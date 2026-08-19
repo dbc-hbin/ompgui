@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -12,7 +13,6 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment: npm
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -73,6 +73,8 @@ jobs:
           fi
 
       - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           PACKAGE_NAME="$(node -p 'require("./package.json").name')"
           VERSION="$(node -p 'require("./package.json").version')"
@@ -87,41 +89,3 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
-
-  notify-discord:
-    needs: publish
-    runs-on: ubuntu-latest
-    steps:
-      - name: Post release notes to Discord
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASES_WEBHOOK }}
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          DISCORD_WEBHOOK_URL="$(printf '%s' "$DISCORD_WEBHOOK_URL" | tr -d '\r\n')"
-          case "$DISCORD_WEBHOOK_URL" in
-            https://discord.com/api/webhooks/*/*) ;;
-            *) echo 'DISCORD_RELEASES_WEBHOOK is not a valid Discord webhook URL' >&2; exit 1 ;;
-          esac
-
-          RELEASE_JSON="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body,url)"
-
-          jq -n \
-            --arg body "$(jq -r '.body' <<<"$RELEASE_JSON")" \
-            --arg title "OMPGUI $TAG" \
-            --arg url "$(jq -r '.url' <<<"$RELEASE_JSON")" \
-            '{
-              username: "OMPGUI Releases",
-              embeds: [{
-                title: $title,
-                url: $url,
-                description: $body[0:3800],
-                color: 15105570,
-                footer: {text: "GitHub Release"}
-              }]
-            }' > discord-release.json
-
-          curl --fail-with-body \
-            --header "Content-Type: application/json" \
-            --data @discord-release.json \
-            "$DISCORD_WEBHOOK_URL"
