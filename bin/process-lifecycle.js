@@ -1,8 +1,6 @@
 "use strict";
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const os = require("node:os");
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { spawn } = require("node:child_process");
 
 const forwardedSignals = ["SIGINT", "SIGTERM"];

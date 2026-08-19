@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Bot, Check, Edit3, Plus, Search, Trash2, Download, RefreshCw, X, Shield, Wrench, Eye } from "lucide-react";
+import { Bot, Edit3, Plus, Search, Trash2, Download, RefreshCw, X, Wrench, Eye } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import type { AgentDefinition, AgentSource } from "@/lib/omp/agents-service";
+import { agentModelOptionsFromResponse, formatAgentModelDisplay, parseAgentModelOverrideInput, type AgentModelOption } from "@/lib/agent-model-options";
 
 type Props = {
   cwd?: string;
@@ -24,7 +25,7 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
   const [error, setError] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<AgentDefinition | null>(null);
-  const [models, setModels] = useState<string[]>([]);
+  const [models, setModels] = useState<AgentModelOption[]>([]);
   const [disabledMap, setDisabledMap] = useState<Record<string, boolean>>({});
   const [unpacking, setUnpacking] = useState(false);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
@@ -46,18 +47,7 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
 
       if (modelsRes.ok) {
         const md = await modelsRes.json();
-        const list = md.models ?? md.catalog ?? md.modelList ?? [];
-        const modelNames = (Array.isArray(list) ? list : [])
-          .map((x: unknown) => {
-            if (typeof x === "string") return x;
-            if (x && typeof x === "object") {
-              if ("id" in x && typeof x.id === "string") return x.id;
-              if ("name" in x && typeof x.name === "string") return x.name;
-            }
-            return null;
-          })
-          .filter((x): x is string => x !== null);
-        setModels(modelNames);
+        setModels(agentModelOptionsFromResponse(md));
       }
 
       if (settingsRes.ok) {
@@ -119,10 +109,11 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
 
       if (overrideType === "model") {
         const overrides = { ...(task.agentModelOverrides || {}) };
-        if (value === undefined || value === "") {
+        const parsed = parseAgentModelOverrideInput(typeof value === "string" ? value : undefined);
+        if (!parsed) {
           delete overrides[agentName];
         } else {
-          overrides[agentName] = value as string;
+          overrides[agentName] = parsed;
         }
         task.agentModelOverrides = overrides;
       } else if (overrideType === "prewalk") {
@@ -143,11 +134,15 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
         task.agentAdvisor = advisors;
       }
 
-      await fetch("/api/omp-settings", {
+      const response = await fetch("/api/omp-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ settings: { task } }),
       });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error ?? `HTTP ${response.status}`);
+      }
       await load();
       onSaved?.();
     } catch (err) {
@@ -219,7 +214,19 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
   ];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14, padding: embedded ? 0 : 20, color: "var(--text)", minHeight: 0, flex: 1, background: "var(--bg)" }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        padding: embedded ? 0 : isMobile ? "12px 14px" : 20,
+        color: "var(--text)",
+        minHeight: 0,
+        flex: 1,
+        background: "var(--bg)",
+        overflowX: "hidden",
+      }}
+    >
       <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
@@ -249,46 +256,46 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
         </div>
       )}
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           <button
             type="button"
             onClick={() => setCreateModalOpen(true)}
-            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: "var(--radius-control)", background: "var(--accent-strong)", color: "var(--on-accent)", border: 0, fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: "var(--radius-control)", background: "var(--accent-strong)", color: "var(--on-accent)", border: 0, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}
           >
-            <Plus size={14} /> {t("agentsConfig.newAgent")}
+            <Plus size={13} /> {t("agentsConfig.newAgent")}
           </button>
           <button
             type="button"
             disabled={unpacking}
             onClick={() => void handleUnpack()}
-            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 12, cursor: unpacking ? "wait" : "pointer" }}
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 12, cursor: unpacking ? "wait" : "pointer", whiteSpace: "nowrap" }}
           >
-            <Download size={14} /> {unpacking ? t("agentsConfig.unpacking") : t("agentsConfig.unpackBundled")}
+            <Download size={13} /> {unpacking ? t("agentsConfig.unpacking") : t("agentsConfig.unpackBundled")}
           </button>
           <button
             type="button"
             onClick={() => void load()}
             aria-label="Refresh"
-            style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: "var(--radius-control)", background: "var(--bg-panel)", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer" }}
+            style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, borderRadius: "var(--radius-control)", background: "var(--bg-panel)", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer", flexShrink: 0 }}
           >
             <RefreshCw size={13} className={loading ? "spin" : ""} />
           </button>
         </div>
 
-        <div style={{ position: "relative", minWidth: 200, flex: isMobile ? 1 : "0 1 240px" }}>
-          <Search size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--text-dim)", pointerEvents: "none" }} />
+        <div style={{ position: "relative", minWidth: 140, flex: "1 1 180px", maxWidth: isMobile ? "100%" : 240 }}>
+          <Search size={13} style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text-dim)", pointerEvents: "none" }} />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t("agentsConfig.searchPlaceholder")}
-            style={{ width: "100%", height: 30, padding: "0 8px 0 28px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", color: "var(--text)", fontSize: 12, outline: "none" }}
+            style={{ width: "100%", height: 28, padding: "0 8px 0 26px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", color: "var(--text)", fontSize: 12, outline: "none" }}
           />
         </div>
       </div>
 
-      <nav aria-label="Agent scopes" style={{ display: "flex", gap: 4, borderBottom: "1px solid var(--border)", overflowX: "auto" }}>
+      <nav aria-label="Agent scopes" style={{ display: "flex", gap: 4, borderBottom: "1px solid var(--border)", overflowX: "auto", flexShrink: 0, WebkitOverflowScrolling: "touch", paddingBottom: 2 }}>
         {scopeTabs.map((tab) => {
           const selected = scopeFilter === tab.id;
           return (
@@ -302,13 +309,14 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
                 background: "transparent",
                 color: selected ? "var(--text)" : "var(--text-muted)",
                 fontWeight: selected ? 600 : 400,
-                padding: "8px 12px",
+                padding: "6px 10px",
                 fontSize: 12,
                 cursor: "pointer",
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 6,
                 whiteSpace: "nowrap",
+                flexShrink: 0,
               }}
             >
               {tab.label}
@@ -332,7 +340,7 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
           {t("agentsConfig.noAgentsFound")}
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(320px, 1fr))", gap: 12, overflowY: "auto" }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(280px, 1fr))", gap: 10, overflowY: "auto", minHeight: 0 }}>
           {filteredAgents.map((agent) => {
             const isAgentDisabled = Boolean(disabledMap[agent.name] ?? agent.disabled);
             return (
@@ -355,6 +363,7 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
         <AgentModal
           agent={editingAgent}
           models={models}
+          isMobile={isMobile}
           onCancel={() => {
             setCreateModalOpen(false);
             setEditingAgent(null);
@@ -377,7 +386,7 @@ function AgentCard({
 }: {
   agent: AgentDefinition;
   disabled: boolean;
-  models: string[];
+  models: AgentModelOption[];
   onToggleDisabled: (disabled: boolean) => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -492,22 +501,26 @@ function AgentCard({
         ))}
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: "auto", flexWrap: "wrap" }}>
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-          <label style={{ fontSize: 11, color: "var(--text-muted)", display: "inline-flex", alignItems: "center", gap: 4 }}>
-            {t("agentsConfig.modelOverride")}:
-            <select
-              value={typeof agent.overrideModel === "string" ? agent.overrideModel : ""}
-              onChange={(e) => onUpdateOverride("model", e.target.value || undefined)}
-              style={{ padding: "3px 6px", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 11 }}
-            >
-              <option value="">default ({Array.isArray(agent.model) ? agent.model[0] : agent.model || "standard"})</option>
-              {models.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          </label>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: "auto" }}>
+          <AgentModelOverrideEditor agent={agent} models={models} onChange={(value) => onUpdateOverride("model", value)} />
 
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => onUpdateOverride("advisor", agent.advisorOverride === true ? false : true)}
+            style={{
+              padding: "3px 7px",
+              borderRadius: "var(--radius-control)",
+              border: "1px solid var(--border)",
+              background: agent.advisorOverride ? "color-mix(in srgb, var(--accent) 15%, transparent)" : "var(--bg)",
+              color: agent.advisorOverride ? "var(--accent)" : "var(--text-dim)",
+              fontSize: 11,
+              cursor: "pointer",
+            }}
+          >
+            {t("agentsConfig.advisor")}: {agent.advisorOverride ? "on" : "off"}
+          </button>
           <button
             type="button"
             onClick={() => onUpdateOverride("prewalk", agent.prewalkOverride === true ? false : true)}
@@ -525,32 +538,104 @@ function AgentCard({
           </button>
         </div>
 
-        <div style={{ display: "flex", gap: 4 }}>
-          {isCustom && (
-            <button
-              type="button"
-              onClick={onEdit}
-              title={t("agentsConfig.editAgent")}
-              aria-label={t("agentsConfig.editAgent")}
-              style={{ background: "transparent", border: 0, color: "var(--text-muted)", cursor: "pointer", padding: 4 }}
-            >
-              <Edit3 size={14} />
-            </button>
-          )}
-          {isCustom && (
-            <button
-              type="button"
-              onClick={onDelete}
-              title={t("agentsConfig.deleteAgent")}
-              aria-label={t("agentsConfig.deleteAgent")}
-              style={{ background: "transparent", border: 0, color: "var(--status-error)", cursor: "pointer", padding: 4 }}
-            >
-              <Trash2 size={14} />
-            </button>
-          )}
+          <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
+            {isCustom && (
+              <button
+                type="button"
+                onClick={onEdit}
+                title={t("agentsConfig.editAgent")}
+                aria-label={t("agentsConfig.editAgent")}
+                style={{ background: "transparent", border: 0, color: "var(--text-muted)", cursor: "pointer", padding: 4 }}
+              >
+                <Edit3 size={14} />
+              </button>
+            )}
+            {isCustom && (
+              <button
+                type="button"
+                onClick={onDelete}
+                title={t("agentsConfig.deleteAgent")}
+                aria-label={t("agentsConfig.deleteAgent")}
+                style={{ background: "transparent", border: 0, color: "var(--status-error)", cursor: "pointer", padding: 4 }}
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
         </div>
       </div>
+      </div>
     </article>
+  );
+}
+
+function AgentModelOverrideEditor({
+  agent,
+  models,
+  onChange,
+}: {
+  agent: AgentDefinition;
+  models: AgentModelOption[];
+  onChange: (value: string | undefined) => void;
+}) {
+  const { t } = useI18n();
+  const persisted = formatAgentModelDisplay(agent.overrideModel);
+  const [draft, setDraft] = useState(persisted);
+  const listId = `agent-models-${agent.source}-${agent.name}`;
+
+  useEffect(() => setDraft(persisted), [persisted]);
+
+  const commit = () => {
+    const next = draft.trim();
+    if (next !== persisted.trim()) onChange(next || undefined);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0, width: "100%" }}>
+      <label htmlFor={listId} style={{ fontSize: 11, color: "var(--text-muted)" }}>
+        {t("agentsConfig.modelOverride")}
+      </label>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, width: "100%" }}>
+        <input
+          id={listId}
+          list={`${listId}-options`}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+            if (event.key === "Escape") {
+              setDraft(persisted);
+              event.currentTarget.blur();
+            }
+          }}
+          placeholder={t("agentsConfig.modelOverridePlaceholder")}
+          title={t("agentsConfig.modelOverrideHint")}
+          style={{ minWidth: 0, flex: 1, width: "100%", padding: "4px 7px", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 11, fontFamily: "var(--font-mono)" }}
+        />
+        {persisted && (
+          <button
+            type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => { setDraft(""); onChange(undefined); }}
+            title={t("agentsConfig.clearModelOverride")}
+            aria-label={t("agentsConfig.clearModelOverride")}
+            style={{ border: 0, background: "transparent", color: "var(--text-dim)", cursor: "pointer", padding: 3, flexShrink: 0 }}
+          >
+            <X size={13} />
+          </button>
+        )}
+        <datalist id={`${listId}-options`}>
+          {models.map((model) => <option key={model.selector} value={model.selector}>{model.label}</option>)}
+        </datalist>
+      </div>
+      <span style={{ fontSize: 10, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {persisted ? (
+          <span style={{ color: "var(--accent)" }}>✓ {persisted}</span>
+        ) : (
+          t("agentsConfig.agentDefaultModel", { model: formatAgentModelDisplay(agent.model) || "session model" })
+        )}
+      </span>
+    </div>
   );
 }
 
@@ -559,18 +644,20 @@ function AgentModal({
   models,
   onCancel,
   onSave,
+  isMobile,
 }: {
   agent: AgentDefinition | null;
-  models: string[];
+  models: AgentModelOption[];
   onCancel: () => void;
   onSave: (payload: Record<string, unknown>) => Promise<void>;
+  isMobile?: boolean;
 }) {
   const { t } = useI18n();
   const isEdit = Boolean(agent);
   const [name, setName] = useState(agent?.name ?? "");
   const [description, setDescription] = useState(agent?.description ?? "");
   const [scope, setScope] = useState<"user" | "project">(agent?.source === "project" ? "project" : "user");
-  const [model, setModel] = useState(typeof agent?.model === "string" ? agent.model : "");
+  const [model, setModel] = useState(formatAgentModelDisplay(agent?.model));
   const [tools, setTools] = useState((agent?.tools ?? []).join(", "));
   const [systemPrompt, setSystemPrompt] = useState(agent?.systemPrompt ?? "");
   const [saving, setSaving] = useState(false);
@@ -586,13 +673,14 @@ function AgentModal({
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean);
+      const parsedModel = parseAgentModelOverrideInput(model);
 
       await onSave({
         name: name.trim(),
         description: description.trim(),
         scope,
         tools: toolList.length > 0 ? toolList : undefined,
-        model: model || undefined,
+        model: parsedModel,
         systemPrompt: systemPrompt.trim(),
       });
     } catch (err) {
@@ -656,7 +744,7 @@ function AgentModal({
             />
           </label>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
             <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
               {t("agentsConfig.toolsLabel")}
               <input
@@ -670,16 +758,18 @@ function AgentModal({
 
             <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
               Model
-              <select
+              <input
+                list="modal-agent-models-list"
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
-                style={{ height: 32, padding: "0 8px", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12 }}
-              >
-                <option value="">default</option>
+                placeholder={t("agentsConfig.modelOverridePlaceholder")}
+                style={{ height: 32, padding: "0 8px", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, fontFamily: "var(--font-mono)" }}
+              />
+              <datalist id="modal-agent-models-list">
                 {models.map((m) => (
-                  <option key={m} value={m}>{m}</option>
+                  <option key={m.selector} value={m.selector}>{m.label}</option>
                 ))}
-              </select>
+              </datalist>
             </label>
           </div>
 

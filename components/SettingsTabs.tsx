@@ -137,7 +137,20 @@ export function SettingsTabs({
   }
 
   return (
-    <nav aria-label="Settings sections" role="tablist" style={{ display: "flex", gap: 3, padding: "7px 12px", borderBottom: "1px solid var(--border)", background: "var(--bg-panel)", flexShrink: 0, overflowX: "auto" }}>
+    <nav
+      aria-label="Settings sections"
+      role="tablist"
+      style={{
+        display: "flex",
+        gap: 6,
+        padding: "8px 12px",
+        borderBottom: "1px solid var(--border)",
+        background: "var(--bg-panel)",
+        flexShrink: 0,
+        overflowX: "auto",
+        WebkitOverflowScrolling: "touch",
+      }}
+    >
       {SETTINGS_CATEGORIES.map(({ id, label, description, Icon, needsWorkspace }, index) => {
         const selected = id === currentActive;
         const disabled = Boolean(needsWorkspace && !workspaceReady);
@@ -157,12 +170,29 @@ export function SettingsTabs({
             disabled={disabled}
             onClick={() => onSelect(id)}
             onKeyDown={(event) => onKeyDown(event, index)}
-            style={{ display: "inline-flex", alignItems: "flex-start", gap: 5, padding: "6px 9px", border: "none", borderRadius: "var(--radius-control)", background: selected ? "var(--bg-selected)" : "transparent", color: selected ? "var(--text)" : "var(--text-muted)", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1, fontSize: 12, whiteSpace: "nowrap", textAlign: "left", minWidth: 150 }}
+            style={{
+              display: "inline-flex",
+              alignItems: "flex-start",
+              gap: 7,
+              padding: "6px 10px",
+              border: selected ? "1px solid var(--accent)" : "1px solid var(--border)",
+              borderRadius: "var(--radius-control)",
+              background: selected ? "color-mix(in srgb, var(--accent) 12%, var(--bg-selected))" : "var(--bg)",
+              color: selected ? "var(--text)" : disabled ? "var(--text-dim)" : "var(--text-muted)",
+              fontWeight: selected ? 600 : 500,
+              cursor: disabled ? "not-allowed" : "pointer",
+              opacity: disabled ? 0.45 : 1,
+              fontSize: 12,
+              whiteSpace: "nowrap",
+              textAlign: "left",
+              flexShrink: 0,
+              transition: "all var(--dur-fast) ease",
+            }}
           >
-            <Icon size={13} aria-hidden="true" />
+            <Icon size={14} aria-hidden="true" style={{ marginTop: 2, flexShrink: 0, color: selected ? "var(--accent)" : "currentColor" }} />
             <span style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
-              <span style={{ fontWeight: selected ? 600 : 500 }}>{localizedLabel}</span>
-              <span style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", color: "var(--text-muted)", fontSize: 10, fontWeight: 400, lineHeight: 1.25 }}>{localizedDesc}</span>
+              <span style={{ fontWeight: selected ? 600 : 500, fontSize: 12, color: selected ? "var(--text)" : "inherit" }}>{localizedLabel}</span>
+              <span style={{ fontSize: 10, color: "var(--text-dim)", lineHeight: 1.25, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>{localizedDesc}</span>
             </span>
           </button>
         );

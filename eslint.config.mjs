@@ -11,6 +11,12 @@ const eslintConfig = [
       "react-hooks/set-state-in-effect": "off",
     },
   },
+  {
+    files: ["bin/**/*.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
 ];
 
 export default eslintConfig;

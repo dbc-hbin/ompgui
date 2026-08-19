@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import en from "./locales/en.json";
 import ja from "./locales/ja.json";
 import zhCN from "./locales/zh-CN.json";
@@ -110,7 +110,17 @@ function getServerSnapshot(): Locale {
 /** Locale state + translator. Components re-render on language switch because
  * the locale is the subscribed snapshot. */
 export function useI18n() {
-  const locale = useSyncExternalStore(subscribe, getLocale, getServerSnapshot);
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
+
+  const getClientSnapshot = useCallback((): Locale => {
+    if (!hydrated) return "en";
+    return getLocale();
+  }, [hydrated]);
+
+  const locale = useSyncExternalStore(subscribe, getClientSnapshot, getServerSnapshot);
 
   const t = useCallback(
     (key: string, vars?: Record<string, string | number>) => translate(key, vars),

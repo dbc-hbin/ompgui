@@ -1,6 +1,5 @@
 "use strict";
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const net = require("net");
 
 function isPortAvailable(port, hostname) {

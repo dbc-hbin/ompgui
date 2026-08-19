@@ -261,9 +261,9 @@ export function writeNativeSettings(settings: NativeSettings): void {
   for (const [key, value] of Object.entries(settings.mnemopi ?? {})) doc.setIn(["mnemopi", key], value);
   for (const [key, value] of Object.entries(settings.mcp ?? {})) doc.setIn(["mcp", key], value);
   if (settings.task?.prewalk !== undefined) doc.setIn(["task", "prewalk"], settings.task.prewalk);
-  for (const [key, value] of Object.entries(settings.task?.agentModelOverrides ?? {})) doc.setIn(["task", "agentModelOverrides", key], value);
-  for (const [key, value] of Object.entries(settings.task?.agentPrewalk ?? {})) doc.setIn(["task", "agentPrewalk", key], value);
-  for (const [key, value] of Object.entries(settings.task?.agentAdvisor ?? {})) doc.setIn(["task", "agentAdvisor", key], value);
+  if (settings.task?.agentModelOverrides !== undefined) doc.setIn(["task", "agentModelOverrides"], settings.task.agentModelOverrides);
+  if (settings.task?.agentPrewalk !== undefined) doc.setIn(["task", "agentPrewalk"], settings.task.agentPrewalk);
+  if (settings.task?.agentAdvisor !== undefined) doc.setIn(["task", "agentAdvisor"], settings.task.agentAdvisor);
   if (settings.task?.disabledAgents !== undefined) doc.setIn(["task", "disabledAgents"], settings.task.disabledAgents);
   const temp = `${path}.tmp-${process.pid}-${Date.now()}`;
   try { writeFileSync(temp, doc.toString(), "utf8"); renameSync(temp, path); } catch (error) { try { if (existsSync(temp)) unlinkSync(temp); } catch {} throw error; }

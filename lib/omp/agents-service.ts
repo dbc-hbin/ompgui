@@ -4,7 +4,6 @@ import { parseDocument, stringify } from "yaml";
 import { getAgentDir } from "./paths";
 import { readNativeSettings } from "./settings-config";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "../file-access";
-import { resolveOmpBin } from "./omp-cli";
 
 export type AgentSource = "bundled" | "user" | "project" | "extension";
 
