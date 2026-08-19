@@ -2,8 +2,6 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-커뮤니티: [OMPWEB Discord 참여하기](https://discord.gg/evqgGzRfM5)
-
 [oh-my-pi (omp) 코딩 에이전트](https://github.com/can1357/oh-my-pi)를 위한 로컬 웹 UI입니다. ompweb은 로컬 omp 세션 파일을 읽어 브라우저에서 세션 탐색, 실시간 채팅, 모델 설정, 스킬 관리, 프로젝트 파일 미리보기를 제공하는 워크스페이스를 엽니다.
 
 ![ompweb — 라이트 테마](docs/screenshot-light.png)
