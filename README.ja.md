@@ -1,6 +1,6 @@
 # ompweb
 
-[English](./README.md) | [简体中文](./README.zh-CN.md)
+[English](./README.md) | [简体中文](./README.zh-CN.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md)
 
 コミュニティ：[OMPWEB Discord に参加](https://discord.gg/evqgGzRfM5)
 
@@ -117,9 +117,9 @@ node --test lib/*.test.mjs components/*.test.mjs   # テスト実行
 
 ## 国際化
 
-ompweb は英語、簡体字中国語（简体中文）、日本語をサポートし、3 言語で UI 全体の翻訳文字列を提供しています。言語は `navigator.language` から自動検出され、トップバーの言語メニューから実行時に切り替えできます。選択はセッション間で永続化されます。
+ompweb は英語、簡体字中国語（简体中文）、日本語、韓国語（한국어）をサポートし、4 言語で UI 全体の翻訳文字列を提供しています。言語は `navigator.language` から自動検出され、トップバーの言語メニューから実行時に切り替えできます。選択はセッション間で永続化されます。
 
-- 辞書ファイル: `lib/i18n/locales/{en,zh-CN,ja}.json`
+- 辞書ファイル: `lib/i18n/locales/{en,zh-CN,ja,ko}.json`
 - フレームワーク: `lib/i18n/index.tsx` — `useSyncExternalStore` ベースの軽量ストア、`{var}` 補間と複数形サポート（`.one`/`.other`）
 - API エラーメッセージは安定したエラーコード（`errors.<code>`）でクライアント側で翻訳
 

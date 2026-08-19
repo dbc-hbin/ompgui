@@ -173,6 +173,7 @@ const BUILTIN_SLASH_COMMAND_DEFS: { name: string; descriptionKey: string; argume
   { name: "reload", descriptionKey: "chatInput.cmdReload" },
   { name: "name", descriptionKey: "chatInput.cmdName" },
   { name: "session", descriptionKey: "chatInput.cmdSession" },
+  { name: "agents", descriptionKey: "chatInput.cmdAgents" },
   { name: "copy", descriptionKey: "chatInput.cmdCopy" },
 ];
 

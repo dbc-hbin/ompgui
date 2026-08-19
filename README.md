@@ -1,6 +1,6 @@
 # ompweb
 
-[English](./README.md) | [简体中文](./README.zh-CN.md) | [日本語](./README.ja.md)
+[English](./README.md) | [简体中文](./README.zh-CN.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md)
 
 Community: [Join the OMPWEB Discord](https://discord.gg/evqgGzRfM5)
 
@@ -131,9 +131,9 @@ Avoid running `next build` / `npm run build` during local development. It writes
 
 ## Internationalization
 
-ompweb supports English, Simplified Chinese (简体中文), and Japanese (日本語) with translated UI strings across all three languages. The language is auto-detected from `navigator.language` and can be switched at runtime via the language menu in the top bar. The choice persists across sessions.
+ompweb supports English, Simplified Chinese (简体中文), Japanese (日本語), and Korean (한국어) with translated UI strings across all languages. The language is auto-detected from `navigator.language` and can be switched at runtime via the language menu in the top bar. The choice persists across sessions.
 
-- Dictionaries: `lib/i18n/locales/{en,zh-CN,ja}.json`
+- Dictionaries: `lib/i18n/locales/{en,zh-CN,ja,ko}.json`
 - Framework: `lib/i18n/index.tsx` — a lightweight store built on `useSyncExternalStore` with `{var}` interpolation and plural support (`.one`/`.other`)
 - API error messages are translated via stable error codes (`errors.<code>`) looked up client-side
 

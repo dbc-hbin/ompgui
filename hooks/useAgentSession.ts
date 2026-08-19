@@ -321,7 +321,7 @@ export interface SlashCommandInfo {
 
 export type BuiltinSlashCommandResult =
   | { handled: false }
-  | { handled: true; message?: string; error?: string; action?: "openSessionStats"; retainInput?: boolean };
+  | { handled: true; message?: string; error?: string; action?: "openSessionStats" | "openSettings"; retainInput?: boolean };
 
 export interface UseAgentSessionOptions {
   session: SessionInfo | null;
@@ -337,6 +337,7 @@ export interface UseAgentSessionOptions {
   /** Registers an action that lazily starts the session and loads its system prompt. */
   onSystemPromptLoaderChange?: (loader: (() => Promise<void>) | null) => void;
   onSessionStatsPanelOpen?: () => void;
+  onOpenSettingsTab?: (tab: "agents") => void;
   setToolPreset?: (preset: "none" | "default" | "full") => void;
   /** Opens a file in the web UI's file viewer (used by the open_file host tool). */
   onOpenFile?: (filePath: string, name: string, sessionId?: string) => void;
@@ -581,7 +582,7 @@ function toSlashCommandInfo(command: RpcAvailableSlashCommand): SlashCommandInfo
 export function useAgentSession(opts: UseAgentSessionOptions) {
   const {
     session, newSessionCwd, advisorEnabled, onAgentEnd, onSessionCreated, onSessionForked,
-    modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsPanelOpen,
+    modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsPanelOpen, onOpenSettingsTab,
     onOpenFile,
   } = opts;
 
@@ -2663,6 +2664,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           return complete({ handled: true, action: "openSessionStats" });
         }
 
+        case "agents": {
+          onOpenSettingsTab?.("agents");
+          return complete({ handled: true, action: "openSettings" });
+        }
+
         case "copy": {
           if (!sid) return complete({ handled: true, error: translate("agentSession.noActiveSession") });
           const data = await sendAgentCommand<LastAssistantTextResponse>(sid, { type: "get_last_assistant_text" });
@@ -2713,7 +2719,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setIsCompacting(false);
       }
     }
-  }, [addNotice, ensureNewSession, handleSend, isCompacting, loadModels, loadSession, loadSlashCommands, promoteNewSession, onSessionStatsPanelOpen]);
+  }, [addNotice, ensureNewSession, handleSend, isCompacting, loadModels, loadSession, loadSlashCommands, promoteNewSession, onOpenSettingsTab, onSessionStatsPanelOpen]);
 
   // Queued (undelivered) messages live in the queue panel only; the chat gets
   // the real user message when pi delivers it (user message_end event). An

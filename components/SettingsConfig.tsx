@@ -15,6 +15,7 @@ const ModelsConfig = dynamic(() => import("./ModelsConfig").then((module) => mod
 const SkillsConfig = dynamic(() => import("./SkillsConfig").then((module) => module.SkillsConfig), { loading: SettingsTabLoading });
 const PluginsConfig = dynamic(() => import("./PluginsConfig").then((module) => module.PluginsConfig), { loading: SettingsTabLoading });
 const McpConfig = dynamic(() => import("./McpConfig").then((module) => module.McpConfig), { loading: SettingsTabLoading });
+const AgentsConfig = dynamic(() => import("./AgentsConfig").then((m) => m.AgentsConfig), { ssr: false });
 
 type UpdateState = {
   currentVersion: string | null;
@@ -458,14 +459,14 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
       <DialogContent ariaLabel="Settings" style={{ width: isMobile ? "calc(100vw - 16px)" : 940, maxWidth: "calc(100vw - 16px)", height: isMobile ? "calc(100dvh - 16px)" : "82vh", maxHeight: "calc(100dvh - 16px)", padding: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, padding: "12px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-panel)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <DialogTitle style={{ fontSize: 16, margin: 0, fontWeight: 600 }}>Settings</DialogTitle>
+            <DialogTitle style={{ fontSize: 16, margin: 0, fontWeight: 600 }}>{t("settingsConfig.title")}</DialogTitle>
             {nativeSavesInFlight > 0 ? (
               <span style={{ fontSize: 11, color: "var(--accent)", padding: "2px 8px", borderRadius: 10, background: "var(--bg-subtle)", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                <RefreshCw size={11} className="spin" aria-hidden="true" /> Saving…
+                <RefreshCw size={11} className="spin" aria-hidden="true" /> {t("settingsConfig.saving")}
               </span>
             ) : (
               <span style={{ fontSize: 11, color: "var(--text-dim)", padding: "2px 8px", borderRadius: 10, background: "var(--bg-subtle)" }}>
-                Auto-saved
+                {t("settingsConfig.autoSaved")}
               </span>
             )}
           </div>
@@ -474,8 +475,8 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
               <Search size={13} aria-hidden="true" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
               <input
                 type="text"
-                aria-label="Search settings"
-                placeholder="Search settings..."
+                aria-label={t("settingsConfig.searchAria")}
+                placeholder={t("settingsConfig.searchPlaceholder")}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => {
@@ -488,7 +489,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                 style={{ width: "100%", height: 28, padding: "0 8px 0 28px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg)", color: "var(--text)", fontSize: 12, outline: "none" }}
               />
             </div>
-            <button type="button" onClick={onClose} aria-label="Close settings" style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
+            <button type="button" onClick={onClose} aria-label={t("settingsConfig.close")} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
           </div>
         </header>
 
@@ -514,14 +515,14 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
             {currentTab === "general" && (
               <div role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
                 <div>
-                  <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Interface & Behavior</h3>
-                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>Controls interface presentation, notification sounds, and execution submission mode.</p>
+                  <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{t("settingsConfig.generalTitle")}</h3>
+                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>{t("settingsConfig.generalDescription")}</p>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                  <NativeSetting label="Keep tool calls collapsed" description="Show only compact headers while tools execute." scope="UI">
+                  <NativeSetting label={t("settingsConfig.toolCallsCollapsed")} description={t("settingsConfig.toolCallsCollapsedDesc")} scope="UI">
                     <ToggleSwitch checked={toolCallsDefaultCollapsed} onChange={onToolCallsDefaultCollapsedChange} />
                   </NativeSetting>
-                  <NativeSetting label="Completion sound" description="Play a tone when the agent completes a run." scope="UI">
+                  <NativeSetting label={t("settingsConfig.completionSound")} description={t("settingsConfig.completionSoundDesc")} scope="UI">
                     <ToggleSwitch
                       checked={soundEnabled}
                       onChange={(next) => {
@@ -532,7 +533,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                     />
                   </NativeSetting>
                 </div>
-                <NativeSetting label="Message during active run" description="What composer does on submit while agent runs. Steer interrupts; Queue follow-up delivers after finish." scope="UI">
+                <NativeSetting label={t("settingsConfig.submitBehavior")} description={t("settingsConfig.submitBehaviorDesc")} scope="UI">
                   <select
                     style={nativeSelectStyle}
                     value={submitBehavior}
@@ -542,51 +543,55 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                       setSubmitBehavior(next);
                     }}
                   >
-                    <option value="steer" style={nativeOptionStyle}>Steer current run</option>
-                    <option value="queue" style={nativeOptionStyle}>Queue follow-up</option>
+                    <option value="steer" style={nativeOptionStyle}>{t("settingsConfig.steerCurrent")}</option>
+                    <option value="queue" style={nativeOptionStyle}>{t("settingsConfig.queueFollowUp")}</option>
                   </select>
                 </NativeSetting>
               </div>
+            )}
+
+            {currentTab === "agents" && (
+              <AgentsConfig cwd={cwd ?? undefined} onSaved={onModelsSaved} isMobile={isMobile} />
             )}
 
             {/* SAFETY & APPROVALS TAB */}
             {currentTab === "safety" && (
               <div role="tabpanel" id="settings-panel-safety" aria-labelledby="settings-tab-safety" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
                 <div>
-                  <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Tool Safety & Approvals</h3>
-                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>Tool execution safety rules and permission prompts. Persisted in <code>~/.omp/agent/config.yml</code>.</p>
+                  <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{t("settingsConfig.safetyTitle")}</h3>
+                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>{t("settingsConfig.safetyDescription")}</p>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                  <NativeSetting label="Approval Mode" description="Choose when OMP asks before tool calls." scope="Native OMP">
+                  <NativeSetting label={t("settingsConfig.approvalMode")} description={t("settingsConfig.approvalModeDesc")} scope="Native OMP">
                     <select
                       style={nativeSelectStyle}
                       value={nativeSettings?.tools?.approvalMode ?? "yolo"}
                       onChange={(event) => patchSection("tools", { approvalMode: event.target.value as "always-ask" | "write" | "yolo" })}
                     >
-                      <option value="always-ask" style={nativeOptionStyle}>Always ask</option>
-                      <option value="write" style={nativeOptionStyle}>Allow writes</option>
-                      <option value="yolo" style={nativeOptionStyle}>Auto approve (YOLO)</option>
+                      <option value="always-ask" style={nativeOptionStyle}>{t("settingsConfig.approvalAlwaysAsk")}</option>
+                      <option value="write" style={nativeOptionStyle}>{t("settingsConfig.approvalWrite")}</option>
+                      <option value="yolo" style={nativeOptionStyle}>{t("settingsConfig.approvalYolo")}</option>
                     </select>
                   </NativeSetting>
-                  <NativeSetting label="Bash Override" description="Override default approval policy specifically for terminal commands." scope="Native OMP">
+                  <NativeSetting label={t("settingsConfig.bashApproval")} description={t("settingsConfig.bashApprovalDesc")} scope="Native OMP">
                     <select
                       style={nativeSelectStyle}
                       value={nativeSettings?.tools?.approval?.bash ?? "prompt"}
                       onChange={(event) => patchApproval({ bash: event.target.value as "allow" | "prompt" | "deny" })}
                     >
-                      <option value="allow" style={nativeOptionStyle}>Allow</option>
-                      <option value="prompt" style={nativeOptionStyle}>Always ask</option>
-                      <option value="deny" style={nativeOptionStyle}>Deny</option>
+                      <option value="allow" style={nativeOptionStyle}>{t("settingsConfig.allow")}</option>
+                      <option value="prompt" style={nativeOptionStyle}>{t("settingsConfig.alwaysAsk")}</option>
+                      <option value="deny" style={nativeOptionStyle}>{t("settingsConfig.deny")}</option>
                     </select>
                   </NativeSetting>
-                  <NativeSetting label="Extension Tool Requests" description="Automatically approve extension tool authorization requests." scope="Native OMP">
+                  <NativeSetting label={t("settingsConfig.extensionApproval")} description={t("settingsConfig.extensionApprovalDesc")} scope="Native OMP">
                     <select
                       style={nativeSelectStyle}
                       value={nativeSettings?.tools?.approval?.extension ?? "prompt"}
                       onChange={(event) => patchApproval({ extension: event.target.value as "allow" | "prompt" })}
                     >
-                      <option value="prompt" style={nativeOptionStyle}>Ask every time</option>
-                      <option value="allow" style={nativeOptionStyle}>Auto approve</option>
+                      <option value="prompt" style={nativeOptionStyle}>{t("settingsConfig.askEveryTime")}</option>
+                      <option value="allow" style={nativeOptionStyle}>{t("settingsConfig.autoApprove")}</option>
                     </select>
                   </NativeSetting>
                 </div>
@@ -597,11 +602,11 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
             {(activeTab === "models" || currentTab === "models") && (
               <div role="tabpanel" id="settings-panel-models" aria-labelledby="settings-tab-models" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
                 <div>
-                  <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>AI Model Defaults</h3>
-                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>Configure default reasoning effort, response verbosity, personality tone, and thinking display.</p>
+                  <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{t("settingsConfig.modelsTitle")}</h3>
+                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>{t("settingsConfig.modelsDescription")}</p>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                  <NativeSetting label="Reasoning" description="Default effort level for thinking-capable models." scope="Native OMP">
+                  <NativeSetting label={t("settingsConfig.reasoning")} description={t("settingsConfig.reasoningDesc")} scope="Native OMP">
                     <select
                       style={nativeSelectStyle}
                       value={nativeSettings?.defaultThinkingLevel ?? "high"}
@@ -612,7 +617,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                       ))}
                     </select>
                   </NativeSetting>
-                  <NativeSetting label="Verbosity" description="Response detail level for supporting providers." scope="Native OMP">
+                  <NativeSetting label={t("settingsConfig.verbosity")} description={t("settingsConfig.verbosityDesc")} scope="Native OMP">
                     <select
                       style={nativeSelectStyle}
                       value={nativeSettings?.textVerbosity ?? "medium"}
@@ -623,7 +628,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                       ))}
                     </select>
                   </NativeSetting>
-                  <NativeSetting label="Personality" description="Style included in OMP's system prompt." scope="Native OMP">
+                  <NativeSetting label={t("settingsConfig.personality")} description={t("settingsConfig.personalityDesc")} scope="Native OMP">
                     <select
                       style={nativeSelectStyle}
                       value={nativeSettings?.personality ?? "default"}
@@ -634,13 +639,13 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                       ))}
                     </select>
                   </NativeSetting>
-                  <NativeSetting label="Thinking Blocks" description="Hide model reasoning from output view." scope="Native OMP">
+                  <NativeSetting label={t("settingsConfig.hideThinking")} description={t("settingsConfig.hideThinkingDesc")} scope="Native OMP">
                     <ToggleSwitch
                       checked={nativeSettings?.hideThinkingBlock ?? false}
                       onChange={(checked) => patchSettings({ hideThinkingBlock: checked })}
                     />
                   </NativeSetting>
-                  <NativeSetting label="External Thinking" description="Private scratchpad reasoning via think tool." scope="Native OMP">
+                  <NativeSetting label={t("settingsConfig.externalThinking")} description={t("settingsConfig.externalThinkingDesc")} scope="Native OMP">
                     <ToggleSwitch
                       checked={nativeSettings?.externalThinking ?? false}
                       onChange={(checked) => patchSettings({ externalThinking: checked })}
@@ -663,11 +668,11 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                 {/* Advisor Section */}
                 <section style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600 }}>
-                    <Sparkles size={14} aria-hidden="true" style={{ color: "var(--accent)" }} /> Advisor Review
+                    <Sparkles size={14} aria-hidden="true" style={{ color: "var(--accent)" }} /> {t("settingsConfig.advisorReview")}
                   </div>
-                  <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>Configured advisor model role passively reviews turns and injects guidance notes.</p>
+                  <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>{t("settingsConfig.advisorReviewDesc")}</p>
                   <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                    <NativeSetting label="Enable Advisor" description="Enable Advisor for new sessions with the advisor role." scope="Native OMP">
+                    <NativeSetting label={t("settingsConfig.enableAdvisor")} description={t("settingsConfig.enableAdvisorDesc")} scope="Native OMP">
                       <ToggleSwitch
                         checked={nativeSettings?.advisor?.enabled ?? advisorEnabled}
                         onChange={(enabled) => {
@@ -677,22 +682,22 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                       />
                     </NativeSetting>
                     {(nativeSettings?.advisor?.enabled ?? advisorEnabled) && (
-                      <NativeSetting label="Advisor Backlog" description="Wait briefly when advisor falls behind." scope="Native OMP">
+                      <NativeSetting label={t("settingsConfig.advisorBacklog")} description={t("settingsConfig.advisorBacklogDesc")} scope="Native OMP">
                         <select
                           style={nativeSelectStyle}
                           value={nativeSettings?.advisor?.syncBacklog ?? "off"}
                           onChange={(e) => patchSection("advisor", { syncBacklog: e.target.value as "off" | "1" | "3" | "5" })}
                         >
-                          <option value="off" style={nativeOptionStyle}>Off</option>
-                          <option value="1" style={nativeOptionStyle}>1 turn</option>
-                          <option value="3" style={nativeOptionStyle}>3 turns</option>
-                          <option value="5" style={nativeOptionStyle}>5 turns</option>
+                          <option value="off" style={nativeOptionStyle}>{t("settingsConfig.backlogOff")}</option>
+                          <option value="1" style={nativeOptionStyle}>{t("settingsConfig.backlog1")}</option>
+                          <option value="3" style={nativeOptionStyle}>{t("settingsConfig.backlog3")}</option>
+                          <option value="5" style={nativeOptionStyle}>{t("settingsConfig.backlog5")}</option>
                         </select>
                       </NativeSetting>
                     )}
                   </div>
                   {(nativeSettings?.advisor?.enabled ?? advisorEnabled) && (
-                    <NativeSetting label="Review Subagents" description="Apply Advisor passive review to subagent tasks." scope="Native OMP">
+                    <NativeSetting label={t("settingsConfig.reviewSubagents")} description={t("settingsConfig.reviewSubagentsDesc")} scope="Native OMP">
                       <ToggleSwitch
                         checked={nativeSettings?.advisor?.subagents ?? false}
                         onChange={(checked) => patchSection("advisor", { subagents: checked })}
@@ -703,22 +708,22 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
 
                 {/* Context Compaction Section */}
                 <section style={{ display: "flex", flexDirection: "column", gap: 10, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>Context Compaction</div>
-                  <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>OMP automatically compacts oversized context to prevent hitting context limits.</p>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{t("settingsConfig.contextCompaction")}</div>
+                  <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>{t("settingsConfig.contextCompactionDesc")}</p>
                   <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                    <NativeSetting label="Automatic Compaction" description="Compact context before model context limit is hit." scope="Native OMP">
+                    <NativeSetting label={t("settingsConfig.autoCompaction")} description={t("settingsConfig.autoCompactionDesc")} scope="Native OMP">
                       <ToggleSwitch
                         checked={nativeSettings?.compaction?.enabled ?? true}
                         onChange={(checked) => patchSection("compaction", { enabled: checked })}
                       />
                     </NativeSetting>
-                    <NativeSetting label="Continue After Compaction" description="Resume task execution after compaction completes." scope="Native OMP">
+                    <NativeSetting label={t("settingsConfig.autoContinueCompaction")} description={t("settingsConfig.autoContinueCompactionDesc")} scope="Native OMP">
                       <ToggleSwitch
                         checked={nativeSettings?.compaction?.autoContinue ?? true}
                         onChange={(checked) => patchSection("compaction", { autoContinue: checked })}
                       />
                     </NativeSetting>
-                    <NativeSetting label="Maintenance Strategy" description="Select algorithm used to reduce context pressure." scope="Native OMP">
+                    <NativeSetting label={t("settingsConfig.compactionStrategy")} description={t("settingsConfig.compactionStrategyDesc")} scope="Native OMP">
                       <select
                         style={nativeSelectStyle}
                         value={nativeSettings?.compaction?.strategy ?? "snapcompact"}
@@ -731,7 +736,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                         <option value="off" style={nativeOptionStyle}>Off</option>
                       </select>
                     </NativeSetting>
-                    <NativeSetting label="Compact Mid-Turn" description="Check context limits between tool execution steps." scope="Native OMP">
+                    <NativeSetting label={t("settingsConfig.compactMidTurn")} description={t("settingsConfig.compactMidTurnDesc")} scope="Native OMP">
                       <ToggleSwitch
                         checked={nativeSettings?.compaction?.midTurnEnabled ?? true}
                         onChange={(checked) => patchSection("compaction", { midTurnEnabled: checked })}
@@ -742,51 +747,51 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
 
                 {/* Memory & Auto-Learn Section */}
                 <section style={{ display: "flex", flexDirection: "column", gap: 10, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>Memory & Auto-Learn</div>
-                  <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>Durable project memory storage and automatic lesson capture.</p>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{t("settingsConfig.memoryAndAutoLearn")}</div>
+                  <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>{t("settingsConfig.memoryAndAutoLearnDesc")}</p>
                   <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                    <NativeSetting label="Memory Backend" description="Where durable knowledge is stored across sessions." scope="Native OMP">
+                    <NativeSetting label={t("settingsConfig.memoryBackend")} description={t("settingsConfig.memoryBackendDesc")} scope="Native OMP">
                       <select
                         style={nativeSelectStyle}
                         value={nativeSettings?.memory?.backend ?? "mnemopi"}
                         onChange={(e) => patchSection("memory", { backend: e.target.value as NonNullable<NativeSettings["memory"]>["backend"] })}
                       >
-                        <option value="off" style={nativeOptionStyle}>Off</option>
-                        <option value="local" style={nativeOptionStyle}>Local summaries</option>
-                        <option value="mnemopi" style={nativeOptionStyle}>Mnemopi SQLite</option>
-                        <option value="hindsight" style={nativeOptionStyle}>Hindsight</option>
+                        <option value="off" style={nativeOptionStyle}>{t("settingsConfig.backlogOff")}</option>
+                        <option value="local" style={nativeOptionStyle}>{t("settingsConfig.memoryLocal")}</option>
+                        <option value="mnemopi" style={nativeOptionStyle}>{t("settingsConfig.memoryMnemopi")}</option>
+                        <option value="hindsight" style={nativeOptionStyle}>{t("settingsConfig.memoryHindsight")}</option>
                       </select>
                     </NativeSetting>
-                    <NativeSetting label="Enable Auto-Learn" description="Capture reusable lessons after completed runs." scope="Native OMP">
+                    <NativeSetting label={t("settingsConfig.enableAutolearn")} description={t("settingsConfig.enableAutolearnDesc")} scope="Native OMP">
                       <ToggleSwitch
                         checked={nativeSettings?.autolearn?.enabled ?? true}
                         onChange={(checked) => patchSection("autolearn", { enabled: checked })}
                       />
                     </NativeSetting>
-                    <NativeSetting label="Private Capture Turn" description="Run private lesson-capture turn at completion." scope="Native OMP">
+                    <NativeSetting label={t("settingsConfig.privateCaptureTurn")} description={t("settingsConfig.privateCaptureTurnDesc")} scope="Native OMP">
                       <ToggleSwitch
                         checked={nativeSettings?.autolearn?.autoContinue ?? true}
                         onChange={(checked) => patchSection("autolearn", { autoContinue: checked })}
                       />
                     </NativeSetting>
-                    <NativeSetting label="Memory Scope" description="Scoping for Mnemopi knowledge storage." scope="Native OMP">
+                    <NativeSetting label={t("settingsConfig.memoryScope")} description={t("settingsConfig.memoryScopeDesc")} scope="Native OMP">
                       <select
                         style={nativeSelectStyle}
                         value={nativeSettings?.mnemopi?.scoping ?? "per-project"}
                         onChange={(e) => patchSection("mnemopi", { scoping: e.target.value as NonNullable<NativeSettings["mnemopi"]>["scoping"] })}
                       >
-                        <option value="per-project" style={nativeOptionStyle}>Per project</option>
-                        <option value="per-project-tagged" style={nativeOptionStyle}>Per project, tagged recall</option>
-                        <option value="global" style={nativeOptionStyle}>Global</option>
+                        <option value="per-project" style={nativeOptionStyle}>{t("settingsConfig.scopePerProject")}</option>
+                        <option value="per-project-tagged" style={nativeOptionStyle}>{t("settingsConfig.scopePerProjectTagged")}</option>
+                        <option value="global" style={nativeOptionStyle}>{t("settingsConfig.scopeGlobal")}</option>
                       </select>
                     </NativeSetting>
-                    <NativeSetting label="Recall on Session Start" description="Load relevant memories into first turn." scope="Native OMP">
+                    <NativeSetting label={t("settingsConfig.autoRecall")} description={t("settingsConfig.autoRecallDesc")} scope="Native OMP">
                       <ToggleSwitch
                         checked={nativeSettings?.mnemopi?.autoRecall ?? true}
                         onChange={(checked) => patchSection("mnemopi", { autoRecall: checked })}
                       />
                     </NativeSetting>
-                    <NativeSetting label="Retain Completed Turns" description="Store completed conversation turns in memory." scope="Native OMP">
+                    <NativeSetting label={t("settingsConfig.autoRetain")} description={t("settingsConfig.autoRetainDesc")} scope="Native OMP">
                       <ToggleSwitch
                         checked={nativeSettings?.mnemopi?.autoRetain ?? true}
                         onChange={(checked) => patchSection("mnemopi", { autoRetain: checked })}
@@ -797,16 +802,16 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
 
                 {/* Retry Section */}
                 <section style={{ display: "flex", flexDirection: "column", gap: 10, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>Automatic Retry</div>
-                  <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>Rules for automatically retrying failed turns.</p>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{t("settingsConfig.autoRetry")}</div>
+                  <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>{t("settingsConfig.autoRetryDesc")}</p>
                   <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                    <NativeSetting label="Automatic Retry" description="Retry failed turns automatically." scope="Native OMP">
+                    <NativeSetting label={t("settingsConfig.enableRetry")} description={t("settingsConfig.enableRetryDesc")} scope="Native OMP">
                       <ToggleSwitch
                         checked={nativeSettings?.retry?.enabled ?? true}
                         onChange={(checked) => patchSection("retry", { enabled: checked })}
                       />
                     </NativeSetting>
-                    <NativeSetting label="Max Attempts" description="Retry limit before giving up." scope="Native OMP">
+                    <NativeSetting label={t("settingsConfig.maxAttempts")} description={t("settingsConfig.maxAttemptsDesc")} scope="Native OMP">
                       <select
                         style={nativeSelectStyle}
                         value={String(nativeSettings?.retry?.maxRetries ?? 2)}
@@ -817,7 +822,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                         ))}
                       </select>
                     </NativeSetting>
-                    <NativeSetting label="Model Fallback" description="Fall back to alternative model when retries exhaust." scope="Native OMP">
+                    <NativeSetting label={t("settingsConfig.modelFallback")} description={t("settingsConfig.modelFallbackDesc")} scope="Native OMP">
                       <ToggleSwitch
                         checked={nativeSettings?.retry?.modelFallback ?? false}
                         onChange={(checked) => patchSection("retry", { modelFallback: checked })}
@@ -832,24 +837,24 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
             {(visitedTabs.has("mcp") || visitedTabs.has("skills") || visitedTabs.has("plugins")) && (
               <div role="tabpanel" id="settings-panel-mcp" aria-labelledby="settings-tab-mcp" style={{ display: currentTab === "mcp" ? "flex" : "none", height: "100%", minHeight: 0, flexDirection: "column", overflowY: "auto", padding: 20, gap: 16 }}>
                 <div>
-                  <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Extensions & Tools</h3>
-                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>Model Context Protocol servers, managed skills, and OMP plugins.</p>
+                  <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{t("settingsConfig.mcpTitle")}</h3>
+                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>{t("settingsConfig.mcpDescription")}</p>
                 </div>
                 {cwd && (
                   <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                    <NativeSetting label="Load Project MCP Servers" description="Allow project-root MCP configuration to be discovered." scope="Native OMP">
+                    <NativeSetting label={t("settingsConfig.loadProjectMcp")} description={t("settingsConfig.loadProjectMcpDesc")} scope="Native OMP">
                       <ToggleSwitch
                         checked={nativeSettings?.mcp?.enableProjectConfig ?? true}
                         onChange={(checked) => patchSection("mcp", { enableProjectConfig: checked })}
                       />
                     </NativeSetting>
-                    <NativeSetting label="Render MCP Markdown" description="Render non-JSON MCP results as Markdown in transcript." scope="Native OMP">
+                    <NativeSetting label={t("settingsConfig.renderMcpMarkdown")} description={t("settingsConfig.renderMcpMarkdownDesc")} scope="Native OMP">
                       <ToggleSwitch
                         checked={nativeSettings?.mcp?.renderMarkdownResults ?? true}
                         onChange={(checked) => patchSection("mcp", { renderMarkdownResults: checked })}
                       />
                     </NativeSetting>
-                    <NativeSetting label="MCP Resource Updates" description="Inject server resource updates into conversation." scope="Native OMP">
+                    <NativeSetting label={t("settingsConfig.mcpResourceUpdates")} description={t("settingsConfig.mcpResourceUpdatesDesc")} scope="Native OMP">
                       <ToggleSwitch
                         checked={nativeSettings?.mcp?.notifications ?? false}
                         onChange={(checked) => patchSection("mcp", { notifications: checked })}
@@ -858,7 +863,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                   </div>
                 )}
                 <McpConfig cwd={cwd} sessionId={sessionId} />
-                {!cwd && <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>Select a project workspace to view and edit its project MCP configuration.</p>}
+                {!cwd && <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>{t("settingsConfig.noWorkspaceMcpHint")}</p>}
               </div>
             )}
 

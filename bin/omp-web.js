@@ -73,11 +73,34 @@ nextArgs.push("-H", hostname);
 // and path-with-spaces problems on Windows when shell: true is used.
 const url = `http://${hostname}:${port}`;
 
+function openBrowserWindow(targetUrl) {
+  const isWindows = process.platform === "win32";
+  const isMac = process.platform === "darwin";
+  const isWsl = process.platform === "linux" && Boolean(process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP);
+  const openCmd = isWindows ? "cmd.exe" : isMac ? "open" : isWsl ? "wslview" : "xdg-open";
+  const openArgs = isWindows ? ["/c", "start", "", targetUrl] : [targetUrl];
+
+  try {
+    const opener = spawn(openCmd, openArgs, {
+      stdio: "ignore",
+      detached: true,
+    });
+    opener.on("error", (error) => {
+      console.warn(`Could not open browser automatically: ${error.message}`);
+    });
+    opener.unref();
+  } catch (error) {
+    console.warn(`Could not open browser automatically: ${error.message}`);
+  }
+}
+
 async function main() {
   if (!await isPortAvailable(port, hostname)) {
-    console.error(`Port ${port} on ${hostname} is already in use.`);
-    console.error(`If ompweb is already running, open ${url}. Otherwise, stop the process using it or run: ompweb --port ${Number(port) + 1}`);
-    process.exitCode = 1;
+    console.log(`ompweb is already running on ${hostname}:${port}.`);
+    if (openBrowser) {
+      console.log(`Opening ${url} in your browser...`);
+      openBrowserWindow(url);
+    }
     return;
   }
 
@@ -95,26 +118,35 @@ async function main() {
   wireChildProcessLifecycle(child);
 
   let browserOpened = false;
+  const tryOpenBrowser = () => {
+    if (!openBrowser || browserOpened) return;
+    browserOpened = true;
+    openBrowserWindow(url);
+  };
+
   child.stdout.on("data", (chunk) => {
     const text = chunk.toString();
     process.stdout.write(text);
-    if (openBrowser && !browserOpened && text.includes("Ready")) {
-      browserOpened = true;
-      const isWindows = process.platform === "win32";
-      const isMac = process.platform === "darwin";
-      const openCmd = isWindows ? "explorer.exe" : isMac ? "open" : "xdg-open";
-      const opener = spawn(openCmd, [url], {
-        stdio: "ignore",
-        detached: true,
-      });
-
-      opener.on("error", (error) => {
-        console.warn(`Could not open browser automatically: ${error.message}`);
-      });
-
-      opener.unref();
+    if (/ready|started|local:\s*http|listening/i.test(text)) {
+      tryOpenBrowser();
     }
   });
+
+  if (openBrowser) {
+    const checkInterval = setInterval(async () => {
+      if (browserOpened) {
+        clearInterval(checkInterval);
+        return;
+      }
+      const available = await isPortAvailable(port, hostname);
+      if (!available) {
+        clearInterval(checkInterval);
+        tryOpenBrowser();
+      }
+    }, 250);
+
+    setTimeout(() => clearInterval(checkInterval), 15000);
+  }
 }
 
 main().catch((error) => {

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
 import { dirname } from "path";
 import { isMap, parseDocument, stringify } from "yaml";
 import { getSettingsPath } from "./paths";
@@ -28,6 +28,7 @@ export type NativeSettings = {
   autolearn?: { enabled?: boolean; autoContinue?: boolean; minToolCalls?: number };
   mnemopi?: { scoping?: "global" | "per-project" | "per-project-tagged"; autoRecall?: boolean; autoRetain?: boolean; noEmbeddings?: boolean };
   mcp?: { enableProjectConfig?: boolean; renderMarkdownResults?: boolean; notifications?: boolean; notificationDebounceMs?: number };
+  task?: { prewalk?: boolean; agentModelOverrides?: Record<string, string | string[]>; agentPrewalk?: Record<string, boolean | string>; agentAdvisor?: Record<string, boolean | string>; disabledAgents?: string[] };
 };
 
 const THINKING_LEVELS = new Set(["auto", "minimal", "low", "medium", "high", "xhigh", "max"]);
@@ -47,6 +48,18 @@ function configPath(): string {
 
 function stringArray(value: unknown): string[] | undefined {
   return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined;
+}
+function stringMap(value: unknown): Record<string, string | string[]> | undefined {
+  if (!isRecord(value)) return undefined;
+  const out: Record<string, string | string[]> = {};
+  for (const [key, item] of Object.entries(value)) if (typeof item === "string" || stringArray(item)) out[key] = item as string | string[];
+  return out;
+}
+function booleanStringMap(value: unknown): Record<string, boolean | string> | undefined {
+  if (!isRecord(value)) return undefined;
+  const out: Record<string, boolean | string> = {};
+  for (const [key, item] of Object.entries(value)) if (typeof item === "boolean" || typeof item === "string") out[key] = item;
+  return out;
 }
 
 function assertOptionalRecord(value: unknown, name: string): asserts value is Record<string, unknown> | undefined {
@@ -81,6 +94,7 @@ export function readNativeSettings(): { path: string; settings: NativeSettings }
   const autolearn = isRecord(data.autolearn) ? data.autolearn : {};
   const mnemopi = isRecord(data.mnemopi) ? data.mnemopi : {};
   const mcp = isRecord(data.mcp) ? data.mcp : {};
+  const task = isRecord(data.task) ? data.task : {};
   const registryHasScopedEntries = [data.enabledModels, data.disabledProviders, data.modelProviderOrder]
     .some((value) => Array.isArray(value) && !value.every((item) => typeof item === "string"));
   return {
@@ -143,6 +157,13 @@ export function readNativeSettings(): { path: string; settings: NativeSettings }
         ...(typeof mcp.notifications === "boolean" ? { notifications: mcp.notifications } : {}),
         ...(typeof mcp.notificationDebounceMs === "number" && Number.isInteger(mcp.notificationDebounceMs) ? { notificationDebounceMs: mcp.notificationDebounceMs } : {}),
       } } : {}),
+      ...(Object.keys(task).length ? { task: {
+        ...(typeof task.prewalk === "boolean" ? { prewalk: task.prewalk } : {}),
+        ...(stringMap(task.agentModelOverrides) ? { agentModelOverrides: stringMap(task.agentModelOverrides) } : {}),
+        ...(booleanStringMap(task.agentPrewalk) ? { agentPrewalk: booleanStringMap(task.agentPrewalk) } : {}),
+        ...(booleanStringMap(task.agentAdvisor) ? { agentAdvisor: booleanStringMap(task.agentAdvisor) } : {}),
+        ...(stringArray(task.disabledAgents) ? { disabledAgents: stringArray(task.disabledAgents) } : {}),
+      } } : {}),
     },
   };
 }
@@ -159,6 +180,7 @@ export function writeNativeSettings(settings: NativeSettings): void {
   assertOptionalRecord(settings.autolearn, "autolearn");
   assertOptionalRecord(settings.mnemopi, "mnemopi");
   assertOptionalRecord(settings.mcp, "mcp");
+  assertOptionalRecord(settings.task, "task");
   for (const [name, value] of Object.entries({
     hideThinkingBlock: settings.hideThinkingBlock,
     externalThinking: settings.externalThinking,
@@ -178,7 +200,15 @@ export function writeNativeSettings(settings: NativeSettings): void {
     "mcp.enableProjectConfig": settings.mcp?.enableProjectConfig,
     "mcp.renderMarkdownResults": settings.mcp?.renderMarkdownResults,
     "mcp.notifications": settings.mcp?.notifications,
+    "task.prewalk": settings.task?.prewalk,
   })) assertOptionalBoolean(value, name);
+  for (const [name, value] of Object.entries(settings.task?.agentModelOverrides ?? {})) {
+    if (typeof value !== "string" && !stringArray(value)) throw new Error(`task.agentModelOverrides.${name} must be a string or string array`);
+  }
+  for (const [mapName, map] of [["agentPrewalk", settings.task?.agentPrewalk], ["agentAdvisor", settings.task?.agentAdvisor]] as const) {
+    for (const [name, value] of Object.entries(map ?? {})) if (typeof value !== "boolean" && typeof value !== "string") throw new Error(`task.${mapName}.${name} must be a boolean or string`);
+  }
+  if (settings.task?.disabledAgents !== undefined && (!stringArray(settings.task.disabledAgents) || settings.task.disabledAgents.some((v) => !v.trim()))) throw new Error("task.disabledAgents must contain non-empty strings");
   if (settings.defaultThinkingLevel !== undefined && !THINKING_LEVELS.has(settings.defaultThinkingLevel)) throw new Error("Invalid default thinking level");
   if (settings.textVerbosity !== undefined && !TEXT_VERBOSITIES.has(settings.textVerbosity)) throw new Error("Invalid text verbosity");
   if (settings.personality !== undefined && !PERSONALITIES.has(settings.personality)) throw new Error("Invalid personality");
@@ -208,8 +238,7 @@ export function writeNativeSettings(settings: NativeSettings): void {
   mkdirSync(dirname(path), { recursive: true });
   if (doc.contents === null) {
     const temp = `${path}.tmp-${process.pid}-${Date.now()}`;
-    writeFileSync(temp, stringify(settings), "utf8");
-    renameSync(temp, path);
+    try { writeFileSync(temp, stringify(settings), "utf8"); renameSync(temp, path); } catch (error) { try { if (existsSync(temp)) unlinkSync(temp); } catch {} throw error; }
     return;
   }
   if (!isMap(doc.contents)) throw new Error(`${path} must contain a YAML mapping`);
@@ -231,7 +260,11 @@ export function writeNativeSettings(settings: NativeSettings): void {
   for (const [key, value] of Object.entries(settings.autolearn ?? {})) doc.setIn(["autolearn", key], value);
   for (const [key, value] of Object.entries(settings.mnemopi ?? {})) doc.setIn(["mnemopi", key], value);
   for (const [key, value] of Object.entries(settings.mcp ?? {})) doc.setIn(["mcp", key], value);
+  if (settings.task?.prewalk !== undefined) doc.setIn(["task", "prewalk"], settings.task.prewalk);
+  for (const [key, value] of Object.entries(settings.task?.agentModelOverrides ?? {})) doc.setIn(["task", "agentModelOverrides", key], value);
+  for (const [key, value] of Object.entries(settings.task?.agentPrewalk ?? {})) doc.setIn(["task", "agentPrewalk", key], value);
+  for (const [key, value] of Object.entries(settings.task?.agentAdvisor ?? {})) doc.setIn(["task", "agentAdvisor", key], value);
+  if (settings.task?.disabledAgents !== undefined) doc.setIn(["task", "disabledAgents"], settings.task.disabledAgents);
   const temp = `${path}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(temp, doc.toString(), "utf8");
-  renameSync(temp, path);
+  try { writeFileSync(temp, doc.toString(), "utf8"); renameSync(temp, path); } catch (error) { try { if (existsSync(temp)) unlinkSync(temp); } catch {} throw error; }
 }

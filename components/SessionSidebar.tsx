@@ -1761,8 +1761,8 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
         <button
           className="sidebar-settings-row"
           onClick={onOpenSettings}
-          title="Settings"
-          aria-label="Settings"
+          title={t("settingsConfig.title")}
+          aria-label={t("settingsConfig.title")}
           style={{
             width: "100%",
             height: 36,
@@ -1792,7 +1792,7 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
             )}
           </span>
           <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 500 }}>
-            Settings
+            {t("settingsConfig.title")}
           </span>
           <ChevronRight size={13} strokeWidth={2} style={{ flexShrink: 0, color: "var(--text-dim)" }} aria-hidden="true" />
         </button>

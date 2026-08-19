@@ -1,7 +1,8 @@
 "use client";
 
-import { Cable, Cpu, KeyRound, RefreshCw, Settings2, ShieldCheck, Sparkles } from "lucide-react";
+import { Bot, Cable, Cpu, KeyRound, RefreshCw, Settings2, ShieldCheck, Sparkles } from "lucide-react";
 import type { ComponentType, CSSProperties } from "react";
+import { useI18n } from "@/lib/i18n";
 
 export type SettingsTab =
   | "general"
@@ -13,7 +14,8 @@ export type SettingsTab =
   | "mcp"
   | "skills"
   | "plugins"
-  | "system";
+  | "system"
+  | "agents";
 
 export interface TabItem {
   id: SettingsTab;
@@ -29,6 +31,7 @@ export const SETTINGS_CATEGORIES: TabItem[] = [
   { id: "models", label: "AI Model Defaults", description: "Reasoning budget, verbosity, personality, scratchpad", Icon: Cpu },
   { id: "providers", label: "API Keys & Providers", description: "Connected OAuth accounts, API keys, and model registry", Icon: KeyRound },
   { id: "intelligence", label: "Agent & Intelligence", description: "Advisor, memory, autolearn, compaction and retry", Icon: Sparkles },
+  { id: "agents", label: "Agents & Subagents", description: "Configured subagents, model routing, prewalk, and advisor", Icon: Bot },
   { id: "mcp", label: "Extensions & Tools", description: "MCP servers, managed skills, and OMP plugins", Icon: Cable },
   { id: "system", label: "System & Updates", description: "App updates, runtime version, and active session restart", Icon: RefreshCw },
 ];
@@ -49,6 +52,7 @@ export function SettingsTabs({
   workspaceReady?: boolean;
   layout?: "horizontal" | "vertical";
 }) {
+  const { t } = useI18n();
   const currentActive = getNormalizedActive(active);
 
   const onKeyDown = (event: React.KeyboardEvent, index: number) => {
@@ -86,6 +90,8 @@ export function SettingsTabs({
         {SETTINGS_CATEGORIES.map(({ id, label, description, Icon, needsWorkspace }, index) => {
           const selected = id === currentActive;
           const disabled = Boolean(needsWorkspace && !workspaceReady);
+          const localizedLabel = t(`settingsTabs.${id}`) || label;
+          const localizedDesc = t(`settingsTabs.${id}Desc`) || description;
           return (
             <button
               key={id}
@@ -117,10 +123,10 @@ export function SettingsTabs({
               <Icon size={16} aria-hidden="true" style={{ marginTop: 2, flexShrink: 0, color: selected ? "var(--accent)" : "currentColor" }} />
               <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
                 <div style={{ fontSize: 12.5, fontWeight: selected ? 600 : 500, lineHeight: 1.3, color: selected ? "var(--text)" : "inherit" }}>
-                  {label}
+                  {localizedLabel}
                 </div>
                 <div style={{ fontSize: 10.5, color: "var(--text-dim)", lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {description}
+                  {localizedDesc}
                 </div>
               </div>
             </button>
@@ -135,6 +141,8 @@ export function SettingsTabs({
       {SETTINGS_CATEGORIES.map(({ id, label, description, Icon, needsWorkspace }, index) => {
         const selected = id === currentActive;
         const disabled = Boolean(needsWorkspace && !workspaceReady);
+        const localizedLabel = t(`settingsTabs.${id}`) || label;
+        const localizedDesc = t(`settingsTabs.${id}Desc`) || description;
         return (
           <button
             key={id}
@@ -143,8 +151,8 @@ export function SettingsTabs({
             id={`settings-tab-${id}`}
             aria-selected={selected}
             aria-controls={`settings-panel-${id}`}
-            aria-label={`${label}: ${description}`}
-            title={description}
+            aria-label={`${localizedLabel}: ${localizedDesc}`}
+            title={localizedDesc}
             tabIndex={selected ? 0 : -1}
             disabled={disabled}
             onClick={() => onSelect(id)}
@@ -153,8 +161,8 @@ export function SettingsTabs({
           >
             <Icon size={13} aria-hidden="true" />
             <span style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
-              <span style={{ fontWeight: selected ? 600 : 500 }}>{label}</span>
-              <span style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", color: "var(--text-muted)", fontSize: 10, fontWeight: 400, lineHeight: 1.25 }}>{description}</span>
+              <span style={{ fontWeight: selected ? 600 : 500 }}>{localizedLabel}</span>
+              <span style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", color: "var(--text-muted)", fontSize: 10, fontWeight: 400, lineHeight: 1.25 }}>{localizedDesc}</span>
             </span>
           </button>
         );

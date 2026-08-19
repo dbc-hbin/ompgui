@@ -1,6 +1,6 @@
 # ompweb
 
-[English](./README.md) | [日本語](./README.ja.md)
+[English](./README.md) | [简体中文](./README.zh-CN.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md)
 
 社区：[加入 OMPWEB Discord](https://discord.gg/evqgGzRfM5)
 
@@ -117,9 +117,9 @@ node --test lib/*.test.mjs components/*.test.mjs   # 运行测试
 
 ## 多语言支持
 
-ompweb 支持英语、简体中文和日本語，三种语言均覆盖整个界面的翻译字符串。语言从 `navigator.language` 自动检测，可通过顶栏的语言菜单在运行时切换。选择会跨会话持久化。
+ompweb 支持英语、简体中文、日本語和韩语（한국어），四种语言均覆盖整个界面的翻译字符串。语言从 `navigator.language` 自动检测，可通过顶栏的语言菜单在运行时切换。选择会跨会话持久化。
 
-- 字典文件：`lib/i18n/locales/{en,zh-CN,ja}.json`
+- 字典文件：`lib/i18n/locales/{en,zh-CN,ja,ko}.json`
 - 框架：`lib/i18n/index.tsx` — 基于 `useSyncExternalStore` 的轻量 store，支持 `{var}` 插值和复数形式（`.one`/`.other`）
 - API 错误消息通过稳定的错误码（`errors.<code>`）在客户端翻译
 
