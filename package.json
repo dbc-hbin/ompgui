@@ -10,6 +10,7 @@
   "bugs": {
     "url": "https://github.com/dbc-hbin/ompweb/issues"
   },
+  "author": "dbc-hbin",
   "license": "MIT",
   "engines": {
     "node": ">=22.19.0"
