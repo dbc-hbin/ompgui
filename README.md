@@ -57,6 +57,38 @@ OMP_WEB_NO_OPEN=1 ompweb        # useful when running as a background service
 
 Set `OMP_WEB_PASSWORD` (or pass `--password`) to protect the interface and every API endpoint with a themed, password-only sign-in screen. A successful sign-in creates an HTTP-only signed session cookie for 30 days; changing the configured password invalidates existing sessions. Leaving the variable unset disables authentication. Remote use still requires HTTPS through a trusted reverse proxy or VPN so the password and session cookie cannot be intercepted. On Windows the env-variable syntax is `$env:OMP_WEB_PASSWORD="..."`; `ompweb --password "..."` works in every shell without that extra step.
 
+## Remote & Mobile Access (Tailscale Recommended)
+
+For accessing `ompweb` from mobile devices (iPhone, iPad, Android) or external laptops, **using [Tailscale](https://tailscale.com/) is strongly recommended**. Tailscale creates a private, point-to-point WireGuard mesh VPN between your devices without exposing your host machine to the public internet or requiring port forwarding.
+
+### 1. Configure Password (Required for Remote Access)
+
+When binding to external network interfaces, setting a password is required to secure the workspace:
+
+```bash
+# CLI option: bind to all interfaces with a password
+ompweb -H 0.0.0.0 --password "your-strong-password"
+
+# Or via environment variables
+OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompweb
+```
+
+### 2. Steps to Connect via Tailscale
+
+1. **Install Tailscale**: Download and sign into [Tailscale](https://tailscale.com/download) on both your host machine and your mobile device using the same account.
+2. **Start ompweb on your host machine**:
+   ```bash
+   ompweb --hostname 0.0.0.0 --password "your-strong-password"
+   ```
+3. **Access from your mobile browser**:
+   - Navigate to your host's Tailscale IP (e.g. `100.x.y.z`) or MagicDNS machine name:
+     ```text
+     http://100.x.y.z:30177
+     # Or with MagicDNS enabled:
+     http://my-macbook:30177
+     ```
+4. **Log in**: Enter your configured password to securely control and chat with your coding agent on mobile.
+
 ### Security and troubleshooting
 
 - The server binds to `127.0.0.1` by default. A non-loopback hostname is an explicit opt-in and should only be used behind a trusted network boundary; ompweb is not safe to expose publicly.

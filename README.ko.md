@@ -57,6 +57,38 @@ OMP_WEB_NO_OPEN=1 ompweb        # 백그라운드 서비스로 실행할 때 유
 
 `OMP_WEB_PASSWORD`를 설정하거나 `--password`를 전달하면 테마가 적용된 비밀번호 전용 로그인 화면으로 인터페이스와 모든 API 엔드포인트를 보호합니다. 로그인에 성공하면 30일 동안 유효한 HTTP 전용 서명 세션 쿠키가 생성됩니다. 설정된 비밀번호를 변경하면 기존 세션이 무효화됩니다. 변수를 설정하지 않으면 인증이 비활성화됩니다. 원격 사용 시 비밀번호와 세션 쿠키가 가로채이지 않도록 신뢰할 수 있는 리버스 프록시나 VPN을 통해 HTTPS를 사용해야 합니다. Windows 환경 변수 문법은 `$env:OMP_WEB_PASSWORD="..."`이며, `ompweb --password "..."`는 별도 문법 없이 모든 셸에서 작동합니다.
 
+## 원격 및 모바일 접속 (Tailscale 권장)
+
+외부나 모바일 기기(iPhone, iPad, Android)에서 로컬 PC의 `ompweb`에 접속할 때는 **[Tailscale](https://tailscale.com/) 가상 사설망(VPN)을 사용하는 것을 강력히 권장**합니다. 포트 포워딩이나 공인 IP 노출 없이 종단간 암호화(P2P)를 통해 가장 안전하게 원격 접속할 수 있습니다.
+
+### 1. 비밀번호 설정 (보안 필수)
+
+외부 네트워크에 바인딩할 때는 인증 보호를 위해 반드시 비밀번호를 설정해야 합니다:
+
+```bash
+# CLI 옵션으로 비밀번호 설정 및 전체 네트워크 바인딩
+ompweb -H 0.0.0.0 --password "your-strong-password"
+
+# 또는 환경 변수로 설정
+OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompweb
+```
+
+### 2. Tailscale 연결 단계
+
+1. **Tailscale 설치**: 호스트 PC와 모바일 기기에 [Tailscale](https://tailscale.com/download)을 설치하고 동일한 계정으로 로그인합니다.
+2. **호스트 PC에서 ompweb 실행**:
+   ```bash
+   ompweb --hostname 0.0.0.0 --password "your-strong-password"
+   ```
+3. **모바일 브라우저에서 접속**:
+   - 호스트 PC의 Tailscale IP(예: `100.x.y.z`) 또는 MagicDNS 머신 이름으로 접속합니다:
+     ```text
+     http://100.x.y.z:30177
+     # 또는 MagicDNS 활성화 시
+     http://my-macbook:30177
+     ```
+4. **로그인**: 설정한 비밀번호를 입력하면 모바일에서도 안전하게 실시간 코딩 에이전트와 대화하고 작업할 수 있습니다.
+
 ### 보안 및 문제 해결
 
 - 서버는 기본적으로 `127.0.0.1`에 바인딩됩니다. 루프백이 아닌 호스트 이름은 명시적으로 선택해야 하며 신뢰할 수 있는 네트워크 경계 뒤에서만 사용하세요. ompweb을 공개적으로 노출하는 것은 안전하지 않습니다.

@@ -56,6 +56,38 @@ OMP_WEB_NO_OPEN=1 ompweb        # 作为后台服务运行时很有用
 
 设置 `OMP_WEB_PASSWORD` 可通过与主题集成的仅密码登录页面保护界面和所有 API 端点。登录成功后，会创建有效期为 30 天的 HTTP-only 签名会话 Cookie；留空则关闭认证。远程访问仍需通过受信任反向代理或 VPN 提供 HTTPS，以保护密码和会话 Cookie。默认仅监听 `127.0.0.1`；不要将 ompweb 直接暴露到互联网。
 
+## 远程与移动端访问（推荐使用 Tailscale）
+
+从移动设备（iPhone、iPad、Android）或外部笔记本访问 `ompweb` 时，**强烈推荐使用 [Tailscale](https://tailscale.com/) 虚拟专用网（VPN）**。它通过端到端加密的点对点 Mesh 网络连接设备，无需端口转发或暴露公网 IP。
+
+### 1. 配置访问密码（远程访问必备）
+
+当绑定到外部网络接口时，必须配置密码以保护工作区：
+
+```bash
+# CLI 选项：绑定到所有网络接口并设置密码
+ompweb -H 0.0.0.0 --password "your-strong-password"
+
+# 或通过环境变量设置
+OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompweb
+```
+
+### 2. Tailscale 连接步骤
+
+1. **安装 Tailscale**：在宿主电脑和移动设备上安装 [Tailscale](https://tailscale.com/download) 并登录同一账户。
+2. **在宿主电脑上启动 ompweb**：
+   ```bash
+   ompweb --hostname 0.0.0.0 --password "your-strong-password"
+   ```
+3. **在移动端浏览器中访问**：
+   - 访问宿主电脑的 Tailscale IP（如 `100.x.y.z`）或 MagicDNS 机器名：
+     ```text
+     http://100.x.y.z:30177
+     # 或启用 MagicDNS 时
+     http://my-macbook:30177
+     ```
+4. **登录**：输入设置的密码即可在移动设备上安全地与编程智能体进行实时交互与操作。
+
 ## 功能特性
 
 - **随时接续之前的工作**：按项目浏览以往的 omp 对话，不必翻找终端历史或会话文件路径。
