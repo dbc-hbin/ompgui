@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/api-utils";
+import { parseJsonWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
 import { discoverAgents, updateAgent, deleteAgent, type AgentDefinition } from "@/lib/omp/agents-service";
 
 export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ name: string }> };
+const MAX_AGENT_REQUEST_BYTES = 512 * 1024 * 6 + 64 * 1024;
+
 function statusFor(error: unknown, fallback = 400) {
+  if (error instanceof RequestBodyTooLargeError) return 413;
   const m = String(error).toLowerCase();
   if (m.includes("not found")) return 404;
   if (m.includes("access denied") || m.includes("disallowed")) return 403;
@@ -25,7 +29,7 @@ export async function GET(req: Request, { params }: Ctx) {
 
 export async function PUT(req: Request, { params }: Ctx) {
   try {
-    const { name } = await params; const body = await req.json();
+    const { name } = await params; const body = await parseJsonWithinLimit<Record<string, unknown>>(req, MAX_AGENT_REQUEST_BYTES);
     if (!body || (body.scope !== "user" && body.scope !== "project")) return apiErrorResponse("Invalid agent input", 400);
     const filePath = await updateAgent({ ...body, name });
     const agent = (await discoverAgents(body.cwd)).agents.find((a: AgentDefinition) => a.filePath === filePath);
