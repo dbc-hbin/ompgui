@@ -2,13 +2,13 @@
   "name": "ompgui",
   "version": "0.4.1",
   "description": "Web UI & Browser GUI for the oh-my-pi (omp) coding agent",
-  "homepage": "https://github.com/dbc-hbin/ompweb#readme",
+  "homepage": "https://github.com/dbc-hbin/ompgui#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dbc-hbin/ompweb.git"
+    "url": "git+https://github.com/dbc-hbin/ompgui.git"
   },
   "bugs": {
-    "url": "https://github.com/dbc-hbin/ompweb/issues"
+    "url": "https://github.com/dbc-hbin/ompgui/issues"
   },
   "author": "dbc-hbin",
   "license": "MIT",
