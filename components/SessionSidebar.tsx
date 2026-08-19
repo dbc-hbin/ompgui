@@ -471,14 +471,14 @@ function useScramble(target: string, running: boolean, reducedMotion: boolean): 
   return display;
 }
 
-function OmpWebTitle() {
+function OmpGuiTitle() {
   const [showVersion, setShowVersion] = useState(false);
   const [scrambling, setScrambling] = useState(false);
-  const revertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrambleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const revertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reducedMotion = usePrefersReducedMotion();
 
-  const target = showVersion ? `v${process.env.NEXT_PUBLIC_OMP_WEB_VERSION ?? "0.0.0"}` : "omp web";
+  const target = showVersion ? `v${process.env.NEXT_PUBLIC_OMPGUI_VERSION ?? process.env.NEXT_PUBLIC_OMP_WEB_VERSION ?? "0.4.1"}` : "ompgui";
   const display = useScramble(target, scrambling, reducedMotion);
 
   const triggerScramble = useCallback((toVersion: boolean) => {
@@ -515,12 +515,12 @@ function OmpWebTitle() {
         minWidth: "6ch",
         lineHeight: 1,
       }}
-      title={showVersion ? "Show ompweb name" : "Show ompweb version"}
+      title={showVersion ? "Show ompgui name" : "Show ompgui version"}
     >
       {!scrambling && !showVersion ? (
         <>
           <span style={{ color: "var(--accent)" }}>omp</span>
-          <span style={{ color: "var(--text)" }}>web</span>
+          <span style={{ color: "var(--text)" }}>gui</span>
         </>
       ) : (
         <span style={{ color: showVersion ? "var(--accent)" : "var(--text)" }}>{display}</span>
@@ -1416,7 +1416,7 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <OmpWebTitle />
+          <OmpGuiTitle />
           <div style={{ display: "flex", gap: 2 }}>
             <Tooltip content={t("sessionSidebar.importTitle")} side="bottom">
               <SidebarIconButton

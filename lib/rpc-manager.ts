@@ -39,10 +39,10 @@ const MCP_LIST_TIMEOUT_MS = 15_000;
 
 const RESTARTING_MESSAGE = "This session is restarting — retry in a moment.";
 const BASH_EXCLUDE_MESSAGE =
-  "omp cannot run a shell command with its output excluded from the model context (`!!`): the RPC bash command has no exclusion option, so the output would silently enter the context anyway. Run it with a single `!` to share the output with the model, or use a terminal outside omp web.";
+  "omp cannot run a shell command with its output excluded from the model context (`!!`): the RPC bash command has no exclusion option, so the output would silently enter the context anyway. Run it with a single `!` to share the output with the model, or use a terminal outside ompgui.";
 
 /**
- * Failure raised by omp-web itself (not by omp) carrying a stable snake_case
+ * Failure raised by ompgui itself (not by omp) carrying a stable snake_case
  * code. API routes forward `{ error, code }` so the client dictionary can
  * localize it via `errors.<code>` while unknown codes fall back to the text.
  */
@@ -519,7 +519,7 @@ export class AgentSessionWrapper {
       result: {
         content: [{
           type: "text",
-          text: `Host tool \"${toolName}\" is not available in omp-web. Use OMP's built-in tools within the selected workspace.`,
+          text: `Host tool \"${toolName}\" is not available in ompgui. Use OMP's built-in tools within the selected workspace.`,
         }],
       },
     });

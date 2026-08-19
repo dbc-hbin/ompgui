@@ -29,7 +29,7 @@ export function invalidateOmpCliCache(): void {
 }
 
 function probeOmpBin(): string | null {
-  const override = process.env.OMP_WEB_OMP_BIN;
+  const override = process.env.OMPGUI_OMP_BIN ?? process.env.OMP_WEB_OMP_BIN;
   if (override) return existsSync(override) ? override : null;
   for (const dir of (process.env.PATH ?? "").split(delimiter)) {
     if (!dir) continue;
