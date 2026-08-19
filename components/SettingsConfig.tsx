@@ -906,11 +906,11 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                     <div style={{ marginTop: 6, padding: "10px 12px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg)", display: "flex", flexDirection: "column", gap: 6 }}>
                       <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("settingsConfig.runAppUpdateCommand")}</div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <code style={{ flex: 1, fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--accent)", wordBreak: "break-all" }}>{appUpdate.updateCommand || "npm install -g ompweb"}</code>
+                        <code style={{ flex: 1, fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--accent)", wordBreak: "break-all" }}>{appUpdate.updateCommand || "npm install -g ompgui"}</code>
                         <button
                           type="button"
                           onClick={() => {
-                            void copyText(appUpdate.updateCommand || "npm install -g ompweb")
+                            void copyText(appUpdate.updateCommand || "npm install -g ompgui")
                               .then(() => setMessage(t("appShell.commandCopied")))
                               .catch(() => setMessage(t("appShell.commandCopyFailed")));
                           }}

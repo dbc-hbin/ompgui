@@ -25,13 +25,13 @@
 **インストールせずに実行:**
 
 ```bash
-npx ompweb@latest
+npx ompgui@latest
 ```
 
 **またはグローバルにインストール:**
 
 ```bash
-npm install -g ompweb
+npm install -g ompgui
 ompweb
 ```
 

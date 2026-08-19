@@ -23,13 +23,13 @@
 **설치 없이 실행:**
 
 ```bash
-npx ompweb@latest
+npx ompgui@latest
 ```
 
 **또는 전역 설치:**
 
 ```bash
-npm install -g ompweb
+npm install -g ompgui
 ompweb
 ```
 
