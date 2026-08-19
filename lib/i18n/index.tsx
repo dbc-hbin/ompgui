@@ -15,7 +15,7 @@ export const LOCALES: Array<{ value: Locale; label: string }> = [
   { value: "ko", label: "한국어" },
 ];
 
-const STORAGE_KEY = "omp-lang";
+const STORAGE_KEY = "ompgui-lang";
 
 const dictionaries: Record<Locale, Record<string, string>> = {
   en: en as Record<string, string>,
@@ -41,7 +41,7 @@ const listeners = state.listeners;
 
 function detectLocale(): Locale {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = localStorage.getItem(STORAGE_KEY) || localStorage.getItem("omp-lang");
     if (stored === "en" || stored === "zh-CN" || stored === "ja" || stored === "ko") return stored;
   } catch {
     // storage unavailable (private mode etc.)

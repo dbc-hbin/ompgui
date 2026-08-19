@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
+export const OMPGUI_SESSION_COOKIE = "ompgui_session";
 export const OMP_WEB_SESSION_COOKIE = "omp_web_session";
 export const OMP_WEB_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
@@ -11,11 +12,11 @@ function equal(left: string, right: string): boolean {
   return timingSafeEqual(hash(left), hash(right));
 }
 
-export function isWebPasswordEnabled(password: string | undefined = process.env.OMP_WEB_PASSWORD): password is string {
+export function isWebPasswordEnabled(password: string | undefined = process.env.OMPGUI_PASSWORD ?? process.env.OMP_WEB_PASSWORD): password is string {
   return typeof password === "string" && password.length > 0;
 }
 
-export function isValidWebPassword(candidate: string, password = process.env.OMP_WEB_PASSWORD): boolean {
+export function isValidWebPassword(candidate: string, password = process.env.OMPGUI_PASSWORD ?? process.env.OMP_WEB_PASSWORD): boolean {
   return isWebPasswordEnabled(password) && equal(candidate, password);
 }
 
@@ -26,7 +27,7 @@ export function createWebSession(password: string, now = Date.now()): string {
   return `${payload}.${signature}`;
 }
 
-export function isValidWebSession(session: string | undefined, password = process.env.OMP_WEB_PASSWORD, now = Date.now()): boolean {
+export function isValidWebSession(session: string | undefined, password = process.env.OMPGUI_PASSWORD ?? process.env.OMP_WEB_PASSWORD, now = Date.now()): boolean {
   if (!isWebPasswordEnabled(password) || !session) return false;
   const match = /^v1\.(\d{13})\.([A-Za-z0-9_-]{22})\.([A-Za-z0-9_-]{43})$/.exec(session);
   if (!match) return false;

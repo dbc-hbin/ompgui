@@ -1,4 +1,4 @@
-/* Keep Tailwind's content scan inside the omp-web package. This is important
+/* Keep Tailwind's content scan inside the ompgui package. This is important
    on Windows, where a parent user-profile package can make the scanner walk
    protected junctions such as "My Documents" during production builds. */
 @import "tailwindcss" source(none);

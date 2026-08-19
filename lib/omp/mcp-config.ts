@@ -190,7 +190,7 @@ export function resolveMcpConfig(cwd: string): { root: string; path: string } {
 export function readMcpConfig(cwd: string): { root: string; path: string; config: McpFile; exists: boolean } {
   const resolved = resolveMcpConfig(cwd);
   if (!existsSync(resolved.path)) return { ...resolved, config: { mcpServers: {} }, exists: false };
-  if (statSync(resolved.path).size > MAX_MCP_CONFIG_BYTES) throw new Error("MCP configuration is too large to edit in omp-web");
+  if (statSync(resolved.path).size > MAX_MCP_CONFIG_BYTES) throw new Error("MCP configuration is too large to edit in ompgui");
   let config: unknown;
   try {
     config = JSON.parse(readFileSync(resolved.path, "utf8"));

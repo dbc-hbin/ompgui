@@ -4,7 +4,7 @@ import {
   createWebSession,
   isValidWebPassword,
   isWebPasswordEnabled,
-  OMP_WEB_SESSION_COOKIE,
+  OMPGUI_SESSION_COOKIE,
   OMP_WEB_SESSION_MAX_AGE_SECONDS,
 } from "@/lib/web-auth";
 
@@ -29,8 +29,8 @@ export async function POST(request: Request) {
   const response = NextResponse.json({ ok: true });
   const secure = new URL(request.url).protocol === "https:" || request.headers.get("x-forwarded-proto") === "https";
   response.cookies.set({
-    name: OMP_WEB_SESSION_COOKIE,
-    value: createWebSession(process.env.OMP_WEB_PASSWORD!),
+    name: OMPGUI_SESSION_COOKIE,
+    value: createWebSession(process.env.OMPGUI_PASSWORD ?? process.env.OMP_WEB_PASSWORD!),
     httpOnly: true,
     secure,
     sameSite: "lax",

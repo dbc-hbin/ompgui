@@ -1,17 +1,17 @@
-# ompweb
+# ompgui
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-[oh-my-pi (omp) コーディングエージェント](https://github.com/can1357/oh-my-pi)のローカル Web UI です。ompweb はローカルの omp セッションファイルを読み込み、セッションの閲覧、リアルタイムチャット、モデル設定、スキル管理、プロジェクトファイルのプレビューを行えるブラウザワークスペースを提供します。
+[oh-my-pi (omp) コーディングエージェント](https://github.com/can1357/oh-my-pi)のローカル Web UI です。ompgui はローカルの omp セッションファイルを読み込み、セッションの閲覧、リアルタイムチャット、モデル設定、スキル管理、プロジェクトファイルのプレビューを行えるブラウザワークスペースを提供します。
 
-![ompweb — ライトテーマ](docs/screenshot-light.png)
+![ompgui — ライトテーマ](docs/screenshot-light.png)
 
 <details>
 <summary>ダークテーマとコマンドパレット</summary>
 
-![ompweb — ダークテーマ](docs/screenshot-dark.png)
+![ompgui — ダークテーマ](docs/screenshot-dark.png)
 
-![ompweb — コマンドパレット](docs/screenshot-palette.png)
+![ompgui — コマンドパレット](docs/screenshot-palette.png)
 
 </details>
 
@@ -32,33 +32,33 @@ npx ompgui@latest
 
 ```bash
 npm install -g ompgui
-ompweb
+ompgui
 ```
 
-続いて [http://127.0.0.1:30177](http://127.0.0.1:30177) を開きます。サーバーの準備が整うと、CLI はブラウザを自動的に開こうとします。ompweb はデフォルトで `127.0.0.1` で待ち受けます。
+続いて [http://127.0.0.1:30177](http://127.0.0.1:30177) を開きます。サーバーの準備が整うと、CLI はブラウザを自動的に開こうとします。ompgui はデフォルトで `127.0.0.1` で待ち受けます。
 
 **オプション:**
 
 ```bash
-ompweb --port 8080              # カスタムポート
-ompweb --hostname 0.0.0.0       # 信頼できるネットワークに公開
-ompweb -p 8080 -H 0.0.0.0       # オプションを組み合わせる
-ompweb --no-open                # ブラウザを自動的に開かない
+ompgui --port 8080              # カスタムポート
+ompgui --hostname 0.0.0.0       # 信頼できるネットワークに公開
+ompgui -p 8080 -H 0.0.0.0       # オプションを組み合わせる
+ompgui --no-open                # ブラウザを自動的に開かない
 
-ompweb --password "a-long-random-password" # パスワードのみのサインインを有効化（Windows でも同様）
+ompgui --password "a-long-random-password" # パスワードのみのサインインを有効化（Windows でも同様）
 
-PORT=8080 ompweb                # 環境変数にも対応
-OMP_WEB_HOSTNAME=0.0.0.0 ompweb # ネットワーク公開を明示的に有効化
-OMP_WEB_PASSWORD='a-long-random-password' ompweb # 環境変数でも同様（POSIX）
-# Windows: $env:OMP_WEB_PASSWORD="secret"; ompweb
-OMP_WEB_NO_OPEN=1 ompweb        # バックグラウンドサービスとして実行する場合に便利
+PORT=8080 ompgui                # 環境変数にも対応
+OMP_WEB_HOSTNAME=0.0.0.0 ompgui # ネットワーク公開を明示的に有効化
+OMP_WEB_PASSWORD='a-long-random-password' ompgui # 環境変数でも同様（POSIX）
+# Windows: $env:OMP_WEB_PASSWORD="secret"; ompgui
+OMP_WEB_NO_OPEN=1 ompgui        # バックグラウンドサービスとして実行する場合に便利
 ```
 
-`OMP_WEB_PASSWORD` を設定すると、テーマに統合されたパスワードのみのサインイン画面で UI とすべての API エンドポイントを保護できます。サインイン後は HTTP-only の署名付きセッションクッキーが 30 日間有効です。未設定なら認証は無効です。リモート利用では、パスワードとセッションクッキーを守るため、信頼できるリバースプロキシまたは VPN 経由の HTTPS が必要です。ompweb をインターネットへ直接公開しないでください。
+`OMP_WEB_PASSWORD` を設定すると、テーマに統合されたパスワードのみのサインイン画面で UI とすべての API エンドポイントを保護できます。サインイン後は HTTP-only の署名付きセッションクッキーが 30 日間有効です。未設定なら認証は無効です。リモート利用では、パスワードとセッションクッキーを守るため、信頼できるリバースプロキシまたは VPN 経由の HTTPS が必要です。ompgui をインターネットへ直接公開しないでください。
 
 ## リモート・モバイルアクセス（Tailscale 推奨）
 
-モバイル端末（iPhone、iPad、Android）や外部のノートPCから `ompweb` にアクセスする場合は、**[Tailscale](https://tailscale.com/) の利用を強く推奨します**。ポート開放やグローバルIPの公開なしに、端末間の暗号化メッシュVPNを通じて最も安全にリモートアクセスできます。
+モバイル端末（iPhone、iPad、Android）や外部のノートPCから `ompgui` にアクセスする場合は、**[Tailscale](https://tailscale.com/) の利用を強く推奨します**。ポート開放やグローバルIPの公開なしに、端末間の暗号化メッシュVPNを通じて最も安全にリモートアクセスできます。
 
 ### 1. パスワードの設定（セキュリティ上必須）
 
@@ -66,18 +66,18 @@ OMP_WEB_NO_OPEN=1 ompweb        # バックグラウンドサービスとして�
 
 ```bash
 # CLI オプションでパスワードを設定して全インターフェースにバインド
-ompweb -H 0.0.0.0 --password "your-strong-password"
+ompgui -H 0.0.0.0 --password "your-strong-password"
 
 # または環境変数で設定
-OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompweb
+OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompgui
 ```
 
 ### 2. Tailscale 接続手順
 
 1. **Tailscale をインストール**: ホストPCとモバイル端末に [Tailscale](https://tailscale.com/download) をインストールし、同一アカウントでログインします。
-2. **ホストPCで ompweb を起動**:
+2. **ホストPCで ompgui を起動**:
    ```bash
-   ompweb --hostname 0.0.0.0 --password "your-strong-password"
+   ompgui --hostname 0.0.0.0 --password "your-strong-password"
    ```
 3. **モバイルブラウザからアクセス**:
    - ホストPCの Tailscale IP（例: `100.x.y.z`）または MagicDNS マシン名でアクセスします:
@@ -117,7 +117,7 @@ OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompweb
 
 ## アーキテクチャ
 
-ompweb は Node 上でホストされる Next.js アプリで、インストール済みの `omp` バイナリを操作します。エージェント自体は同梱していません:
+ompgui は Node 上でホストされる Next.js アプリで、インストール済みの `omp` バイナリを操作します。エージェント自体は同梱していません:
 
 - **ライブセッション**: `omp --mode rpc-ui`（stdio 上の NDJSON）を、アクティブなセッションごとに 1 つの子プロセスとして起動します。そのため、エージェントのバージョンは常にインストールされているものと完全に一致します。
 - **セッション閲覧**: omp のセッションファイル（`~/.omp/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`）を直接読み込みます。タイトル変更、アーカイブ、削除は、OMP のライブ書き込みと競合しないよう保護されたネイティブファイルのメンテナンス操作です。
@@ -147,7 +147,7 @@ node --test lib/*.test.mjs components/*.test.mjs   # テスト実行
 
 ## 国際化
 
-ompweb は英語、簡体字中国語（简体中文）、日本語、韓国語（한국어）をサポートし、4 言語で UI 全体の翻訳文字列を提供しています。言語は `navigator.language` から自動検出され、トップバーの言語メニューから実行時に切り替えできます。選択はセッション間で永続化されます。
+ompgui は英語、簡体字中国語（简体中文）、日本語、韓国語（한국어）をサポートし、4 言語で UI 全体の翻訳文字列を提供しています。言語は `navigator.language` から自動検出され、トップバーの言語メニューから実行時に切り替えできます。選択はセッション間で永続化されます。
 
 - 辞書ファイル: `lib/i18n/locales/{en,zh-CN,ja,ko}.json`
 - フレームワーク: `lib/i18n/index.tsx` — `useSyncExternalStore` ベースの軽量ストア、`{var}` 補間と複数形サポート（`.one`/`.other`）
@@ -162,7 +162,7 @@ ompweb は英語、簡体字中国語（简体中文）、日本語、韓国語�
 
 ## クレジット
 
-ompweb は [agegr/pi-web](https://github.com/agegr/pi-web)（MIT）のフォークです。pi-web は [badlogic/pi-mono](https://github.com/badlogic/pi-mono) の pi コーディングエージェント向け Web UI で、これを [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi) 向けに適合させたものです。
+ompgui は [agegr/pi-web](https://github.com/agegr/pi-web)（MIT）のフォークです。pi-web は [badlogic/pi-mono](https://github.com/badlogic/pi-mono) の pi コーディングエージェント向け Web UI で、これを [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi) 向けに適合させたものです。
 
 ## ライセンス
 

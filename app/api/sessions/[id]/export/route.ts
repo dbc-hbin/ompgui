@@ -54,7 +54,7 @@ export async function GET(
     if ("response" in resolved) return resolved.response;
     const filePath = resolved.filePath;
 
-    const tempDir = join(tmpdir(), "omp-web-export");
+    const tempDir = join(tmpdir(), "ompgui-export");
     mkdirSync(tempDir, { recursive: true });
 
     const sessionBase = basename(filePath, ".jsonl");

@@ -16,7 +16,7 @@ import type {
 export const dynamic = "force-dynamic";
 
 // Plugin management is delegated to the user's omp binary (`omp plugin ...`);
-// omp-web never embeds the Bun-only SDK. `--json` output shapes are mirrored
+// ompgui never embeds the Bun-only SDK. `--json` output shapes are mirrored
 // from oh-my-pi coding-agent src/cli/plugin-cli.ts + extensibility/plugins.
 
 type PluginAction = "install" | "remove" | "update" | "disable" | "enable";

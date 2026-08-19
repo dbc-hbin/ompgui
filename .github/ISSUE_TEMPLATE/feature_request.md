@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Suggest an idea for omp-web
+about: Suggest an idea for ompgui
 title: "[Feature] "
 labels: enhancement
 ---

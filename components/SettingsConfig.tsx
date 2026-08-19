@@ -288,7 +288,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     if (typeof window === "undefined") return true;
     try {
-      const value = window.localStorage.getItem("omp-sound-enabled");
+      const value = window.localStorage.getItem("ompgui-sound-enabled") || window.localStorage.getItem("omp-sound-enabled");
       return value === null ? true : value === "true";
     } catch {
       return true;
@@ -527,7 +527,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                       checked={soundEnabled}
                       onChange={(next) => {
                         setSoundEnabled(next);
-                        try { localStorage.setItem("omp-sound-enabled", String(next)); } catch { /* storage fallback */ }
+                        try { localStorage.setItem("ompgui-sound-enabled", String(next)); } catch { /* storage fallback */ }
                         window.dispatchEvent(new CustomEvent("omp-sound-pref-change", { detail: next }));
                       }}
                     />
@@ -889,7 +889,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                   <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>{t("settingsConfig.systemUpdatesDescription")}</p>
                 </div>
 
-                {/* ompweb app update card */}
+                {/* ompgui app update card */}
                 <section style={{ padding: 14, border: "1px solid var(--border)", borderRadius: "var(--radius-card)", background: "var(--bg-panel)", display: "flex", flexDirection: "column", gap: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                     <div>

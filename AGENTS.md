@@ -1,4 +1,4 @@
-# omp-web - Development Notes
+# ompgui - Development Notes
 
 ## Quick Start
 
@@ -17,7 +17,7 @@ All live-agent features go through it; session browsing works without it.
 
 ## Architecture
 
-omp-web never imports `@oh-my-pi/*` or `@earendil-works/*` packages (they are
+ompgui never imports `@oh-my-pi/*` or `@earendil-works/*` packages (they are
 Bun-only and cannot run inside Node/Next). See `DESIGN.md` for the full porting
 contract.
 
@@ -189,7 +189,7 @@ handled or safely ignored.
 - **On-disk history** (`lib/subagent-history.ts`, `/api/sessions/[id]/subagents*`):
   omp persists each subagent's transcript to the parent session's sibling
   artifacts dir (`<session-dir>/<subagent-id>.jsonl`) and the parent file's
-  task toolResults keep `progress[]`/`results[]` snapshots. omp-web recovers
+  task toolResults keep `progress[]`/`results[]` snapshots. ompgui recovers
   the roster from disk (`extractSubagentHistory`, result fields win over the
   mid-run snapshot), so past/finished runs show in the composer panel after a
   reload. The transcript route pages the sibling file byte-wise (mirroring
@@ -236,7 +236,7 @@ handled or safely ignored.
   (`lib/project-ordering.ts`); the order deliberately does NOT depend on
   session activity, so project rows never jump around while sessions refresh.
   Expanded project paths live
-  in `localStorage` (`omp-web:expanded-projects`), defaulting to only the
+  in `localStorage` (`ompgui:expanded-projects`), defaulting to only the
   active/restored project expanded, and stale keys are pruned against the
   current project list (only after the first project fetch — an empty
   still-loading list must never wipe storage).
@@ -294,13 +294,13 @@ handled or safely ignored.
 
 ### Update notifications (`/api/omp-update`, `/api/app-update`)
 - Automatic in-app self-updating has been removed in favor of explicit user notifications and manual terminal commands.
-- `GET /api/app-update` queries the npm registry for `@kahme247/ompweb` updates, detects the install manager (`bun` vs `npm` via `detectInstallMethod`), and returns `updateAvailable` plus the exact terminal command (e.g. `npm install -g @kahme247/ompweb` or `bun add -g @kahme247/ompweb`).
+- `GET /api/app-update` queries the npm registry for `ompgui` updates, detects the install manager (`bun` vs `npm` via `detectInstallMethod`), and returns `updateAvailable` plus the exact terminal command (e.g. `npm install -g ompgui` or `bun add -g ompgui`).
 - `POST /api/omp-update` (`action: "check"`) runs `omp update --check` and returns `updateAvailable` plus `updateCommand: "omp update"`.
 - `POST /api/omp-update` (`action: "restart"`) restarts active OMP sessions after a manual CLI update.
 - Notifications in `AppShell` and settings cards in `SettingsConfig` present the update notification alongside copyable terminal update commands.
 
 ### Auth and model config
-- Auth flows go through RPC commands (`get_login_providers`, `login`) against the omp child process; credentials live in omp's `agent.db` (SQLite) which omp-web never touches directly.
+- Auth flows go through RPC commands (`get_login_providers`, `login`) against the omp child process; credentials live in omp's `agent.db` (SQLite) which ompgui never touches directly.
 - The Models panel reads and writes `models.yml` in the omp agent directory (`~/.omp/agent/models.yml`, `.yaml` fallback).
 - API-key status endpoints must never return the raw key.
 

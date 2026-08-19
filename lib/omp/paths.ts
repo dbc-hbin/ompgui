@@ -4,7 +4,7 @@ import * as path from "path";
 
 /**
  * Node port of oh-my-pi's directory resolution (packages/utils/src/dirs.ts).
- * omp-web cannot import the Bun-only @oh-my-pi packages, so the layout rules
+ * ompgui cannot import the Bun-only @oh-my-pi packages, so the layout rules
  * are replicated here. Covered: PI_CODING_AGENT_DIR override, PI_CONFIG_DIR
  * rename, OMP_PROFILE/PI_PROFILE profiles, and the XDG data layout (used only
  * when $XDG_DATA_HOME/omp already exists, mirroring omp's opt-in migration).
@@ -22,7 +22,7 @@ const WINDOWS_RESERVED_BASENAME_RE = /^(?:CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(?:\
  * Faithful port of omp's normalizeProfileName (packages/utils/src/dirs.ts).
  * Returns undefined for the implicit default (empty, whitespace, or the
  * explicit "default" sentinel) and throws for invalid names — omp refuses to
- * start on those, so silently falling back would make omp-web read a different
+ * start on those, so silently falling back would make ompgui read a different
  * agent dir than the omp child it spawns.
  */
 export function normalizeProfileName(profile: string | undefined): string | undefined {

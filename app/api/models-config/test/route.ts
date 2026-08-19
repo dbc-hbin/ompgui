@@ -13,7 +13,7 @@ import { type OmpModel, runIsolatedUtilityCommand } from "@/lib/omp/rpc-utility"
 export const dynamic = "force-dynamic";
 
 // Registry resolution (spawn + model discovery), not a completion round-trip:
-// omp-web cannot send test prompts without going through a full agent session.
+// ompgui cannot send test prompts without going through a full agent session.
 const TEST_TIMEOUT_MS = 60_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -54,7 +54,7 @@ export async function POST(req: Request) {
     // Isolated throwaway agent dir: the spawned omp sees only this candidate
     // config (no stored credentials, no models.db cache) and never touches
     // ~/.omp. Profile/XDG overrides are cleared so the redirect always wins.
-    tempDir = mkdtempSync(join(tmpdir(), "omp-web-model-test-"));
+    tempDir = mkdtempSync(join(tmpdir(), "ompgui-model-test-"));
     writeFileSync(join(tempDir, "models.yml"), serializeModelsConfig(config), "utf8");
 
     const startedAt = Date.now();

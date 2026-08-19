@@ -112,7 +112,8 @@ function saveUnreadSessionIds(ids: Set<string>): void {
   }
 }
 
-const EXPANDED_PROJECTS_STORAGE_KEY = "omp-web:expanded-projects";
+const EXPANDED_PROJECTS_STORAGE_KEY = "ompgui:expanded-projects";
+const LEGACY_EXPANDED_PROJECTS_STORAGE_KEY = "omp-web:expanded-projects";
 
 /** Shared empty set for the no-stored-expansion default (never mutated). */
 const EMPTY_PROJECT_SET: ReadonlySet<string> = new Set();
@@ -122,7 +123,7 @@ const EMPTY_PROJECT_SET: ReadonlySet<string> = new Set();
 function loadExpandedProjects(): Set<string> | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(EXPANDED_PROJECTS_STORAGE_KEY);
+    const raw = window.localStorage.getItem(EXPANDED_PROJECTS_STORAGE_KEY) || window.localStorage.getItem(LEGACY_EXPANDED_PROJECTS_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as unknown;
     if (Array.isArray(parsed)) {

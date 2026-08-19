@@ -304,7 +304,7 @@ export function writeModelsConfig(config: ModelsFileConfig, options: WriteModels
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   // Write-then-rename: a crash mid-write must not leave models.yml truncated,
   // which would disable every custom model until the user repairs it by hand.
-  const temp = join(dir, `.${basename(current.path)}.omp-web-${process.pid}-${Date.now()}.tmp`);
+  const temp = join(dir, `.${basename(current.path)}.ompgui-${process.pid}-${Date.now()}.tmp`);
   try {
     writeFileSync(temp, text, "utf8");
     renameSync(temp, current.path);

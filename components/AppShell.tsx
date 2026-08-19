@@ -37,8 +37,8 @@ const FileViewer = dynamic(() => import("./FileViewer").then((m) => m.FileViewer
 
 // Resizable desktop sidebar: the width is stored on the container as the
 // --sidebar-width CSS variable (globals.css) and persisted between sessions.
-const SIDEBAR_WIDTH_STORAGE_KEY = "omp-web:sidebar-width";
-const TOOL_CALLS_COLLAPSED_STORAGE_KEY = "omp-web:tool-calls-collapsed";
+const SIDEBAR_WIDTH_STORAGE_KEY = "ompgui:sidebar-width";
+const TOOL_CALLS_COLLAPSED_STORAGE_KEY = "ompgui:tool-calls-collapsed";
 const SIDEBAR_MIN_WIDTH = 200;
 const SIDEBAR_MAX_WIDTH = 520;
 const SIDEBAR_DEFAULT_WIDTH = 260;
@@ -757,7 +757,7 @@ export function AppShell() {
   const showPlaceholder = initialSessionRestored && !showChat;
 
   const activeCwdName = activeCwd ? getFileName(activeCwd) || activeCwd : null;
-  const windowTitle = activeCwdName ? `${activeCwdName} - omp web` : "omp web";
+  const windowTitle = activeCwdName ? `${activeCwdName} - ompgui` : "ompgui";
 
   useEffect(() => {
     const syncWindowTitle = () => {

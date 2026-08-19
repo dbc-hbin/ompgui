@@ -22,7 +22,7 @@ function isNodeVersionSupported(version) {
 
 function getUnsupportedNodeVersionMessage(version) {
   return [
-    `ompweb requires Node.js ${MIN_NODE_VERSION} or newer.`,
+    `ompgui requires Node.js ${MIN_NODE_VERSION} or newer.`,
     `Current Node.js version: ${version}.`,
     "Upgrade Node.js and try again: https://nodejs.org/",
   ].join("\n");

@@ -24,7 +24,7 @@ export async function GET(
     });
     if (loadError === "too_large") {
       return NextResponse.json(
-        { error: "Session file is too large to open in omp-web", code: "session_file_too_large" },
+        { error: "Session file is too large to open in ompgui", code: "session_file_too_large" },
         { status: 413 },
       );
     }

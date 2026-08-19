@@ -1,15 +1,15 @@
-# ompweb
+# ompgui
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-Local web UI for the [oh-my-pi (omp) coding agent](https://github.com/can1357/oh-my-pi). ompweb reads your local omp session files and gives you a browser workspace for session browsing, real-time chat, model configuration, skill management, and project file preview.
+Local web UI for the [oh-my-pi (omp) coding agent](https://github.com/can1357/oh-my-pi). ompgui reads your local omp session files and gives you a browser workspace for session browsing, real-time chat, model configuration, skill management, and project file preview.
 
-![ompweb — light theme](docs/screenshot-light.png)
+![ompgui — light theme](docs/screenshot-light.png)
 
 <details>
 <summary>Dark theme</summary>
 
-![ompweb — dark theme](docs/screenshot-dark.png)
+![ompgui — dark theme](docs/screenshot-dark.png)
 
 </details>
 
@@ -30,36 +30,36 @@ npx ompgui@latest
 
 ```bash
 npm install -g ompgui
-ompweb
+ompgui
 ```
 
-Then open [http://127.0.0.1:30177](http://127.0.0.1:30177). The CLI will try to open the browser automatically after the server is ready. ompweb listens on `127.0.0.1` by default.
+Then open [http://127.0.0.1:30177](http://127.0.0.1:30177). The CLI will try to open the browser automatically after the server is ready. ompgui listens on `127.0.0.1` by default.
 
 **Options:**
 
 ```bash
-ompweb --port 8080              # custom port
-ompweb --hostname 0.0.0.0       # expose on a trusted network
-ompweb -p 8080 -H 0.0.0.0       # combine options
-ompweb --no-open                # do not open the browser automatically
-ompweb --password "a-long-random-password" # password-only sign-in without POSIX inline-env syntax
+ompgui --port 8080              # custom port
+ompgui --hostname 0.0.0.0       # expose on a trusted network
+ompgui -p 8080 -H 0.0.0.0       # combine options
+ompgui --no-open                # do not open the browser automatically
+ompgui --password "a-long-random-password" # password-only sign-in without POSIX inline-env syntax
 
-PORT=8080 ompweb                # environment variable is also supported
-OMP_WEB_HOSTNAME=0.0.0.0 ompweb # explicit network exposure
-OMP_WEB_PASSWORD='a-long-random-password' ompweb # env-variable form (POSIX: inline or exported)
-OMP_WEB_NO_OPEN=1 ompweb        # useful when running as a background service
+PORT=8080 ompgui                # environment variable is also supported
+OMP_WEB_HOSTNAME=0.0.0.0 ompgui # explicit network exposure
+OMP_WEB_PASSWORD='a-long-random-password' ompgui # env-variable form (POSIX: inline or exported)
+OMP_WEB_NO_OPEN=1 ompgui        # useful when running as a background service
 
 # Windows (PowerShell / CMD)
-# $env:OMP_WEB_PASSWORD="a-long-random-password"; ompweb
+# $env:OMP_WEB_PASSWORD="a-long-random-password"; ompgui
 # or
-# ompweb --password "a-long-random-password"
+# ompgui --password "a-long-random-password"
 ```
 
-Set `OMP_WEB_PASSWORD` (or pass `--password`) to protect the interface and every API endpoint with a themed, password-only sign-in screen. A successful sign-in creates an HTTP-only signed session cookie for 30 days; changing the configured password invalidates existing sessions. Leaving the variable unset disables authentication. Remote use still requires HTTPS through a trusted reverse proxy or VPN so the password and session cookie cannot be intercepted. On Windows the env-variable syntax is `$env:OMP_WEB_PASSWORD="..."`; `ompweb --password "..."` works in every shell without that extra step.
+Set `OMP_WEB_PASSWORD` (or pass `--password`) to protect the interface and every API endpoint with a themed, password-only sign-in screen. A successful sign-in creates an HTTP-only signed session cookie for 30 days; changing the configured password invalidates existing sessions. Leaving the variable unset disables authentication. Remote use still requires HTTPS through a trusted reverse proxy or VPN so the password and session cookie cannot be intercepted. On Windows the env-variable syntax is `$env:OMP_WEB_PASSWORD="..."`; `ompgui --password "..."` works in every shell without that extra step.
 
 ## Remote & Mobile Access (Tailscale Recommended)
 
-For accessing `ompweb` from mobile devices (iPhone, iPad, Android) or external laptops, **using [Tailscale](https://tailscale.com/) is strongly recommended**. Tailscale creates a private, point-to-point WireGuard mesh VPN between your devices without exposing your host machine to the public internet or requiring port forwarding.
+For accessing `ompgui` from mobile devices (iPhone, iPad, Android) or external laptops, **using [Tailscale](https://tailscale.com/) is strongly recommended**. Tailscale creates a private, point-to-point WireGuard mesh VPN between your devices without exposing your host machine to the public internet or requiring port forwarding.
 
 ### 1. Configure Password (Required for Remote Access)
 
@@ -67,18 +67,18 @@ When binding to external network interfaces, setting a password is required to s
 
 ```bash
 # CLI option: bind to all interfaces with a password
-ompweb -H 0.0.0.0 --password "your-strong-password"
+ompgui -H 0.0.0.0 --password "your-strong-password"
 
 # Or via environment variables
-OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompweb
+OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompgui
 ```
 
 ### 2. Steps to Connect via Tailscale
 
 1. **Install Tailscale**: Download and sign into [Tailscale](https://tailscale.com/download) on both your host machine and your mobile device using the same account.
-2. **Start ompweb on your host machine**:
+2. **Start ompgui on your host machine**:
    ```bash
-   ompweb --hostname 0.0.0.0 --password "your-strong-password"
+   ompgui --hostname 0.0.0.0 --password "your-strong-password"
    ```
 3. **Access from your mobile browser**:
    - Navigate to your host's Tailscale IP (e.g. `100.x.y.z`) or MagicDNS machine name:
@@ -91,10 +91,10 @@ OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompweb
 
 ### Security and troubleshooting
 
-- The server binds to `127.0.0.1` by default. A non-loopback hostname is an explicit opt-in and should only be used behind a trusted network boundary; ompweb is not safe to expose publicly.
+- The server binds to `127.0.0.1` by default. A non-loopback hostname is an explicit opt-in and should only be used behind a trusted network boundary; ompgui is not safe to expose publicly.
 - File APIs are allow-listed to the selected workspace, its valid Git worktrees, session-referenced directories, and explicitly selected roots. Paths are canonicalized to reject traversal and symlink escapes.
 - `omp` is resolved from `OMP_WEB_OMP_BIN` first, then `PATH`. If live chat cannot start, run `omp --version` in the same terminal or set `OMP_WEB_OMP_BIN` to the executable's absolute path.
-- Session history remains native OMP JSONL. OMP owns live-session writes; ompweb reads the files directly and only performs explicit title, archive, and delete maintenance when it is not racing a live OMP write.
+- Session history remains native OMP JSONL. OMP owns live-session writes; ompgui reads the files directly and only performs explicit title, archive, and delete maintenance when it is not racing a live OMP write.
 - Session archive uses OMP's native `archive/sessions/<cwd>/<file>.jsonl.gz` layout and moves sibling artifacts with the transcript; the original JSONL bytes are preserved inside the gzip.
 
 ## Features
@@ -128,7 +128,7 @@ OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompweb
 
 ## Architecture
 
-ompweb is a Node-hosted Next.js app that drives your installed `omp` binary — it does not embed the agent:
+ompgui is a Node-hosted Next.js app that drives your installed `omp` binary — it does not embed the agent:
 
 - **Live sessions**: spawns `omp --mode rpc-ui` (NDJSON over stdio), one child process per active session, so the agent version is always exactly what you have installed. It negotiates RPC v2 when the installed OMP advertises it, uses bounded chunk reassembly for large frames, and falls back to v1 for older versions. Host env (`PORT`, `NEXT_*`, `NODE_ENV`) is stripped before spawn, and shutdown is graceful on both POSIX (process-group) and Windows (`taskkill /t`).
 - **Session browsing**: reads omp's session files (`~/.omp/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`) directly; title, archive, and delete are narrow native-file maintenance operations guarded against live OMP writes. Projects are grouped by a stable `projectKey` (Windows case-folded, symlink-resolved) so the sidebar doesn't jump between drives or worktrees.
@@ -161,7 +161,7 @@ Avoid running `next build` / `npm run build` during local development. It writes
 
 ## Internationalization
 
-ompweb supports English, Simplified Chinese (简体中文), Japanese (日本語), and Korean (한국어) with translated UI strings across all languages. The language is auto-detected from `navigator.language` and can be switched at runtime via the language menu in the top bar. The choice persists across sessions.
+ompgui supports English, Simplified Chinese (简体中文), Japanese (日本語), and Korean (한국어) with translated UI strings across all languages. The language is auto-detected from `navigator.language` and can be switched at runtime via the language menu in the top bar. The choice persists across sessions.
 
 - Dictionaries: `lib/i18n/locales/{en,zh-CN,ja,ko}.json`
 - Framework: `lib/i18n/index.tsx` — a lightweight store built on `useSyncExternalStore` with `{var}` interpolation and plural support (`.one`/`.other`)
@@ -176,7 +176,7 @@ ompweb supports English, Simplified Chinese (简体中文), Japanese (日本語)
 
 ## Credits
 
-ompweb is a fork of [agegr/pi-web](https://github.com/agegr/pi-web) (MIT), the web UI for the [earendil/pi-mono](https://github.com/earendil-works/pi) pi coding agent, adapted for [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi).
+ompgui is a fork of [agegr/pi-web](https://github.com/agegr/pi-web) (MIT), the web UI for the [earendil/pi-mono](https://github.com/earendil-works/pi) pi coding agent, adapted for [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi).
 
 ## License
 

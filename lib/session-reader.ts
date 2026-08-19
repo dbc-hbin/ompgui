@@ -29,7 +29,7 @@ export { getAgentDir };
 
 /**
  * `header.parentSession` has two forms in omp: a session FILE PATH (branch /
- * createBranchedSession, the RPC path omp-web drives) and a bare SESSION ID
+ * createBranchedSession, the RPC path ompgui drives) and a bare SESSION ID
  * (SessionManager.fork, reached from the TUI /fork, `omp --fork` and /tan).
  * Resolve the path form first, then fall back to an id match, so TUI-forked
  * sessions are not rendered as unrelated roots.

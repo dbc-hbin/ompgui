@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 export type ThemePreference = "light" | "dark" | "system";
 type Theme = "light" | "dark";
 
-const STORAGE_KEY = "omp-theme";
+const STORAGE_KEY = "ompgui-theme";
 const listeners = new Set<() => void>();
 
 function subscribe(cb: () => void): () => void {
@@ -16,7 +16,7 @@ function subscribe(cb: () => void): () => void {
 function storedPreference(): ThemePreference {
   if (typeof window === "undefined") return "system";
   try {
-    const value = localStorage.getItem(STORAGE_KEY);
+    const value = localStorage.getItem(STORAGE_KEY) || localStorage.getItem("omp-theme");
     return value === "light" || value === "dark" || value === "system" ? value : "system";
   } catch {
     return "system";

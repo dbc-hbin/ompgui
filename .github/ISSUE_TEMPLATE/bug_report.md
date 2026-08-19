@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Something in omp-web is broken
+about: Something in ompgui is broken
 title: "[Bug] "
 labels: bug
 ---
@@ -24,7 +24,7 @@ If applicable, add screenshots (light/dark theme noted).
 - Node.js version: [`node --version`]
 - omp version: [`omp --version`]
 - Browser: [e.g. Chrome 150]
-- omp-web version: [e.g. 0.1.0]
+- ompgui version: [e.g. 0.1.0]
 
 **Additional context**
 Console errors, server logs, or anything else relevant.

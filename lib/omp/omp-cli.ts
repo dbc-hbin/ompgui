@@ -4,7 +4,7 @@ import { homedir } from "os";
 import { delimiter, join } from "path";
 
 /**
- * Locating and probing the user's installed `omp` CLI. omp-web never embeds
+ * Locating and probing the user's installed `omp` CLI. ompgui never embeds
  * the (Bun-only) @oh-my-pi SDK — every live-agent capability goes through the
  * omp binary, so its absence is a first-class, user-visible state.
  */

@@ -771,7 +771,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setActiveGoal(null);
       return;
     }
-    setActiveGoal(parseActiveGoal(sessionStorage.getItem(`omp-web:goal:${sid}`)));
+    setActiveGoal(parseActiveGoal(sessionStorage.getItem(`ompgui:goal:${sid}`) || sessionStorage.getItem(`omp-web:goal:${sid}`)));
   }, [session?.id]);
 
   // A plan request is in progress only for its current agent turn.
@@ -2706,7 +2706,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             const goal = createActiveGoal(args);
             setActiveGoal(goal);
             const activeSessionId = sessionIdRef.current;
-            if (activeSessionId) sessionStorage.setItem(`omp-web:goal:${activeSessionId}`, JSON.stringify(goal));
+            if (activeSessionId) sessionStorage.setItem(`ompgui:goal:${activeSessionId}`, JSON.stringify(goal));
           }
           return { handled: true };
         }

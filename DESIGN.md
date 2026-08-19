@@ -1,8 +1,8 @@
-# ompweb — Product & Architecture Contract
+# ompgui — Product & Architecture Contract
 
 ## Purpose
 
-ompweb is a local, browser-based workspace for the
+ompgui is a local, browser-based workspace for the
 [oh-my-pi](https://github.com/can1357/oh-my-pi) (`omp`) coding agent. It lets a
 user browse the same local sessions they use in the terminal, continue live
 work, configure supported OMP settings, and inspect project files without
@@ -16,13 +16,13 @@ do not assume that Pi-specific implementation changes can be merged unchanged.
 ## Product principles
 
 1. **OMP remains authoritative.** Sessions, credentials, providers, and agent
-   behavior belong to the installed `omp` CLI. ompweb must not invent a
+   behavior belong to the installed `omp` CLI. ompgui must not invent a
    parallel data format or credential store.
 2. **Local-first by default.** The server binds to `127.0.0.1`; remote access
    is an explicit user choice and must be protected by a trusted network
    boundary and HTTPS.
 3. **Node-first installation.** A normal user installs Node.js 22.19+ and OMP,
-   then runs `npx ompweb@latest` or installs `ompweb` globally. ompweb does not
+   then runs `npx ompgui@latest` or installs `ompgui` globally. ompgui does not
    require users to install Bun for its own runtime.
 4. **Native compatibility over imitation.** Prefer OMP's CLI and documented
    on-disk formats to copied SDK internals. If a capability cannot be done
@@ -34,7 +34,7 @@ do not assume that Pi-specific implementation changes can be merged unchanged.
 
 ## Distribution and identity
 
-- npm package and CLI command: `ompweb`.
+- npm package and CLI command: `ompgui`.
 - Default server address: `http://127.0.0.1:30177`.
 - Existing `OMP_WEB_*` environment variables remain the configuration prefix
   for compatibility: `OMP_WEB_HOSTNAME`, `OMP_WEB_NO_OPEN`,
@@ -50,7 +50,7 @@ do not assume that Pi-specific implementation changes can be merged unchanged.
 Browser
   │ HTTP / Server-Sent Events
   ▼
-ompweb (Next.js on Node)
+ompgui (Next.js on Node)
   ├─ reads native OMP session files and selected configuration
   ├─ serves allow-listed project files
   └─ starts one `omp --mode rpc-ui` child per active session
@@ -78,9 +78,9 @@ v1-capable installations.
 
 - `~/.omp/agent` (or OMP's configured/profiled equivalent) is the source of
   truth for sessions, configuration, models, skills, plugins, and blobs.
-- `agent.db` contains authentication data. ompweb never reads or writes it;
+- `agent.db` contains authentication data. ompgui never reads or writes it;
   authentication actions go through the OMP RPC process.
-- A live OMP process owns writes to its session file. ompweb routes supported
+- A live OMP process owns writes to its session file. ompgui routes supported
   live actions through RPC and never races a live file rewrite.
 
 ### Direct file access
@@ -93,7 +93,7 @@ tree.
 Direct session mutation is deliberately narrow and explicit: rename/title,
 archive, deletion, and required branch-parent maintenance. These writes are
 atomic where possible; archive or deletion stops the associated live process
-first. ompweb does not provide a general editor for session JSONL or opaque OMP
+first. ompgui does not provide a general editor for session JSONL or opaque OMP
 state.
 
 Models and allow-listed OMP settings use surgical YAML updates that preserve
@@ -142,8 +142,8 @@ Releases are independent:
 
 1. Run typecheck, lint, relevant tests, and a production build.
 2. Confirm `npm pack --dry-run` contains the built `.next` output and exposes
-   the `ompweb` binary.
-3. Publish `ompweb@<version>` only from an npm account authorized for that
+   the `ompgui` binary.
+3. Publish `ompgui@<version>` only from an npm account authorized for that
    package.
 4. Tag and release the repository that owns this downstream project.
 

@@ -40,7 +40,7 @@ export function LoginForm() {
           <LockKeyhole size={19} aria-hidden="true" />
         </div>
         <h1 id="login-title" className="display-serif" style={{ margin: 0, fontSize: 28, lineHeight: 1.1, color: "var(--text)" }}>Welcome back</h1>
-        <p style={{ margin: "10px 0 24px", color: "var(--text-muted)", fontSize: 13, lineHeight: 1.5 }}>Enter the password for this omp web workspace.</p>
+        <p style={{ margin: "10px 0 24px", color: "var(--text-muted)", fontSize: 13, lineHeight: 1.5 }}>Enter the password for this ompgui workspace.</p>
         <form onSubmit={signIn} style={{ display: "grid", gap: 14 }}>
           <label htmlFor="web-password" style={{ display: "grid", gap: 6, color: "var(--text-muted)", fontSize: 12, fontWeight: 600 }}>
             Password

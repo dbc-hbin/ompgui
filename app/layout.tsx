@@ -27,12 +27,12 @@ const notoSerifSC = Noto_Serif_SC({
 });
 
 export const metadata: Metadata = {
-  title: "omp web",
+  title: "ompgui",
   description: "Web UI for the oh-my-pi (omp) coding agent",
   // PWA-like behavior on iOS: standalone chrome, no telephone autodetect.
   appleWebApp: {
     capable: true,
-    title: "omp web",
+    title: "ompgui",
     statusBarStyle: "default",
   },
   formatDetection: {
@@ -66,12 +66,12 @@ export default function RootLayout({
             of the wrong theme. Matches html.dark selector in globals.css. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem("omp-theme"),d=matchMedia("(prefers-color-scheme: dark)").matches;if(t==="dark"||(t!=="light"&&t!=="dark"&&d))document.documentElement.classList.add("dark")}catch(e){}})();`,
+            __html: `(function(){try{var t=localStorage.getItem("ompgui-theme")||localStorage.getItem("omp-theme"),d=matchMedia("(prefers-color-scheme: dark)").matches;if(t==="dark"||(t!=="light"&&t!=="dark"&&d))document.documentElement.classList.add("dark")}catch(e){}})();`,
           }}
         />
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var l=localStorage.getItem("omp-lang");if(l!=="en"&&l!=="zh-CN"&&l!=="ja"&&l!=="ko"){var n=(navigator.language||"").toLowerCase();l=n.indexOf("zh")===0?"zh-CN":n.indexOf("ja")===0?"ja":n.indexOf("ko")===0?"ko":"en"}document.documentElement.lang=l}catch(e){}})();`,
+            __html: `(function(){try{var l=localStorage.getItem("ompgui-lang")||localStorage.getItem("omp-lang");if(l!=="en"&&l!=="zh-CN"&&l!=="ja"&&l!=="ko"){var n=(navigator.language||"").toLowerCase();l=n.indexOf("zh")===0?"zh-CN":n.indexOf("ja")===0?"ja":n.indexOf("ko")===0?"ko":"en"}document.documentElement.lang=l}catch(e){}})();`,
           }}
         />
       </head>

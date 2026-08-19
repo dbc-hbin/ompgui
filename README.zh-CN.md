@@ -1,17 +1,17 @@
-# ompweb
+# ompgui
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-[oh-my-pi (omp) 编程智能体](https://github.com/can1357/oh-my-pi)的本地 Web UI。ompweb 读取本机的 omp 会话文件，在浏览器中提供一个工作区，支持会话浏览、实时对话、模型配置、技能管理和项目文件预览。
+[oh-my-pi (omp) 编程智能体](https://github.com/can1357/oh-my-pi)的本地 Web UI。ompgui 读取本机的 omp 会话文件，在浏览器中提供一个工作区，支持会话浏览、实时对话、模型配置、技能管理和项目文件预览。
 
-![ompweb — 浅色主题](docs/screenshot-light.png)
+![ompgui — 浅色主题](docs/screenshot-light.png)
 
 <details>
 <summary>深色主题与命令面板</summary>
 
-![ompweb — 深色主题](docs/screenshot-dark.png)
+![ompgui — 深色主题](docs/screenshot-dark.png)
 
-![ompweb — 命令面板](docs/screenshot-palette.png)
+![ompgui — 命令面板](docs/screenshot-palette.png)
 
 </details>
 
@@ -32,33 +32,33 @@ npx ompgui@latest
 
 ```bash
 npm install -g ompgui
-ompweb
+ompgui
 ```
 
-然后打开 [http://127.0.0.1:30177](http://127.0.0.1:30177)。服务器就绪后，CLI 会尝试自动打开浏览器。ompweb 默认监听 `127.0.0.1`。
+然后打开 [http://127.0.0.1:30177](http://127.0.0.1:30177)。服务器就绪后，CLI 会尝试自动打开浏览器。ompgui 默认监听 `127.0.0.1`。
 
 **选项：**
 
 ```bash
-ompweb --port 8080              # 自定义端口
-ompweb --hostname 0.0.0.0       # 在可信网络中暴露服务
-ompweb -p 8080 -H 0.0.0.0       # 组合使用
-ompweb --no-open                # 不自动打开浏览器
+ompgui --port 8080              # 自定义端口
+ompgui --hostname 0.0.0.0       # 在可信网络中暴露服务
+ompgui -p 8080 -H 0.0.0.0       # 组合使用
+ompgui --no-open                # 不自动打开浏览器
 
-ompweb --password "a-long-random-password" # 启用仅密码登录（Windows 同样适用）
+ompgui --password "a-long-random-password" # 启用仅密码登录（Windows 同样适用）
 
-PORT=8080 ompweb                # 也支持环境变量
-OMP_WEB_HOSTNAME=0.0.0.0 ompweb # 显式暴露到网络
-OMP_WEB_PASSWORD='a-long-random-password' ompweb # 环境变量形式（POSIX）
-# Windows: $env:OMP_WEB_PASSWORD="secret"; ompweb
-OMP_WEB_NO_OPEN=1 ompweb        # 作为后台服务运行时很有用
+PORT=8080 ompgui                # 也支持环境变量
+OMP_WEB_HOSTNAME=0.0.0.0 ompgui # 显式暴露到网络
+OMP_WEB_PASSWORD='a-long-random-password' ompgui # 环境变量形式（POSIX）
+# Windows: $env:OMP_WEB_PASSWORD="secret"; ompgui
+OMP_WEB_NO_OPEN=1 ompgui        # 作为后台服务运行时很有用
 ```
 
-设置 `OMP_WEB_PASSWORD` 可通过与主题集成的仅密码登录页面保护界面和所有 API 端点。登录成功后，会创建有效期为 30 天的 HTTP-only 签名会话 Cookie；留空则关闭认证。远程访问仍需通过受信任反向代理或 VPN 提供 HTTPS，以保护密码和会话 Cookie。默认仅监听 `127.0.0.1`；不要将 ompweb 直接暴露到互联网。
+设置 `OMP_WEB_PASSWORD` 可通过与主题集成的仅密码登录页面保护界面和所有 API 端点。登录成功后，会创建有效期为 30 天的 HTTP-only 签名会话 Cookie；留空则关闭认证。远程访问仍需通过受信任反向代理或 VPN 提供 HTTPS，以保护密码和会话 Cookie。默认仅监听 `127.0.0.1`；不要将 ompgui 直接暴露到互联网。
 
 ## 远程与移动端访问（推荐使用 Tailscale）
 
-从移动设备（iPhone、iPad、Android）或外部笔记本访问 `ompweb` 时，**强烈推荐使用 [Tailscale](https://tailscale.com/) 虚拟专用网（VPN）**。它通过端到端加密的点对点 Mesh 网络连接设备，无需端口转发或暴露公网 IP。
+从移动设备（iPhone、iPad、Android）或外部笔记本访问 `ompgui` 时，**强烈推荐使用 [Tailscale](https://tailscale.com/) 虚拟专用网（VPN）**。它通过端到端加密的点对点 Mesh 网络连接设备，无需端口转发或暴露公网 IP。
 
 ### 1. 配置访问密码（远程访问必备）
 
@@ -66,18 +66,18 @@ OMP_WEB_NO_OPEN=1 ompweb        # 作为后台服务运行时很有用
 
 ```bash
 # CLI 选项：绑定到所有网络接口并设置密码
-ompweb -H 0.0.0.0 --password "your-strong-password"
+ompgui -H 0.0.0.0 --password "your-strong-password"
 
 # 或通过环境变量设置
-OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompweb
+OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompgui
 ```
 
 ### 2. Tailscale 连接步骤
 
 1. **安装 Tailscale**：在宿主电脑和移动设备上安装 [Tailscale](https://tailscale.com/download) 并登录同一账户。
-2. **在宿主电脑上启动 ompweb**：
+2. **在宿主电脑上启动 ompgui**：
    ```bash
-   ompweb --hostname 0.0.0.0 --password "your-strong-password"
+   ompgui --hostname 0.0.0.0 --password "your-strong-password"
    ```
 3. **在移动端浏览器中访问**：
    - 访问宿主电脑的 Tailscale IP（如 `100.x.y.z`）或 MagicDNS 机器名：
@@ -117,7 +117,7 @@ OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompweb
 
 ## 架构
 
-ompweb 是一个由 Node 托管的 Next.js 应用，驱动你已安装的 `omp` 二进制文件——它并不内嵌智能体：
+ompgui 是一个由 Node 托管的 Next.js 应用，驱动你已安装的 `omp` 二进制文件——它并不内嵌智能体：
 
 - **实时会话**：启动 `omp --mode rpc-ui`（基于 stdio 的 NDJSON），每个活动会话对应一个子进程，因此智能体版本始终与你安装的完全一致。
 - **会话浏览**：直接读取 omp 的会话文件（`~/.omp/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`）；标题、归档和删除是受保护的原生文件维护操作，不会与 OMP 的实时写入竞争。
@@ -147,7 +147,7 @@ node --test lib/*.test.mjs components/*.test.mjs   # 运行测试
 
 ## 多语言支持
 
-ompweb 支持英语、简体中文、日本語和韩语（한국어），四种语言均覆盖整个界面的翻译字符串。语言从 `navigator.language` 自动检测，可通过顶栏的语言菜单在运行时切换。选择会跨会话持久化。
+ompgui 支持英语、简体中文、日本語和韩语（한국어），四种语言均覆盖整个界面的翻译字符串。语言从 `navigator.language` 自动检测，可通过顶栏的语言菜单在运行时切换。选择会跨会话持久化。
 
 - 字典文件：`lib/i18n/locales/{en,zh-CN,ja,ko}.json`
 - 框架：`lib/i18n/index.tsx` — 基于 `useSyncExternalStore` 的轻量 store，支持 `{var}` 插值和复数形式（`.one`/`.other`）
@@ -162,7 +162,7 @@ ompweb 支持英语、简体中文、日本語和韩语（한국어），四种�
 
 ## 致谢
 
-ompweb 分叉自 [agegr/pi-web](https://github.com/agegr/pi-web)（MIT）——[badlogic/pi-mono](https://github.com/badlogic/pi-mono) pi 编程智能体的 Web UI，并针对 [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi) 进行了适配。
+ompgui 分叉自 [agegr/pi-web](https://github.com/agegr/pi-web)（MIT）——[badlogic/pi-mono](https://github.com/badlogic/pi-mono) pi 编程智能体的 Web UI，并针对 [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi) 进行了适配。
 
 ## 许可证
 

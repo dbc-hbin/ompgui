@@ -2,8 +2,8 @@
 
 Each release publishes two artifacts:
 
-- npm package: `@kahme247/ompweb`
-- GitHub Release: [kahme247/ompweb](https://github.com/kahme247/ompweb)
+- npm package: `ompgui`
+- GitHub Release: [dbc-hbin/ompgui](https://github.com/dbc-hbin/ompgui)
 
 After the initial bootstrap release, publishing is performed by GitHub Actions
 with npm trusted publishing. No npm access token is stored in this repository
@@ -11,7 +11,7 @@ or in GitHub secrets.
 
 ## Bootstrap the first release
 
-`@kahme247/ompweb` is not registered on npm yet. npm exposes trusted-publisher settings
+`ompgui` is not registered on npm yet. npm exposes trusted-publisher settings
 only for an existing package, so version `0.2.0` must be published once from a
 reviewed local checkout using the authenticated npm account:
 
@@ -30,10 +30,10 @@ version.
 
 ## One-time trusted-publisher setup
 
-1. In npm, open the `@kahme247/ompweb` package settings and add a **GitHub Actions**
+1. In npm, open the `ompgui` package settings and add a **GitHub Actions**
    trusted publisher with:
-   - Owner: `kahme247`
-   - Repository: `ompweb`
+   - Owner: `dbc-hbin`
+   - Repository: `ompgui`
    - Workflow filename: `publish.yml`
    - Environment: `npm`
 2. In GitHub, create the `npm` environment for this repository. Add required
@@ -64,7 +64,7 @@ and creates a `v<version>` tag. Review the generated commit before pushing.
 Pushing the tag starts the `Publish npm package` workflow. It checks out that
 immutable tag, verifies the tag matches `package.json`, installs from the
 lockfile, runs tests and the production build, then creates a draft GitHub
-Release with generated notes. It publishes `ompweb` through the configured
+Release with generated notes. It publishes `ompgui` through the configured
 trusted publisher and makes that release public only after npm accepts the
 package. A rerun can safely finish a release if npm has already accepted its
 version.
@@ -72,9 +72,9 @@ version.
 ## Verify
 
 ```bash
-gh run list --repo kahme247/ompweb --workflow publish.yml --limit 1
-npm view @kahme247/ompweb@<version> version --registry https://registry.npmjs.org/
-npm view @kahme247/ompweb@<version> --json --registry https://registry.npmjs.org/
+gh run list --repo dbc-hbin/ompgui --workflow publish.yml --limit 1
+npm view ompgui@<version> version --registry https://registry.npmjs.org/
+npm view ompgui@<version> --json --registry https://registry.npmjs.org/
 ```
 
 Confirm the workflow succeeded, the exact package version resolves, and npm

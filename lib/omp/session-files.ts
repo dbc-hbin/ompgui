@@ -25,7 +25,7 @@ import { gunzipSync, gzipSync } from "zlib";
 import { isRecord } from "../type-guards";
 
 // Keep user-session directory traversal out of Next's static NFT globbing.
-// These paths are resolved and authorized at request time by omp-web.
+// These paths are resolved and authorized at request time by ompgui.
 const readDirectorySyncRuntime = Reflect.get(fsRuntime, "readdirSync") as typeof readdirSync;
 import type {
   CompactionEntry,
@@ -383,7 +383,7 @@ export interface LoadSessionOptions extends ResolveBlobOptions {
 const SESSION_READ_CHUNK_BYTES = 1024 * 1024;
 
 /**
- * Ceiling on the on-disk size omp-web will materialize into memory. omp streams
+ * Ceiling on the on-disk size ompgui will materialize into memory. omp streams
  * sessions, so this is not an omp limit — it is the point past which parsing a
  * session into JS objects (and serializing it into one HTTP response) would OOM
  * the whole Next.js server. Refusing loudly beats taking the process down.
@@ -930,7 +930,7 @@ export function scanSessionInfo(filePath: string, withStatus = true): OmpSession
 // cache is invalidated after every agent turn/rename/model change, so full
 // rescans are frequent; the memo turns each UNCHANGED file's prefix+suffix
 // window reads into a single stat. (path, size, mtimeMs) covers every session
-// mutation omp-web cares about. Stored on globalThis for hot-reload safety and
+// mutation ompgui cares about. Stored on globalThis for hot-reload safety and
 // LRU-bounded (Map iteration order doubles as recency order).
 interface SessionScanCacheEntry {
   size: number;
@@ -1107,7 +1107,7 @@ export function cleanSessionTitle(raw: string): string {
  * updating the header's title fields.
  *
  * Note: unlike omp's SessionManager.setSessionName this does not append a
- * title_change audit entry — omp-web only needs the display title, and a
+ * title_change audit entry — ompgui only needs the display title, and a
  * bounded 256-byte write cannot corrupt a file a live omp process may hold.
  */
 export function setSessionTitle(filePath: string, title: string, source: SessionTitleSource): boolean {
@@ -1171,7 +1171,7 @@ export function setSessionTitle(filePath: string, title: string, source: Session
  */
 export function writeSessionFileAtomicSync(filePath: string, body: string, tag = "rewrite"): void {
   const dir = path.dirname(filePath);
-  const tempDir = mkdtempSync(path.join(dir, `.omp-web-${tag}-`));
+  const tempDir = mkdtempSync(path.join(dir, `.ompgui-${tag}-`));
   const tempPath = path.join(tempDir, path.basename(filePath));
   try {
     writeFileSync(tempPath, body, "utf8");
@@ -1225,7 +1225,7 @@ export function archiveSessionFileWithArtifacts(filePath: string, roots: Session
   // directory after appending `.gz` to the session file.
   const destinationArtifacts = destination.slice(0, -".gz".length);
   mkdirSync(path.dirname(destination), { recursive: true });
-  const tempDir = mkdtempSync(path.join(path.dirname(destination), ".omp-web-archive-"));
+  const tempDir = mkdtempSync(path.join(path.dirname(destination), ".ompgui-archive-"));
   const tempCompressed = path.join(tempDir, path.basename(destination));
   const tempRestore = path.join(tempDir, path.basename(source));
   let destinationCreated = false;
