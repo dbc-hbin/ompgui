@@ -1,6 +1,6 @@
 # ompweb
 
-[English](./README.md) | [简体中文](./README.zh-CN.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md)
+[English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
 コミュニティ：[OMPWEB Discord に参加](https://discord.gg/evqgGzRfM5)
 
@@ -27,13 +27,13 @@
 **インストールせずに実行:**
 
 ```bash
-npx @kahme247/ompweb@latest
+npx ompweb@latest
 ```
 
 **またはグローバルにインストール:**
 
 ```bash
-npm install -g @kahme247/ompweb
+npm install -g ompweb
 ompweb
 ```
 

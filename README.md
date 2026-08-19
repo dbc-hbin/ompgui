@@ -1,6 +1,6 @@
 # ompweb
 
-[English](./README.md) | [简体中文](./README.zh-CN.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md)
+[English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
 Community: [Join the OMPWEB Discord](https://discord.gg/evqgGzRfM5)
 
@@ -25,13 +25,13 @@ Local web UI for the [oh-my-pi (omp) coding agent](https://github.com/can1357/oh
 **Run without installing:**
 
 ```bash
-npx @kahme247/ompweb@latest
+npx ompweb@latest
 ```
 
 **Or install globally:**
 
 ```bash
-npm install -g @kahme247/ompweb
+npm install -g ompweb
 ompweb
 ```
 

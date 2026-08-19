@@ -1,6 +1,6 @@
 # ompweb
 
-[English](./README.md) | [简体中文](./README.zh-CN.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md)
+[English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
 社区：[加入 OMPWEB Discord](https://discord.gg/evqgGzRfM5)
 
@@ -24,16 +24,16 @@
 
 ## 快速开始
 
-**免安装直接运行：**
+**无需安装直接运行：**
 
 ```bash
-npx @kahme247/ompweb@latest
+npx ompweb@latest
 ```
 
 **或全局安装：**
 
 ```bash
-npm install -g @kahme247/ompweb
+npm install -g ompweb
 ompweb
 ```
 

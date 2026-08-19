@@ -1,6 +1,6 @@
 # ompweb
 
-[English](./README.md) | [简体中文](./README.zh-CN.md) | [日本語](./README.ja.md)
+[English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
 커뮤니티: [OMPWEB Discord 참여하기](https://discord.gg/evqgGzRfM5)
 
@@ -25,13 +25,13 @@
 **설치 없이 실행:**
 
 ```bash
-npx @kahme247/ompweb@latest
+npx ompweb@latest
 ```
 
 **또는 전역 설치:**
 
 ```bash
-npm install -g @kahme247/ompweb
+npm install -g ompweb
 ompweb
 ```
 
