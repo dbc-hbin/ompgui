@@ -710,6 +710,10 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
             {/* SAFETY & APPROVALS TAB */}
             {currentTab === "safety" && (
               <div role="tabpanel" id="settings-panel-safety" aria-labelledby="settings-tab-safety" style={{ padding: isMobile ? "12px 14px" : 20, display: "flex", flexDirection: "column", gap: 16 }}>
+                <div>
+                  <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{t("settingsConfig.safetyTitle")}</h3>
+                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>{t("settingsConfig.safetyDescription")}</p>
+                </div>
                 <NativeSetting label={t("settingsConfig.approvalMode")} description={t("settingsConfig.approvalModeDesc")} scope="Native OMP" compact hideDescription={isMobile}>
                   <select
                     style={nativeSelectStyle}
@@ -721,10 +725,6 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                     <option value="yolo" style={nativeOptionStyle}>{t("settingsConfig.approvalYolo")}</option>
                   </select>
                 </NativeSetting>
-                <div>
-                  <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{t("settingsConfig.safetyTitle")}</h3>
-                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>{t("settingsConfig.safetyDescription")}</p>
-                </div>
                 <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
                   <NativeSetting label={t("settingsConfig.bashApproval")} description={t("settingsConfig.bashApprovalDesc")} scope="Native OMP">
                     <select
