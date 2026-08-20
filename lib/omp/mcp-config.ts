@@ -307,10 +307,10 @@ export function writeMcpServer(cwd: string, name: string, server: McpServer, pre
     // Re-read INSIDE the lock so a concurrent writer's mutation is not lost.
     const locked = readMcpConfig(cwd);
     const servers = { ...(locked.config.mcpServers ?? {}) };
-    if (previousName && previousName !== name) delete servers[previousName];
     // The browser never receives existing credentials. Preserve them when an
     // edited server omits those fields, rather than deleting them on save.
     const existing = servers[previousName ?? name];
+    if (previousName && previousName !== name) delete servers[previousName];
     servers[name] = {
       ...server,
       ...(existing?.env !== undefined && server.env === undefined ? { env: existing.env } : {}),
