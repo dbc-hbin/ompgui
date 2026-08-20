@@ -22,12 +22,13 @@
   --color-tool-bg: var(--tool-bg);
   --color-bg-subtle: var(--bg-subtle);
   --font-mono-font: var(--font-mono);
-  --font-serif-display: var(--font-serif);
+  --font-serif-display: var(--font-sans);
 }
 
 /* Warm-paper palette (light). All text/background pairs verified WCAG AA
    (≥4.5:1 for small text) — measured values noted per token. */
-:root {
+:root,
+html[data-palette="warm"] {
   --bg: #FAF9F6;
   --bg-panel: #F2F0EA;
   --bg-hover: #EAE7DF;
@@ -55,10 +56,24 @@
   --status-renamed: #2563EB;
   --on-accent: #FFFFFF;
   --overlay-backdrop: color-mix(in srgb, var(--text) 24%, transparent);
+  --border-muted: #E2DDD2;
+  --border-accent: #B03E22;
+  --focus-ring-color: #B03E22;
+  --custom-message-bg: #F3EEE6;
+  --tool-pending-bg: #F3F0EA;
+  --tool-success-bg: #EDF3EC;
+  --tool-error-bg: #F7ECE8;
+  --source-project: #B03E22;
+  --source-user: #69635A;
+  --source-extension: #6A6458;
+  --switch-track: #E2DDD2;
+  --switch-thumb: #FFFFFF;
+  --switch-thumb-shadow: 0 1px 2px rgba(60,50,35,0.22);
 }
 
 /* Warm-ember palette (dark). Same AA verification as light. */
-html.dark {
+html.dark:not([data-palette]),
+html[data-palette="warm"].dark {
   --bg: #1B1916;
   --bg-panel: #231F1B;
   --bg-hover: #2B2721;
@@ -87,6 +102,95 @@ html.dark {
   --status-renamed: #7CA8FF;
   --on-accent: #FFFFFF;
   --overlay-backdrop: color-mix(in srgb, var(--text) 24%, transparent);
+  --border-muted: #38322B;
+  --border-accent: #E07B54;
+  --focus-ring-color: #E07B54;
+  --custom-message-bg: #2A252F;
+  --tool-pending-bg: #25242A;
+  --tool-success-bg: #202923;
+  --tool-error-bg: #302221;
+  --source-project: #E07B54;
+  --source-user: #A39B8E;
+  --source-extension: #938C81;
+  --switch-track: #38322B;
+  --switch-thumb: #EBE6DC;
+  --switch-thumb-shadow: 0 1px 2px rgba(0,0,0,0.45);
+}
+
+/* OMP Birch palette (light): warm paper, bark neutrals, and moss accent. */
+html[data-palette="omp"] {
+  --bg: #F9F7F1;
+  --bg-panel: #F1EEE6;
+  --bg-hover: #EBE7DC;
+  --bg-selected: #EDE9DF;
+  --border: #C8C4B8;
+  --text: #3A3832;
+  --text-muted: #68645C;
+  --text-dim: #746F65;
+  --accent: #608058;
+  --accent-strong: #4A603F;
+  --accent-hover: #526F4B;
+  --user-bg: #F2EFE7;
+  --tool-bg: #EEF0ED;
+  --bg-subtle: rgba(58,56,50,0.045);
+  --status-error: #A8463E;
+  --status-success: #4A713F;
+  --status-warning: #876A20;
+  --status-modified: #876A20;
+  --status-renamed: #456F68;
+  --on-accent: #FFFFFF;
+  --overlay-backdrop: color-mix(in srgb, var(--text) 24%, transparent);
+  --border-muted: #D8D3C7;
+  --border-accent: #608058;
+  --focus-ring-color: #608058;
+  --custom-message-bg: #EEF5EC;
+  --tool-pending-bg: #EEF0ED;
+  --tool-success-bg: #ECF2EA;
+  --tool-error-bg: #F5EFED;
+  --source-project: #608058;
+  --source-user: #68645C;
+  --source-extension: #746F65;
+  --switch-track: #C8C4B8;
+  --switch-thumb: #FFFFFF;
+  --switch-thumb-shadow: 0 1px 2px rgba(58,56,50,0.22);
+}
+
+/* OMP Graphite palette (dark): neutral terminal surfaces and amber accent. */
+html[data-palette="omp"].dark {
+  --bg: #18181E;
+  --bg-panel: #1E1E24;
+  --bg-hover: #272A31;
+  --bg-selected: #31363F;
+  --border: #3D424A;
+  --text: #E7E8EA;
+  --text-muted: #A0A4AC;
+  --text-dim: #858B96;
+  --accent: #FEBC38;
+  --accent-strong: #956000;
+  --accent-hover: #FFD06A;
+  --user-bg: #221D1A;
+  --tool-bg: #1D2129;
+  --bg-subtle: rgba(231,232,234,0.05);
+  --status-error: #FF6B78;
+  --status-success: #89D281;
+  --status-warning: #E4C00F;
+  --status-modified: #E4C00F;
+  --status-renamed: #64B5D2;
+  --on-accent: #FFFFFF;
+  --overlay-backdrop: color-mix(in srgb, var(--text) 24%, transparent);
+  --border-muted: #3D424A;
+  --border-accent: #178FB9;
+  --focus-ring-color: #0088FA;
+  --custom-message-bg: #2A2530;
+  --tool-pending-bg: #1D2129;
+  --tool-success-bg: #161A1F;
+  --tool-error-bg: #291D1D;
+  --source-project: #FEBC38;
+  --source-user: #A0A4AC;
+  --source-extension: #858B96;
+  --switch-track: #3D424A;
+  --switch-thumb: #E7E8EA;
+  --switch-thumb-shadow: 0 1px 2px rgba(0,0,0,0.5);
 }
 
 /* Shape / elevation / motion tokens (warm-humanistic system). */
@@ -98,7 +202,7 @@ html.dark {
   --control-height: 32px;
   --control-height-lg: 36px;
   --control-padding-inline: 10px;
-  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--focus-ring-color) 22%, transparent);
   /* Warm diffuse shadows (light); dark theme swaps to ambient glow below. */
   --shadow-card: 0 1px 2px rgba(60,50,35,0.05), 0 2px 8px rgba(60,50,35,0.06);
   --shadow-pop: 0 2px 6px rgba(60,50,35,0.07), 0 8px 24px rgba(60,50,35,0.10);
@@ -108,6 +212,12 @@ html.dark {
   --dur-med: 220ms;
   --dur-slow: 320ms;
   --dur-theme: 450ms;
+  --palette-warm-preview-bg: #FAF9F6;
+  --palette-warm-preview-panel: #F2F0EA;
+  --palette-warm-preview-accent: #B03E22;
+  --palette-omp-preview-bg: #F9F7F1;
+  --palette-omp-preview-panel: #EBE7DC;
+  --palette-omp-preview-accent: #608058;
 }
 html.dark {
   --shadow-card: 0 1px 2px rgba(0,0,0,0.35), 0 0 0 1px rgba(235,225,210,0.03);
@@ -147,7 +257,7 @@ html, body {
   padding: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-sans);
   font-size: 14px;
   overscroll-behavior: none;
 }
@@ -193,21 +303,20 @@ body {
 }
 
 :root {
-  --font-mono: var(--font-noto-mono), 'JetBrains Mono', 'Fira Code', 'Consolas', ui-monospace, 'PingFang SC', 'Microsoft YaHei', monospace;
-  /* Display serif for headings / session titles / modal titles / empty states.
-     Falls back to system serifs if the webfont fails. */
-  --font-serif: var(--font-source-serif), var(--font-noto-serif), Georgia, 'Songti SC', 'SimSun', serif;
+  --font-sans: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: var(--font-noto-mono), 'SFMono-Regular', 'Consolas', var(--font-sans), monospace;
+  --font-serif: var(--font-sans);
 }
 
 pre, code {
   font-family: var(--font-mono);
 }
 
-/* Serif display utility: opt-in via class on headings, titles, empty states. */
+/* Display utility retained for existing call sites; headings now use the UI sans. */
 .display-serif {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-weight: 600;
-  letter-spacing: 0.005em;
+  letter-spacing: -0.012em;
 }
 
 /* react-markdown output styles */
@@ -221,7 +330,7 @@ pre, code {
 .markdown-body p:last-child { margin-bottom: 0; }
 .markdown-body h1, .markdown-body h2, .markdown-body h3,
 .markdown-body h4, .markdown-body h5, .markdown-body h6 {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-weight: 600;
   color: var(--text);
   line-height: 1.35;
@@ -1730,8 +1839,9 @@ html.dark .dropdown-surface :is(select, option) {
     flex-shrink: 0;
   }
   .right-panel-container.right-panel-open {
-    width: 42%;
+    width: var(--right-panel-width);
     min-width: 300px;
+    max-width: calc(100vw - 360px);
   }
   .right-panel-container.right-panel-closed {
     width: 0;
@@ -1740,8 +1850,11 @@ html.dark .dropdown-surface :is(select, option) {
   }
   /* keep inner content at fixed width so it doesn't reflow during animation */
   .right-panel-container > * {
-    width: 42vw;
+    width: var(--right-panel-width);
     min-width: 300px;
+  }
+  .right-panel-container.right-panel-resizing {
+    transition: none;
   }
 }
 
@@ -1749,6 +1862,68 @@ html.dark .dropdown-surface :is(select, option) {
 @media (max-width: 640px) {
   .chat-stats-center {
     display: none !important;
+  }
+  .composer-toolbar {
+    display: grid !important;
+    grid-template-columns: 48px minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 6px !important;
+  }
+  .composer-attachment {
+    order: 1;
+    width: 48px !important;
+    height: 48px !important;
+    border-radius: var(--radius-control) !important;
+    touch-action: manipulation;
+  }
+  .composer-model-control {
+    order: 2;
+    min-width: 0;
+  }
+  .composer-model-button {
+    width: 100%;
+    max-width: none !important;
+    height: 48px !important;
+    padding-inline: 10px !important;
+    border-radius: var(--radius-control) !important;
+    font-size: 13px !important;
+    touch-action: manipulation;
+  }
+  .composer-thinking-control {
+    order: 3;
+  }
+  .composer-thinking-button {
+    height: 48px !important;
+    min-width: 68px;
+    justify-content: center;
+    padding-inline: 10px !important;
+    border-radius: var(--radius-control) !important;
+    font-size: 13px !important;
+    touch-action: manipulation;
+  }
+  .composer-primary-action {
+    order: 4;
+    height: 48px !important;
+    min-width: 74px;
+    justify-content: center;
+    padding-inline: 12px !important;
+    border-radius: var(--radius-control) !important;
+    font-size: 13px !important;
+    touch-action: manipulation;
+  }
+  .composer-fast-toggle {
+    order: 5;
+    grid-column: 1 / span 2;
+    justify-self: start;
+    height: 36px !important;
+  }
+  .composer-toolbar-spacer {
+    display: none;
+  }
+  .composer-context-ring {
+    order: 6;
+    grid-column: 3;
+    justify-self: end;
   }
   .sidebar-container {
     position: fixed !important;
@@ -1794,5 +1969,20 @@ html.dark .dropdown-surface :is(select, option) {
   .directory-picker-footer {
     flex-wrap: wrap;
     padding-bottom: max(10px, env(safe-area-inset-bottom)) !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .composer-primary-action {
+    width: 48px;
+    min-width: 48px;
+    padding-inline: 0 !important;
+  }
+  .composer-primary-label {
+    display: none;
+  }
+  .composer-thinking-button {
+    min-width: 60px;
+    padding-inline: 8px !important;
   }
 }

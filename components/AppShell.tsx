@@ -42,6 +42,10 @@ const TOOL_CALLS_COLLAPSED_STORAGE_KEY = "ompgui:tool-calls-collapsed";
 const SIDEBAR_MIN_WIDTH = 200;
 const SIDEBAR_MAX_WIDTH = 520;
 const SIDEBAR_DEFAULT_WIDTH = 260;
+const RIGHT_PANEL_WIDTH_STORAGE_KEY = "ompgui:right-panel-width";
+const RIGHT_PANEL_MIN_WIDTH = 300;
+const RIGHT_PANEL_MAX_WIDTH = 960;
+const RIGHT_PANEL_DEFAULT_WIDTH = 520;
 
 function clampSidebarWidth(width: number): number {
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
@@ -55,6 +59,26 @@ function loadSidebarWidth(): number {
     return Number.isFinite(width) ? clampSidebarWidth(width) : SIDEBAR_DEFAULT_WIDTH;
   } catch {
     return SIDEBAR_DEFAULT_WIDTH;
+  }
+}
+
+function clampRightPanelWidth(width: number): number {
+  return Math.min(RIGHT_PANEL_MAX_WIDTH, Math.max(RIGHT_PANEL_MIN_WIDTH, Math.round(width)));
+}
+
+function defaultRightPanelWidth(): number {
+  if (typeof window === "undefined") return RIGHT_PANEL_DEFAULT_WIDTH;
+  return clampRightPanelWidth(window.innerWidth * 0.42);
+}
+
+function loadRightPanelWidth(): number {
+  if (typeof window === "undefined") return RIGHT_PANEL_DEFAULT_WIDTH;
+  try {
+    const raw = window.localStorage.getItem(RIGHT_PANEL_WIDTH_STORAGE_KEY);
+    const width = raw ? Number(raw) : NaN;
+    return Number.isFinite(width) ? clampRightPanelWidth(width) : defaultRightPanelWidth();
+  } catch {
+    return defaultRightPanelWidth();
   }
 }
 const SettingsConfig = dynamic(() => import("./SettingsConfig").then((m) => m.SettingsConfig), {
@@ -459,6 +483,88 @@ export function AppShell() {
   const [fileTabs, setFileTabs] = useState<Tab[]>([]);
   const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [rightPanelWidth, setRightPanelWidth] = useState(RIGHT_PANEL_DEFAULT_WIDTH);
+  const [rightPanelResizing, setRightPanelResizing] = useState(false);
+  const rightPanelContainerRef = useRef<HTMLDivElement>(null);
+  const pendingRightPanelWidthRef = useRef(RIGHT_PANEL_DEFAULT_WIDTH);
+  const rightPanelResizeHandlersRef = useRef<{ onMove: (event: PointerEvent) => void; onUp: () => void } | null>(null);
+  const rightPanelWidthMountedRef = useRef(false);
+
+  useEffect(() => {
+    setRightPanelWidth(loadRightPanelWidth());
+  }, []);
+
+  useEffect(() => {
+    if (!rightPanelWidthMountedRef.current) {
+      rightPanelWidthMountedRef.current = true;
+      return;
+    }
+    if (rightPanelResizing) return;
+    try {
+      window.localStorage.setItem(RIGHT_PANEL_WIDTH_STORAGE_KEY, String(rightPanelWidth));
+    } catch {
+      // The resized width still applies for this page load.
+    }
+  }, [rightPanelResizing, rightPanelWidth]);
+
+  const resetRightPanelWidth = useCallback(() => {
+    setRightPanelWidth(defaultRightPanelWidth());
+  }, []);
+
+  const changeRightPanelWidth = useCallback((delta: number) => {
+    setRightPanelWidth((current) => clampRightPanelWidth(current + delta));
+  }, []);
+
+  const handleRightPanelResizeKey = useCallback((event: React.KeyboardEvent) => {
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      changeRightPanelWidth(16);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      changeRightPanelWidth(-16);
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      resetRightPanelWidth();
+    }
+  }, [changeRightPanelWidth, resetRightPanelWidth]);
+
+  const handleRightPanelResizeStart = useCallback((event: React.PointerEvent) => {
+    if (isMobile) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = rightPanelWidth;
+    setRightPanelResizing(true);
+    const onMove = (moveEvent: PointerEvent) => {
+      const next = clampRightPanelWidth(startWidth + (startX - moveEvent.clientX));
+      rightPanelContainerRef.current?.style.setProperty("--right-panel-width", `${next}px`);
+      pendingRightPanelWidthRef.current = next;
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      rightPanelResizeHandlersRef.current = null;
+      setRightPanelResizing(false);
+      setRightPanelWidth(pendingRightPanelWidthRef.current);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    pendingRightPanelWidthRef.current = startWidth;
+    rightPanelResizeHandlersRef.current = { onMove, onUp };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, [isMobile, rightPanelWidth]);
+
+  useEffect(() => () => {
+    const handlers = rightPanelResizeHandlersRef.current;
+    if (!handlers) return;
+    window.removeEventListener("pointermove", handlers.onMove);
+    window.removeEventListener("pointerup", handlers.onUp);
+    rightPanelResizeHandlersRef.current = null;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  }, []);
 
   // Same @mention format as the chat input's @ autocomplete, so the agent's
   // read tool resolves it the same way (it strips the @ prefix).
@@ -1443,14 +1549,47 @@ export function AppShell() {
         </div>
       </main>
 
+      {/* Right panel resize handle — desktop only, on the panel's left edge. */}
+      {!isMobile && rightPanelOpen && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={t("appShell.resizeFilePanel")}
+          aria-valuemin={RIGHT_PANEL_MIN_WIDTH}
+          aria-valuemax={RIGHT_PANEL_MAX_WIDTH}
+          aria-valuenow={rightPanelWidth}
+          tabIndex={0}
+          onPointerDown={handleRightPanelResizeStart}
+          onDoubleClick={resetRightPanelWidth}
+          onKeyDown={handleRightPanelResizeKey}
+          title={t("appShell.resizeFilePanelTitle")}
+          style={{
+            width: 5,
+            flexShrink: 0,
+            marginRight: -5,
+            cursor: "col-resize",
+            background: "transparent",
+            zIndex: 205,
+            outline: "none",
+            transition: "background var(--dur-fast) var(--ease-out-warm)",
+          }}
+          onMouseEnter={(event) => { event.currentTarget.style.background = "color-mix(in srgb, var(--accent) 35%, transparent)"; }}
+          onMouseLeave={(event) => { event.currentTarget.style.background = "transparent"; }}
+          onFocus={(event) => { event.currentTarget.style.background = "color-mix(in srgb, var(--accent) 35%, transparent)"; }}
+          onBlur={(event) => { event.currentTarget.style.background = "transparent"; }}
+        />
+      )}
+
       {/* Right panel: file viewer — always mounted, width animated via CSS */}
       <div
-        className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}`}
+        ref={rightPanelContainerRef}
+        className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}${rightPanelResizing ? " right-panel-resizing" : ""}`}
         style={{
           display: "flex",
           flexDirection: "column",
           borderLeft: "1px solid var(--border)",
           background: "var(--bg)",
+          ...(!isMobile ? { "--right-panel-width": `${rightPanelWidth}px` } : {}),
         }}
       >
         {/* Right panel tab bar */}
