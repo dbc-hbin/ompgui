@@ -59,7 +59,7 @@ function phaseLabel(phase: AgentPhase): string {
   return translate("chatWindow.thinking");
 }
 
-const CHAT_MINIMAP_WIDTH = 36;
+const CHAT_MINIMAP_WIDTH = 20;
 const CHAT_COLUMN_PADDING = 16;
 // Trigger the next history page while the sentinel is still this far below
 // the top edge, so a normal upward scroll seamlessly continues into the newly

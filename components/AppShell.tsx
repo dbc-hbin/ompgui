@@ -11,7 +11,7 @@ import { ChatWindow } from "./ChatWindow";
 import { TabBar, type Tab } from "./TabBar";
 import { BranchNavigator } from "./BranchNavigator";
 import { LanguageSwitcher } from "./LanguageSwitcher";
-import { Check, History, Menu, Moon, PanelLeft, PanelRight, Sun, Terminal, Wand2 } from "lucide-react";
+import { Check, History, Menu, Moon, PanelLeft, Sun, Terminal, Wand2 } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
 import { formatCompactNumber, formatPercent } from "@/lib/format";
 import { translate, useI18n } from "@/lib/i18n";
@@ -1197,7 +1197,8 @@ export function AppShell() {
                   marginLeft: "auto",
                   display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
                   paddingLeft: isMobile ? 0 : 12,
-                  paddingRight: isMobile ? 0 : 12,
+                  // The toggle overlays this corner in the pre-merge layout.
+                  paddingRight: isMobile ? (rightPanelOpen ? 0 : 44) : rightPanelOpen ? 12 : 48,
                   height: "100%",
                   minWidth: isMobile ? 44 : 0,
                   overflow: "hidden",
@@ -1262,33 +1263,6 @@ export function AppShell() {
               </button>
             );
           })()}
-          {!rightPanelOpen && (
-            <button
-              type="button"
-              onClick={() => setRightPanelOpen(true)}
-              title={t("appShell.showFilePanel")}
-              aria-label={t("appShell.showFilePanel")}
-              className="ui-focus-ring"
-              style={{
-                marginLeft: "auto",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: isMobile ? 44 : 36, height: "100%", padding: 0, flexShrink: 0,
-                background: "none", border: "none", borderLeft: "1px solid var(--border)",
-                color: "var(--text-muted)", cursor: "pointer",
-                transition: "color var(--dur-fast) var(--ease-out-warm), background var(--dur-fast) var(--ease-out-warm)",
-              }}
-              onMouseEnter={(event) => {
-                event.currentTarget.style.color = "var(--text)";
-                event.currentTarget.style.background = "var(--bg-hover)";
-              }}
-              onMouseLeave={(event) => {
-                event.currentTarget.style.color = "var(--text-muted)";
-                event.currentTarget.style.background = "none";
-              }}
-            >
-              <PanelRight size={16} strokeWidth={1.8} aria-hidden="true" />
-            </button>
-          )}
           {/* Top panel dropdown — shared, only one active at a time. The
               branch panel renders inside BranchNavigator itself; never mount
               an empty fixed layer for it (it would sit over the top-bar
@@ -1626,24 +1600,6 @@ export function AppShell() {
               onCloseTab={handleCloseFileTab}
             />
           </div>
-          <button
-            type="button"
-            onClick={() => setRightPanelOpen(false)}
-            title={t("appShell.hideFilePanel")}
-            aria-label={t("appShell.hideFilePanel")}
-            className="ui-focus-ring"
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: isMobile ? 44 : 36, height: "100%", padding: 0, flexShrink: 0,
-              background: "none", border: "none", borderLeft: "1px solid var(--border)",
-              color: "var(--text)", cursor: "pointer",
-              transition: "color var(--dur-fast) var(--ease-out-warm), background var(--dur-fast) var(--ease-out-warm)",
-            }}
-            onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
-            onMouseLeave={(event) => { event.currentTarget.style.background = "none"; }}
-          >
-            <PanelRight size={16} strokeWidth={1.8} aria-hidden="true" />
-          </button>
         </div>
 
         {/* Keep open viewers mounted so switching tabs preserves scroll and preview state. */}
@@ -1671,6 +1627,26 @@ export function AppShell() {
         </div>
       </div>
     </div>
+    {/* File panel toggle — pre-merge overlay placement avoids a layout column. */}
+    <button
+      onClick={() => setRightPanelOpen((open) => !open)}
+      title={rightPanelOpen ? t("appShell.hideFilePanel") : t("appShell.showFilePanel")}
+      aria-label={rightPanelOpen ? t("appShell.hideFilePanel") : t("appShell.showFilePanel")}
+      style={{
+        position: "fixed", top: 0, right: 0, zIndex: 300,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        width: isMobile ? 44 : 36, height: isMobile ? 44 : 36, padding: 0,
+        background: "var(--bg-panel)", border: "none", borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
+        color: rightPanelOpen ? "var(--text)" : "var(--text-muted)",
+        cursor: "pointer", transition: "color var(--dur-fast) var(--ease-out-warm)",
+      }}
+      onMouseEnter={(event) => { event.currentTarget.style.color = "var(--text)"; }}
+      onMouseLeave={(event) => { event.currentTarget.style.color = rightPanelOpen ? "var(--text)" : "var(--text-muted)"; }}
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
+      </svg>
+    </button>
     {settingsTab && <SettingsConfig activeTab={settingsTab} advisorEnabled={advisorEnabled} onAdvisorChange={handleAdvisorChange} toolCallsDefaultCollapsed={toolCallsDefaultCollapsed} onToolCallsDefaultCollapsedChange={handleToolCallsDefaultCollapsedChange} cwd={activeCwd ?? selectedSession?.cwd ?? newSessionCwd} sessionId={selectedSession?.id ?? null} onModelsSaved={() => setModelsRefreshKey((k) => k + 1)} onPluginsReloaded={() => setSessionKey((k) => k + 1)} onOmpUpdateAvailabilityChange={setOmpUpdateAvailable} onSelectTab={setSettingsTab} onClose={() => setSettingsTab(null)} />}
     {usageOpen && <UsageConfig onClose={() => setUsageOpen(false)} />}
     </ToastProvider>

@@ -9,7 +9,7 @@ interface Props {
   messageRefs: RefObject<(HTMLDivElement | null)[]>;
 }
 
-const MINIMAP_WIDTH = 36;
+const MINIMAP_WIDTH = 20;
 
 function getMessagePreview(msg: AgentMessage | Partial<AgentMessage>): string {
   if (msg.role === "user") {
@@ -350,13 +350,12 @@ export const ChatMinimap = memo(function ChatMinimap({ messages, scrollContainer
       <div
         style={{
           position: "absolute",
-          left: 0,
-          right: 0,
+          right: 3,
+          width: 3,
           top: `${viewportBoxTop}%`,
           height: `${viewportBoxHeight}%`,
-          background: "color-mix(in srgb, var(--text-dim) 10%, transparent)",
-          borderTop: "1px solid color-mix(in srgb, var(--text-dim) 20%, transparent)",
-          borderBottom: "1px solid color-mix(in srgb, var(--text-dim) 20%, transparent)",
+          background: "color-mix(in srgb, var(--text-dim) 32%, transparent)",
+          borderRadius: 2,
           pointerEvents: "none",
           zIndex: 1,
         }}
@@ -382,7 +381,8 @@ export const ChatMinimap = memo(function ChatMinimap({ messages, scrollContainer
               height: "12px",
               display: "flex",
               alignItems: "center",
-              justifyContent: "center",
+              justifyContent: "flex-end",
+              paddingRight: 1,
               cursor: "pointer",
               zIndex: 2,
             }}
@@ -410,12 +410,11 @@ export const ChatMinimap = memo(function ChatMinimap({ messages, scrollContainer
       <div
         style={{
           position: "absolute",
-          left: "50%",
+          right: 4,
           top: 0,
           bottom: 0,
           width: 1,
-          background: "var(--border)",
-          transform: "translateX(-50%)",
+          background: "color-mix(in srgb, var(--border) 72%, transparent)",
           zIndex: 0,
         }}
       />
