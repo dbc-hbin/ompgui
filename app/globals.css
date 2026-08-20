@@ -247,14 +247,13 @@ html.dark {
 html {
   /* Respect prefers-reduced-motion via the media query at the bottom. */
   scroll-behavior: smooth;
-  /* Reserve a gutter so appearing/disappearing scrollbars don't shift layout. */
-  scrollbar-gutter: stable;
 }
 
 html, body {
   height: 100%;
   margin: 0;
   padding: 0;
+  overflow: hidden;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
