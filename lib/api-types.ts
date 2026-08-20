@@ -89,3 +89,116 @@ export interface PluginsResponse {
   totals: PluginResourceCounts;
   diagnostics: PluginDiagnostic[];
 }
+
+// mirrored from oh-my-pi packages/ai/src/usage.ts + coding-agent usage-cli
+
+export type UsageUnit =
+  | "percent"
+  | "tokens"
+  | "requests"
+  | "usd"
+  | "minutes"
+  | "bytes"
+  | "unknown";
+
+export type UsageStatus = "ok" | "warning" | "exhausted" | "unknown";
+
+export interface UsageWindow {
+  id: string;
+  label: string;
+  durationMs?: number;
+  resetsAt?: number;
+  resetLabel?: string;
+}
+
+export interface UsageAmount {
+  used?: number;
+  limit?: number;
+  remaining?: number;
+  usedFraction?: number;
+  remainingFraction?: number;
+  unit: UsageUnit;
+}
+
+export interface UsageScope {
+  provider: string;
+  accountId?: string;
+  projectId?: string;
+  orgId?: string;
+  modelId?: string;
+  tier?: string;
+  windowId?: string;
+  shared?: boolean;
+}
+
+export interface UsageLimit {
+  id: string;
+  label: string;
+  scope: UsageScope;
+  window?: UsageWindow;
+  amount: UsageAmount;
+  status?: UsageStatus;
+  notes?: string[];
+}
+
+export interface UsageResetCreditDetail {
+  grantedAt?: string;
+  expiresAt?: string;
+  status?: string;
+}
+
+export interface UsageResetCredits {
+  availableCount: number;
+  credits?: UsageResetCreditDetail[];
+}
+
+export interface UsageReport {
+  provider: string;
+  fetchedAt: number;
+  limits: UsageLimit[];
+  resetCredits?: UsageResetCredits;
+  notes?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface UsageAccountIdentity {
+  provider: string;
+  type: "api_key" | "oauth";
+  email?: string;
+  accountId?: string;
+  projectId?: string;
+  enterpriseUrl?: string;
+  orgId?: string;
+  orgName?: string;
+  authorizedAt?: number;
+}
+
+export interface DisabledCredentialSummary {
+  id: number;
+  provider: string;
+  type: "api_key" | "oauth" | string;
+  email?: string;
+  accountId?: string;
+  orgId?: string;
+  orgName?: string;
+  cause: string;
+  disabledAtMs?: number;
+}
+
+export interface ProviderWindowStat {
+  window: string;
+  durationMs?: number;
+  accounts: number;
+  usedAccounts: number;
+  remainingAccounts: number;
+}
+
+export interface UsageResponse {
+  generatedAt: number;
+  reports: UsageReport[];
+  accountsWithoutUsage: UsageAccountIdentity[];
+  disabledCredentials: DisabledCredentialSummary[];
+  capacity: Record<string, ProviderWindowStat[]>;
+  cached: boolean;
+  emptyReason?: "no-credentials" | "no-usage-endpoint";
+}

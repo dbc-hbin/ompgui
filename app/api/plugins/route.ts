@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { execFile } from "child_process";
 import { existsSync, promises as fs } from "fs";
 import { basename, extname, join } from "path";
-import { resolveOmpBin } from "@/lib/omp/omp-cli";
+import { parseOmpJsonStdout, runOmpCli } from "@/lib/omp/omp-cli";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 import type {
   PluginDiagnostic,
@@ -60,54 +59,10 @@ interface OmpPluginList {
   marketplace?: OmpMarketplacePlugin[];
 }
 
-const ANSI_RE = /\x1B\[[0-9;]*m/g;
-
 function emptyCounts(): PluginResourceCounts {
   return { extensions: 0, skills: 0, prompts: 0, themes: 0 };
 }
 
-function runOmp(
-  args: string[],
-  opts: { cwd?: string; timeout?: number } = {},
-): Promise<{ stdout: string; stderr: string }> {
-  const bin = resolveOmpBin();
-  if (!bin) {
-    return Promise.reject(new Error("omp binary not found. Install oh-my-pi or set OMP_WEB_OMP_BIN."));
-  }
-  return new Promise((resolve, reject) => {
-    execFile(
-      bin,
-      args,
-      {
-        cwd: opts.cwd,
-        timeout: opts.timeout ?? 60_000,
-        maxBuffer: 16 * 1024 * 1024,
-        env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
-        windowsHide: true,
-      },
-      (error, stdout, stderr) => {
-        if (error) {
-          const detail = (stderr || stdout || error.message).replace(ANSI_RE, "").trim();
-          reject(new Error(detail.slice(-600) || `omp ${args.join(" ")} failed`));
-        } else {
-          resolve({ stdout, stderr });
-        }
-      },
-    );
-  });
-}
-
-/** Parse `--json` stdout, tolerating stray non-JSON lines before the payload. */
-function parseJsonLoose<T>(stdout: string): T | null {
-  const cleaned = stdout.replace(ANSI_RE, "");
-  const start = cleaned.search(/[{[]/);
-  if (start < 0) return null;
-  try {
-    return JSON.parse(cleaned.slice(start)) as T;
-  } catch {
-    return null;
-  }
-}
 
 /** Best-effort scan of a plugin's skills/ directory (omp discovers plugin-root
  * skills the same way) so the UI can show a resource count. */
@@ -220,8 +175,8 @@ async function readPlugins(cwd: string): Promise<PluginsResponse> {
   const totals = emptyCounts();
 
   try {
-    const { stdout } = await runOmp(["plugin", "list", "--json"], { cwd, timeout: 60_000 });
-    const list = parseJsonLoose<OmpPluginList>(stdout);
+    const { stdout } = await runOmpCli(["plugin", "list", "--json"], { cwd, timeout: 60_000 });
+    const list = parseOmpJsonStdout<OmpPluginList>(stdout);
     if (!list) {
       diagnostics.push({
         type: "error",
@@ -310,15 +265,15 @@ export async function POST(req: Request) {
 
     if (body.action === "install") {
       if (!source) return NextResponse.json({ error: "source required", code: "source_required" }, { status: 400 });
-      await runOmp(["plugin", "install", source, "--json", ...scopeArgs], { cwd: body.cwd, timeout: 300_000 });
+      await runOmpCli(["plugin", "install", source, "--json", ...scopeArgs], { cwd: body.cwd, timeout: 300_000 });
     } else if (body.action === "remove") {
       if (!source) return NextResponse.json({ error: "source required", code: "source_required" }, { status: 400 });
-      await runOmp(["plugin", "uninstall", source, "--json", ...scopeArgs], { cwd: body.cwd, timeout: 120_000 });
+      await runOmpCli(["plugin", "uninstall", source, "--json", ...scopeArgs], { cwd: body.cwd, timeout: 120_000 });
     } else if (body.action === "update") {
-      await runOmp(["plugin", "upgrade", ...(source ? [source, ...scopeArgs] : [])], { cwd: body.cwd, timeout: 300_000 });
+      await runOmpCli(["plugin", "upgrade", ...(source ? [source, ...scopeArgs] : [])], { cwd: body.cwd, timeout: 300_000 });
     } else if (body.action === "disable" || body.action === "enable") {
       if (!source) return NextResponse.json({ error: "source required", code: "source_required" }, { status: 400 });
-      await runOmp(["plugin", body.action, source, "--json", ...scopeArgs], { cwd: body.cwd, timeout: 60_000 });
+      await runOmpCli(["plugin", body.action, source, "--json", ...scopeArgs], { cwd: body.cwd, timeout: 60_000 });
     } else {
       return NextResponse.json({ error: `Unsupported action: ${body.action}`, code: "plugin_unsupported_action" }, { status: 400 });
     }

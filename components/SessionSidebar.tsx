@@ -13,7 +13,7 @@ import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { clearLastOpenSession, setLastOpenSession, workspaceKeyOf } from "@/lib/workspace-memory";
 import { groupSessionsByProject, projectActivityCounts, sortManagedProjects } from "@/lib/project-ordering";
 import { comparableProjectPath } from "@/lib/comparable-path";
-import { Check, ChevronDown, ChevronRight, FileUp, Folder, GitBranch, MoreHorizontal, Plus, RefreshCw, Search, Settings2, SlidersHorizontal, Trash2, Upload } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, FileUp, Folder, Gauge, GitBranch, MoreHorizontal, Plus, RefreshCw, Search, Settings2, SlidersHorizontal, Trash2, Upload } from "lucide-react";
 
 declare global {
   interface Window {
@@ -45,6 +45,8 @@ interface Props {
   onAtMentions?: (relativePaths: string[]) => void;
   /** Opens the app settings (pinned sidebar footer row). */
   onOpenSettings?: () => void;
+  /** Opens the usage / quota viewer modal. */
+  onOpenUsage?: () => void;
   /** True when an omp/ompweb update is available — shows a badge on the gear. */
   updateAvailable?: boolean;
 }
@@ -544,7 +546,7 @@ function OmpGuiTitle() {
     </button>
   );
 }
-export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, explorerRefreshing, onExplorerRefreshDone, onAtMention, onAtMentions, onOpenSettings, updateAvailable }: Props) {
+export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, explorerRefreshing, onExplorerRefreshDone, onAtMention, onAtMentions, onOpenSettings, onOpenUsage, updateAvailable }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1800,21 +1802,22 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
         </div>
       )}
 
-      {/* Pinned footer: Settings */}
-      <div style={{ borderTop: "1px solid var(--border)", flexShrink: 0 }}>
+      {/* Pinned footer: Settings & Usage */}
+      <div style={{ borderTop: "1px solid var(--border)", flexShrink: 0, display: "flex" }}>
         <button
           className="sidebar-settings-row"
           onClick={onOpenSettings}
           title={t("settingsConfig.title")}
           aria-label={t("settingsConfig.title")}
           style={{
-            width: "100%",
+            flex: 1,
+            minWidth: 0,
             height: 36,
             boxSizing: "border-box",
             display: "flex",
             alignItems: "center",
-            gap: 9,
-            padding: "0 12px",
+            gap: 8,
+            padding: "0 10px",
             background: "none",
             border: "none",
             color: "var(--text-muted)",
@@ -1837,6 +1840,39 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
           </span>
           <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 500 }}>
             {t("settingsConfig.title")}
+          </span>
+          <ChevronRight size={13} strokeWidth={2} style={{ flexShrink: 0, color: "var(--text-dim)" }} aria-hidden="true" />
+        </button>
+        <span style={{ width: 1, background: "var(--border)", alignSelf: "stretch" }} aria-hidden="true" />
+        <button
+          className="sidebar-settings-row"
+          onClick={onOpenUsage}
+          title={t("usageConfig.title")}
+          aria-label={t("usageConfig.title")}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            height: 36,
+            boxSizing: "border-box",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "0 10px",
+            background: "none",
+            border: "none",
+            color: "var(--text-muted)",
+            cursor: "pointer",
+            textAlign: "left",
+            transition: SIDEBAR_BUTTON_TRANSITION,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-muted)"; }}
+        >
+          <span style={{ position: "relative", display: "inline-flex", flexShrink: 0, color: "var(--accent)" }}>
+            <Gauge size={14} strokeWidth={2} aria-hidden="true" />
+          </span>
+          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 500 }}>
+            {t("usageConfig.title")}
           </span>
           <ChevronRight size={13} strokeWidth={2} style={{ flexShrink: 0, color: "var(--text-dim)" }} aria-hidden="true" />
         </button>

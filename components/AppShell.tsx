@@ -61,6 +61,10 @@ const SettingsConfig = dynamic(() => import("./SettingsConfig").then((m) => m.Se
   ssr: false,
   loading: () => <ModalLoadingFallback />,
 });
+const UsageConfig = dynamic(() => import("./UsageConfig").then((m) => m.UsageConfig), {
+  ssr: false,
+  loading: () => <ModalLoadingFallback />,
+});
 const CommandPalette = dynamic(() => import("./CommandPalette").then((m) => m.CommandPalette), {
   ssr: false,
 });
@@ -110,6 +114,7 @@ export function AppShell() {
   const [explorerRefreshKey, setExplorerRefreshKey] = useState(0);
   const [explorerRefreshing, setExplorerRefreshing] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null);
+  const [usageOpen, setUsageOpen] = useState(false);
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [advisorEnabled, setAdvisorEnabled] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -797,6 +802,7 @@ export function AppShell() {
         onAtMention={handleAtMention}
         onAtMentions={handleAtMentions}
         onOpenSettings={() => setSettingsTab("general")}
+        onOpenUsage={() => setUsageOpen(true)}
         updateAvailable={appUpdateAvailable || ompUpdateAvailable}
       />
     </>
@@ -1506,6 +1512,7 @@ export function AppShell() {
       </svg>
     </button>
     {settingsTab && <SettingsConfig activeTab={settingsTab} advisorEnabled={advisorEnabled} onAdvisorChange={handleAdvisorChange} toolCallsDefaultCollapsed={toolCallsDefaultCollapsed} onToolCallsDefaultCollapsedChange={handleToolCallsDefaultCollapsedChange} cwd={activeCwd ?? selectedSession?.cwd ?? newSessionCwd} sessionId={selectedSession?.id ?? null} onModelsSaved={() => setModelsRefreshKey((k) => k + 1)} onPluginsReloaded={() => setSessionKey((k) => k + 1)} onOmpUpdateAvailabilityChange={setOmpUpdateAvailable} onSelectTab={setSettingsTab} onClose={() => setSettingsTab(null)} />}
+    {usageOpen && <UsageConfig onClose={() => setUsageOpen(false)} />}
     </ToastProvider>
     </>
   );

@@ -15,6 +15,7 @@ let cachedVersion: string | null = null;
 let versionMissAt = 0;
 
 const BIN_NAME = process.platform === "win32" ? "omp.exe" : "omp";
+const ANSI_RE = /\x1B\[[0-9;]*m/g;
 // Only successes are cached for the process lifetime. omp may be installed (or
 // PATH repaired) while the server runs; a permanently cached "not found" would
 // keep the UI reporting a missing binary until restart.
@@ -96,4 +97,53 @@ export async function getOmpVersion(): Promise<string | null> {
   }
   versionMissAt = Date.now();
   return null;
+}
+
+/** Run `omp <args>` and return stdout+stderr with colors disabled. Shared by
+ * plugins, updates, and usage so the exec surface (timeout, maxBuffer, env)
+ * stays identical. Rejects with a trimmed ANSI-free detail on failure. */
+export function runOmpCli(
+  args: string[],
+  opts: { cwd?: string; timeout?: number; maxBuffer?: number } = {},
+): Promise<{ stdout: string; stderr: string }> {
+  const bin = resolveOmpBin();
+  if (!bin) {
+    return Promise.reject(new Error("omp binary not found. Install oh-my-pi or set OMP_WEB_OMP_BIN."));
+  }
+  const { promise, resolve, reject } = Promise.withResolvers<{
+    stdout: string;
+    stderr: string;
+  }>();
+  execFile(
+    bin,
+    args,
+    {
+      cwd: opts.cwd,
+      timeout: opts.timeout ?? 60_000,
+      maxBuffer: opts.maxBuffer ?? 16 * 1024 * 1024,
+      env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
+      windowsHide: true,
+    },
+    (error, stdout, stderr) => {
+      if (error) {
+        const detail = (stderr || stdout || error.message).replace(ANSI_RE, "").trim();
+        reject(new Error(detail.slice(-600) || `omp ${args.join(" ")} failed`));
+      } else {
+        resolve({ stdout, stderr });
+      }
+    },
+  );
+  return promise;
+}
+
+/** Parse `--json` stdout, tolerating stray non-JSON lines before the payload. */
+export function parseOmpJsonStdout<T>(stdout: string): T | null {
+  const cleaned = stdout.replace(ANSI_RE, "");
+  const start = cleaned.search(/[{[]/);
+  if (start < 0) return null;
+  try {
+    return JSON.parse(cleaned.slice(start)) as T;
+  } catch {
+    return null;
+  }
 }
