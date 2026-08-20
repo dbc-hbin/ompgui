@@ -31,8 +31,8 @@ export async function PUT(req: Request, { params }: Ctx) {
   try {
     const { name } = await params; const body = await parseJsonWithinLimit<Record<string, unknown>>(req, MAX_AGENT_REQUEST_BYTES);
     if (!body || (body.scope !== "user" && body.scope !== "project")) return apiErrorResponse("Invalid agent input", 400);
-    const filePath = await updateAgent({ ...body, name });
-    const agent = (await discoverAgents(body.cwd)).agents.find((a: AgentDefinition) => a.filePath === filePath);
+    const filePath = await updateAgent({ ...body, name } as Parameters<typeof updateAgent>[0]);
+    const agent = (await discoverAgents(typeof body.cwd === "string" ? body.cwd : undefined)).agents.find((a: AgentDefinition) => a.filePath === filePath);
     return NextResponse.json({ success: true, agent });
   } catch (error) { return apiErrorResponse(error, statusFor(error)); }
 }
