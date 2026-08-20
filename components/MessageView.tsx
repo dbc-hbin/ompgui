@@ -1219,6 +1219,8 @@ function getResultDiff(result: ToolResultMessage): ResultDiff | null {
 function isEditToolName(toolName: string): boolean {
   const name = toolName.toLowerCase();
   return name === "edit" ||
+    name === "apply_patch" ||
+    name.includes("apply_patch") ||
     name.startsWith("edit_") ||
     name.endsWith(".edit") ||
     name.endsWith("_edit") ||
@@ -1585,6 +1587,12 @@ function getToolPreview(block: ToolCallContent): string {
   if ("file_path" in input) return String(input.file_path).slice(0, 120);
   if ("pattern" in input) return String(input.pattern).slice(0, 120);
   if ("query" in input) return String(input.query).slice(0, 120);
+  if ("input" in input && typeof input.input === "string") {
+    const patchHeader = input.input.match(/\*\*\*\s*(?:Update|Add|Delete)\s*File:\s*([^\r\n]+)/i);
+    if (patchHeader) return patchHeader[1].trim();
+    const diffHeader = input.input.match(/--- (?:a\/)?([^\r\n]+)/);
+    if (diffHeader) return diffHeader[1].trim();
+  }
 
   const first = input[keys[0]];
   return String(first).slice(0, 120);
