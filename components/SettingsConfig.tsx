@@ -39,6 +39,7 @@ type NativeSettings = {
   mnemopi?: { scoping?: "global" | "per-project" | "per-project-tagged"; autoRecall?: boolean; autoRetain?: boolean; noEmbeddings?: boolean };
   mcp?: { enableProjectConfig?: boolean; renderMarkdownResults?: boolean; notifications?: boolean; notificationDebounceMs?: number };
   retry?: { enabled?: boolean; maxRetries?: number; modelFallback?: boolean };
+  task?: { eager?: "default" | "preferred" | "always" };
 };
 
 const nativeSelectStyle = {
@@ -677,7 +678,29 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
             )}
 
             {currentTab === "agents" && (
-              <AgentsConfig cwd={cwd ?? undefined} onSaved={onModelsSaved} isMobile={isMobile} />
+              <div
+                role="tabpanel"
+                id="settings-panel-agents"
+                aria-labelledby="settings-tab-agents"
+                style={{ padding: isMobile ? "12px 14px" : 20, display: "flex", flexDirection: "column", gap: 16, minHeight: 0 }}
+              >
+                <NativeSetting
+                  label={t("settingsConfig.preferTaskDelegation")}
+                  description={t("settingsConfig.preferTaskDelegationDesc")}
+                  scope="Native OMP"
+                >
+                  <select
+                    style={nativeSelectStyle}
+                    value={nativeSettings?.task?.eager ?? "default"}
+                    onChange={(event) => patchSection("task", { eager: event.target.value as NonNullable<NativeSettings["task"]>["eager"] })}
+                  >
+                    <option value="default" style={nativeOptionStyle}>{t("settingsConfig.delegationDefault")}</option>
+                    <option value="preferred" style={nativeOptionStyle}>{t("settingsConfig.delegationPreferred")}</option>
+                    <option value="always" style={nativeOptionStyle}>{t("settingsConfig.delegationAlways")}</option>
+                  </select>
+                </NativeSetting>
+                <AgentsConfig cwd={cwd ?? undefined} onSaved={onModelsSaved} isMobile={isMobile} embedded />
+              </div>
             )}
 
             {/* SAFETY & APPROVALS TAB */}
