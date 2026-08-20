@@ -426,6 +426,9 @@ export async function unpackBundledAgents(params: {
 
     const content = serializeAgentMarkdown({
       name,
+      model: def.model,
+      thinkingLevel: def.thinkingLevel,
+      spawns: def.spawns,
       description: def.description || "",
       tools: def.tools,
       systemPrompt: def.systemPrompt || "",

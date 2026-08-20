@@ -203,7 +203,11 @@ export function writeNativeSettings(settings: NativeSettings): void {
     "task.prewalk": settings.task?.prewalk,
   })) assertOptionalBoolean(value, name);
   for (const [name, value] of Object.entries(settings.task?.agentModelOverrides ?? {})) {
-    if (typeof value !== "string" && !stringArray(value)) throw new Error(`task.agentModelOverrides.${name} must be a string or string array`);
+    if (typeof value === "string") {
+      if (!value.trim()) throw new Error(`task.agentModelOverrides.${name} must be a non-empty string`);
+    } else if (stringArray(value)) {
+      if (value.some((v) => !v.trim())) throw new Error(`task.agentModelOverrides.${name} must contain non-empty strings`);
+    } else throw new Error(`task.agentModelOverrides.${name} must be a string or string array`);
   }
   for (const [mapName, map] of [["agentPrewalk", settings.task?.agentPrewalk], ["agentAdvisor", settings.task?.agentAdvisor]] as const) {
     for (const [name, value] of Object.entries(map ?? {})) if (typeof value !== "boolean" && typeof value !== "string") throw new Error(`task.${mapName}.${name} must be a boolean or string`);
