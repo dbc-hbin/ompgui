@@ -76,8 +76,8 @@ export function setLocale(locale: Locale): void {
 }
 
 /** Translate outside React (toasts, error helpers). Falls back key → en → key. */
-export function translate(key: string, vars?: Record<string, string | number>): string {
-  const locale = getLocale();
+export function translate(key: string, vars?: Record<string, string | number>, forcedLocale?: Locale): string {
+  const locale = forcedLocale ?? getLocale();
   const template = dictionaries[locale][key] ?? dictionaries.en[key] ?? key;
   if (!vars) return template;
   return template.replace(/\{(\w+)\}/g, (match, name: string) =>
@@ -92,8 +92,9 @@ export function translatePlural(
   key: string,
   count: number,
   vars?: Record<string, string | number>,
+  forcedLocale?: Locale,
 ): string {
-  return translate(`${key}.${count === 1 ? "one" : "other"}`, { count, ...vars });
+  return translate(`${key}.${count === 1 ? "one" : "other"}`, { count, ...vars }, forcedLocale);
 }
 
 function subscribe(cb: () => void): () => void {
@@ -123,17 +124,13 @@ export function useI18n() {
   const locale = useSyncExternalStore(subscribe, getClientSnapshot, getServerSnapshot);
 
   const t = useCallback(
-    (key: string, vars?: Record<string, string | number>) => translate(key, vars),
-    // translate() reads module state that only changes with `locale`; depending
-    // on it keeps memoized consumers re-translating on switch.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    (key: string, vars?: Record<string, string | number>) => translate(key, vars, locale),
     [locale],
   );
 
   const tn = useCallback(
     (key: string, count: number, vars?: Record<string, string | number>) =>
-      translatePlural(key, count, vars),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      translatePlural(key, count, vars, locale),
     [locale],
   );
 

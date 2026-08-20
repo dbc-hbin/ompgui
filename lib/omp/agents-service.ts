@@ -3,7 +3,7 @@ import path from "path";
 import { parseDocument, stringify } from "yaml";
 import { getAgentDir } from "./paths";
 import { readNativeSettings } from "./settings-config";
-import { getAllowedFileRoots, isExistingFilePathAllowed } from "../file-access";
+import { getAllowedFileRoots, isExistingFilePathAllowed, isFilePathAllowed } from "../file-access";
 
 export type AgentSource = "bundled" | "user" | "project" | "extension";
 
@@ -275,16 +275,29 @@ async function resolveTargetFilePath(params: {
       throw new Error(`Access denied to project path: ${cwd}`);
     }
     const projectAgents = findProjectAgentsDir(cwd);
-    if (!projectAgents) {
-      // Create .omp/agents in resolved cwd
-      dir = path.join(path.resolve(cwd), ".omp", "agents");
+    dir = projectAgents || path.join(path.resolve(cwd), ".omp", "agents");
+
+    if (existsSync(dir)) {
+      const realDir = await fs.realpath(dir);
+      if (!isExistingFilePathAllowed(realDir, roots)) {
+        throw new Error(`Access denied to project agents directory: ${dir}`);
+      }
+      dir = realDir;
     } else {
-      dir = projectAgents;
+      if (!isFilePathAllowed(dir, roots)) {
+        throw new Error(`Access denied to project agents directory: ${dir}`);
+      }
     }
   }
 
   await fs.mkdir(dir, { recursive: true });
-  return path.join(dir, `${params.name}.md`);
+  const targetPath = path.join(dir, `${params.name}.md`);
+  if (params.scope === "project" && existsSync(targetPath)) {
+    const realTarget = await fs.realpath(targetPath);
+    const roots = await getAllowedFileRoots();
+    if (!isExistingFilePathAllowed(realTarget, roots)) throw new Error(`Access denied to target agent file: ${targetPath}`);
+  }
+  return targetPath;
 }
 
 function serializeAgentMarkdown(params: {
@@ -413,6 +426,15 @@ export async function unpackBundledAgents(params: {
     }
     const projectAgents = findProjectAgentsDir(cwd);
     targetDir = projectAgents || path.join(path.resolve(cwd), ".omp", "agents");
+    if (existsSync(targetDir)) {
+      const realDir = await fs.realpath(targetDir);
+      if (!isExistingFilePathAllowed(realDir, roots)) {
+        throw new Error(`Access denied to project agents directory: ${targetDir}`);
+      }
+      targetDir = realDir;
+    } else if (!isFilePathAllowed(targetDir, roots)) {
+      throw new Error(`Access denied to project agents directory: ${targetDir}`);
+    }
   }
 
   await fs.mkdir(targetDir, { recursive: true });
