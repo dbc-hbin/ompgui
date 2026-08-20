@@ -1197,12 +1197,10 @@ export function AppShell() {
                   marginLeft: "auto",
                   display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
                   paddingLeft: isMobile ? 0 : 12,
-                  // Reserve the corner only while a file-panel toggle exists.
-                  // With no open files, leaving this padding produced a blank
-                  // block in the top-right corner.
-                  paddingRight: fileTabs.length > 0
-                    ? (isMobile ? (rightPanelOpen ? 0 : 44) : rightPanelOpen ? 12 : 48)
-                    : (isMobile ? 0 : 12),
+                  // Reserve the corner for the always-visible file-panel
+                  // toggle: on mobile it is 44px wide and would otherwise
+                  // cover the session-stats button entirely.
+                  paddingRight: isMobile ? (rightPanelOpen ? 0 : 44) : rightPanelOpen ? 12 : 48,
                   height: "100%",
                   minWidth: isMobile ? 44 : 0,
                   overflow: "hidden",
@@ -1632,9 +1630,8 @@ export function AppShell() {
         </div>
       </div>
     </div>
-    {/* The file panel opens automatically with a file. Avoid an empty panel
-        toggle before any file exists. */}
-    {fileTabs.length > 0 && <button
+    {/* File panel toggle — always visible at top-right */}
+    <button
       onClick={() => setRightPanelOpen((v) => !v)}
       title={rightPanelOpen ? t("appShell.hideFilePanel") : t("appShell.showFilePanel")}
       aria-label={rightPanelOpen ? t("appShell.hideFilePanel") : t("appShell.showFilePanel")}
@@ -1652,7 +1649,7 @@ export function AppShell() {
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
       </svg>
-    </button>}
+    </button>
     {settingsTab && <SettingsConfig activeTab={settingsTab} advisorEnabled={advisorEnabled} onAdvisorChange={handleAdvisorChange} toolCallsDefaultCollapsed={toolCallsDefaultCollapsed} onToolCallsDefaultCollapsedChange={handleToolCallsDefaultCollapsedChange} cwd={activeCwd ?? selectedSession?.cwd ?? newSessionCwd} sessionId={selectedSession?.id ?? null} onModelsSaved={() => setModelsRefreshKey((k) => k + 1)} onPluginsReloaded={() => setSessionKey((k) => k + 1)} onOmpUpdateAvailabilityChange={setOmpUpdateAvailable} onSelectTab={setSettingsTab} onClose={() => setSettingsTab(null)} />}
     {usageOpen && <UsageConfig onClose={() => setUsageOpen(false)} />}
     </ToastProvider>

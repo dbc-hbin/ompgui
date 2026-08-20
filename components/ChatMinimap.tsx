@@ -334,13 +334,15 @@ export const ChatMinimap = memo(function ChatMinimap({ messages, scrollContainer
       onMouseLeave={() => { setMinimapHovered(false); setMouseYRatio(null); }}
       onMouseMove={handleMinimapMouseMove}
       style={{
+        position: "absolute",
+        top: 0,
+        right: 0,
+        bottom: 0,
         width: MINIMAP_WIDTH,
-        flexShrink: 0,
-        position: "relative",
+        zIndex: 20,
         cursor: "default",
         userSelect: "none",
-        borderLeft: "1px solid var(--border)",
-        background: "var(--bg-panel)",
+        background: "transparent",
         overflow: "visible",
       }}
     >
