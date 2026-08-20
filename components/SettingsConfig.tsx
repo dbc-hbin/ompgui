@@ -220,7 +220,7 @@ function ToggleSwitch({ checked, onChange, disabled }: { checked: boolean; onCha
   );
 }
 
-function NativeSetting({ label, description, scope, children }: { label: string; description: string; scope?: "UI" | "Native OMP" | "Workspace"; children: ReactNode }) {
+function NativeSetting({ label, description, scope, compact = false, hideDescription = false, children }: { label: string; description: string; scope?: "UI" | "Native OMP" | "Workspace"; compact?: boolean; hideDescription?: boolean; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const highlightId = useContext(SettingsHighlightContext);
   const highlighted = highlightId !== null && highlightId === slugify(label);
@@ -237,13 +237,13 @@ function NativeSetting({ label, description, scope, children }: { label: string;
       data-search-id={slugify(label)}
       style={{
         minWidth: 0,
-        padding: "12px 14px",
+        padding: compact ? "8px 10px" : "12px 14px",
         border: "1px solid var(--border)",
         borderRadius: "var(--radius-card)",
         background: "var(--bg-panel)",
         display: "flex",
         flexDirection: "column",
-        gap: 8,
+        gap: compact ? 4 : 8,
         transition: "box-shadow var(--dur-fast), border-color var(--dur-fast)",
         ...(highlighted ? { borderColor: "var(--accent)", boxShadow: "0 0 0 2px var(--accent)" } : {}),
       }}
@@ -259,7 +259,9 @@ function NativeSetting({ label, description, scope, children }: { label: string;
         </div>
         <span style={{ flexShrink: 0 }}>{children}</span>
       </div>
-      <span style={{ color: "var(--text-muted)", fontSize: 11, lineHeight: 1.45 }}>{description}</span>
+      {!hideDescription && (
+        <span style={{ color: "var(--text-muted)", fontSize: compact ? 10.5 : 11, lineHeight: compact ? 1.3 : 1.45 }}>{description}</span>
+      )}
     </div>
   );
 }
@@ -688,6 +690,8 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                   label={t("settingsConfig.preferTaskDelegation")}
                   description={t("settingsConfig.preferTaskDelegationDesc")}
                   scope="Native OMP"
+                  compact
+                  hideDescription={isMobile}
                 >
                   <select
                     style={nativeSelectStyle}
