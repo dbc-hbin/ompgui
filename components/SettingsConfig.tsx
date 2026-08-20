@@ -3,12 +3,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getSubmitDuringRunBehavior, setSubmitDuringRunBehavior, type SubmitDuringRunBehavior } from "@/lib/composer-prefs";
 import dynamic from "next/dynamic";
-import { Copy, ExternalLink, RefreshCw, RotateCcw, Sparkles, Search, AlertCircle } from "lucide-react";
+import { Copy, ExternalLink, RefreshCw, RotateCcw, Sparkles, Search, AlertCircle, Monitor, Moon, Sun } from "lucide-react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/primitives";
 import { SettingsTabs, type SettingsTab, SETTINGS_CATEGORIES, getNormalizedActive } from "./SettingsTabs";
 import { useI18n } from "@/lib/i18n";
 import { copyText } from "@/lib/clipboard";
+import { useTheme } from "@/hooks/useTheme";
 
 const SettingsTabLoading = () => <div role="status" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 12 }}>Loading settings…</div>;
 const ModelsConfig = dynamic(() => import("./ModelsConfig").then((module) => module.ModelsConfig), { loading: SettingsTabLoading });
@@ -38,6 +39,7 @@ type NativeSettings = {
   mnemopi?: { scoping?: "global" | "per-project" | "per-project-tagged"; autoRecall?: boolean; autoRetain?: boolean; noEmbeddings?: boolean };
   mcp?: { enableProjectConfig?: boolean; renderMarkdownResults?: boolean; notifications?: boolean; notificationDebounceMs?: number };
   retry?: { enabled?: boolean; maxRetries?: number; modelFallback?: boolean };
+  task?: { eager?: "default" | "preferred" | "always" };
 };
 
 const nativeSelectStyle = {
@@ -49,12 +51,6 @@ const nativeSelectStyle = {
   color: "var(--text)",
   fontSize: 12,
   cursor: "pointer",
-  appearance: "none" as const,
-  WebkitAppearance: "none" as const,
-  MozAppearance: "none" as const,
-  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
-  backgroundRepeat: "no-repeat" as const,
-  backgroundPosition: "right 8px center" as const,
   outline: "none",
   colorScheme: "dark light",
 } as const;
@@ -101,6 +97,9 @@ type SettingIndexEntry = {
 // panels below. Search matches against this index and jumps via slugify(label),
 // so keep labels/descriptions in sync when editing the settings UI.
 const SETTING_INDEX: SettingIndexEntry[] = [
+  // Appearance
+  { tab: "general", section: "Appearance", label: "Color mode", description: "Choose between light, dark, or system color mode.", scope: "UI" },
+  { tab: "general", section: "Appearance", label: "Theme palette", description: "Select warm paper/ember or canonical OMP birch/graphite palette.", scope: "UI" },
   // Interface & Behavior
   { tab: "general", section: "Interface & Behavior", label: "Keep tool calls collapsed", description: "Show only compact headers while tools execute.", scope: "UI" },
   { tab: "general", section: "Interface & Behavior", label: "Completion sound", description: "Play a tone when the agent completes a run.", scope: "UI" },
@@ -211,17 +210,17 @@ function ToggleSwitch({ checked, onChange, disabled }: { checked: boolean; onCha
           width: 16,
           height: 16,
           borderRadius: 8,
-          background: "#fff",
+          background: "var(--on-accent)",
           transform: checked ? "translateX(16px)" : "translateX(0px)",
           transition: "transform var(--dur-fast)",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+          boxShadow: "var(--shadow-card)",
         }}
       />
     </button>
   );
 }
 
-function NativeSetting({ label, description, scope, children }: { label: string; description: string; scope?: "UI" | "Native OMP" | "Workspace"; children: ReactNode }) {
+function NativeSetting({ label, description, scope, compact = false, hideDescription = false, children }: { label: string; description: string; scope?: "UI" | "Native OMP" | "Workspace"; compact?: boolean; hideDescription?: boolean; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const highlightId = useContext(SettingsHighlightContext);
   const highlighted = highlightId !== null && highlightId === slugify(label);
@@ -238,18 +237,18 @@ function NativeSetting({ label, description, scope, children }: { label: string;
       data-search-id={slugify(label)}
       style={{
         minWidth: 0,
-        padding: "12px 14px",
+        padding: compact ? "8px 10px" : "12px 14px",
         border: "1px solid var(--border)",
         borderRadius: "var(--radius-card)",
         background: "var(--bg-panel)",
         display: "flex",
         flexDirection: "column",
-        gap: 8,
+        gap: compact ? 4 : 8,
         transition: "box-shadow var(--dur-fast), border-color var(--dur-fast)",
         ...(highlighted ? { borderColor: "var(--accent)", boxShadow: "0 0 0 2px var(--accent)" } : {}),
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>{label}</span>
           {scope && (
@@ -260,7 +259,9 @@ function NativeSetting({ label, description, scope, children }: { label: string;
         </div>
         <span style={{ flexShrink: 0 }}>{children}</span>
       </div>
-      <span style={{ color: "var(--text-muted)", fontSize: 11, lineHeight: 1.45 }}>{description}</span>
+      {!hideDescription && (
+        <span style={{ color: "var(--text-muted)", fontSize: compact ? 10.5 : 11, lineHeight: compact ? 1.3 : 1.45 }}>{description}</span>
+      )}
     </div>
   );
 }
@@ -281,6 +282,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
 }) {
   const isMobile = useIsMobile();
   const { t } = useI18n();
+  const { preference, setTheme, palette, setPalette } = useTheme();
   const workspaceReady = cwd !== null;
   const [searchQuery, setSearchQuery] = useState("");
   const [highlightId, setHighlightId] = useState<string | null>(null);
@@ -522,6 +524,130 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                   <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>{t("settingsConfig.generalDescription")}</p>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+                  <NativeSetting label={t("settingsConfig.themeMode")} description={t("settingsConfig.themeModeDesc")} scope="UI">
+                    <div
+                      role="radiogroup"
+                      aria-label={t("settingsConfig.themeMode")}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 2,
+                        padding: 2,
+                        background: "var(--bg)",
+                        border: "1px solid var(--border)",
+                        borderRadius: "var(--radius-control)",
+                      }}
+                    >
+                      {(["system", "light", "dark"] as const).map((mode) => {
+                        const selected = preference === mode;
+                        const label = mode === "system"
+                          ? t("settingsConfig.themeModeSystem")
+                          : mode === "light"
+                          ? t("settingsConfig.themeModeLight")
+                          : t("settingsConfig.themeModeDark");
+                        const Icon = mode === "system" ? Monitor : mode === "light" ? Sun : Moon;
+                        return (
+                          <button
+                            key={mode}
+                            type="button"
+                            className="ui-focus-ring"
+                            role="radio"
+                            aria-checked={selected}
+                            onClick={() => setTheme(mode)}
+                            title={label}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 4,
+                              height: 24,
+                              padding: "0 8px",
+                              border: "none",
+                              borderRadius: "calc(var(--radius-control) - 2px)",
+                              background: selected ? "var(--bg-selected)" : "transparent",
+                              color: selected ? "var(--text)" : "var(--text-muted)",
+                              fontWeight: selected ? 600 : 500,
+                              fontSize: 11,
+                              cursor: "pointer",
+                              transition: "background var(--dur-fast), color var(--dur-fast)",
+                              outline: "none",
+                            }}
+                          >
+                            <Icon size={12} aria-hidden="true" style={{ color: selected ? "var(--accent)" : "currentColor", flexShrink: 0 }} />
+                            <span>{label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </NativeSetting>
+                  <NativeSetting label={t("settingsConfig.themePalette")} description={t("settingsConfig.themePaletteDesc")} scope="UI">
+                    <div
+                      role="radiogroup"
+                      aria-label={t("settingsConfig.themePalette")}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 2,
+                        padding: 2,
+                        background: "var(--bg)",
+                        border: "1px solid var(--border)",
+                        borderRadius: "var(--radius-control)",
+                      }}
+                    >
+                      {(["warm", "omp"] as const).map((pal) => {
+                        const selected = palette === pal;
+                        const label = pal === "warm"
+                          ? t("settingsConfig.paletteWarm")
+                          : t("settingsConfig.paletteOmp");
+                        return (
+                          <button
+                            key={pal}
+                            type="button"
+                            className="ui-focus-ring"
+                            role="radio"
+                            aria-checked={selected}
+                            onClick={() => setPalette(pal)}
+                            title={label}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 5,
+                              height: 24,
+                              padding: "0 8px",
+                              border: "none",
+                              borderRadius: "calc(var(--radius-control) - 2px)",
+                              background: selected ? "var(--bg-selected)" : "transparent",
+                              color: selected ? "var(--text)" : "var(--text-muted)",
+                              fontWeight: selected ? 600 : 500,
+                              fontSize: 11,
+                              cursor: "pointer",
+                              transition: "background var(--dur-fast), color var(--dur-fast)",
+                              outline: "none",
+                            }}
+                          >
+                            <span
+                              aria-hidden="true"
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 2.5,
+                                padding: "2px 3px",
+                                borderRadius: 3,
+                                background: "var(--bg-subtle)",
+                                flexShrink: 0,
+                              }}
+                            >
+                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: `var(--palette-${pal}-preview-bg)`, border: "1px solid var(--border)", flexShrink: 0 }} />
+                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: `var(--palette-${pal}-preview-panel)`, border: "1px solid var(--border)", flexShrink: 0 }} />
+                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: `var(--palette-${pal}-preview-accent)`, flexShrink: 0 }} />
+                            </span>
+                            <span>{label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </NativeSetting>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
                   <NativeSetting label={t("settingsConfig.toolCallsCollapsed")} description={t("settingsConfig.toolCallsCollapsedDesc")} scope="UI">
                     <ToggleSwitch checked={toolCallsDefaultCollapsed} onChange={onToolCallsDefaultCollapsedChange} />
                   </NativeSetting>
@@ -554,28 +680,52 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
             )}
 
             {currentTab === "agents" && (
-              <AgentsConfig cwd={cwd ?? undefined} onSaved={onModelsSaved} isMobile={isMobile} />
+              <div
+                role="tabpanel"
+                id="settings-panel-agents"
+                aria-labelledby="settings-tab-agents"
+                style={{ padding: isMobile ? "12px 14px" : 20, display: "flex", flexDirection: "column", gap: 16, minHeight: 0 }}
+              >
+                <NativeSetting
+                  label={t("settingsConfig.preferTaskDelegation")}
+                  description={t("settingsConfig.preferTaskDelegationDesc")}
+                  scope="Native OMP"
+                  compact
+                  hideDescription={isMobile}
+                >
+                  <select
+                    style={nativeSelectStyle}
+                    value={nativeSettings?.task?.eager ?? "default"}
+                    onChange={(event) => patchSection("task", { eager: event.target.value as NonNullable<NativeSettings["task"]>["eager"] })}
+                  >
+                    <option value="default" style={nativeOptionStyle}>{t("settingsConfig.delegationDefault")}</option>
+                    <option value="preferred" style={nativeOptionStyle}>{t("settingsConfig.delegationPreferred")}</option>
+                    <option value="always" style={nativeOptionStyle}>{t("settingsConfig.delegationAlways")}</option>
+                  </select>
+                </NativeSetting>
+                <AgentsConfig cwd={cwd ?? undefined} onSaved={onModelsSaved} isMobile={isMobile} embedded />
+              </div>
             )}
 
             {/* SAFETY & APPROVALS TAB */}
             {currentTab === "safety" && (
-              <div role="tabpanel" id="settings-panel-safety" aria-labelledby="settings-tab-safety" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+              <div role="tabpanel" id="settings-panel-safety" aria-labelledby="settings-tab-safety" style={{ padding: isMobile ? "12px 14px" : 20, display: "flex", flexDirection: "column", gap: 16 }}>
                 <div>
                   <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{t("settingsConfig.safetyTitle")}</h3>
                   <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>{t("settingsConfig.safetyDescription")}</p>
                 </div>
+                <NativeSetting label={t("settingsConfig.approvalMode")} description={t("settingsConfig.approvalModeDesc")} scope="Native OMP" compact hideDescription={isMobile}>
+                  <select
+                    style={nativeSelectStyle}
+                    value={nativeSettings?.tools?.approvalMode ?? "yolo"}
+                    onChange={(event) => patchSection("tools", { approvalMode: event.target.value as "always-ask" | "write" | "yolo" })}
+                  >
+                    <option value="always-ask" style={nativeOptionStyle}>{t("settingsConfig.approvalAlwaysAsk")}</option>
+                    <option value="write" style={nativeOptionStyle}>{t("settingsConfig.approvalWrite")}</option>
+                    <option value="yolo" style={nativeOptionStyle}>{t("settingsConfig.approvalYolo")}</option>
+                  </select>
+                </NativeSetting>
                 <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                  <NativeSetting label={t("settingsConfig.approvalMode")} description={t("settingsConfig.approvalModeDesc")} scope="Native OMP">
-                    <select
-                      style={nativeSelectStyle}
-                      value={nativeSettings?.tools?.approvalMode ?? "yolo"}
-                      onChange={(event) => patchSection("tools", { approvalMode: event.target.value as "always-ask" | "write" | "yolo" })}
-                    >
-                      <option value="always-ask" style={nativeOptionStyle}>{t("settingsConfig.approvalAlwaysAsk")}</option>
-                      <option value="write" style={nativeOptionStyle}>{t("settingsConfig.approvalWrite")}</option>
-                      <option value="yolo" style={nativeOptionStyle}>{t("settingsConfig.approvalYolo")}</option>
-                    </select>
-                  </NativeSetting>
                   <NativeSetting label={t("settingsConfig.bashApproval")} description={t("settingsConfig.bashApprovalDesc")} scope="Native OMP">
                     <select
                       style={nativeSelectStyle}

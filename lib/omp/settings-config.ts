@@ -28,7 +28,7 @@ export type NativeSettings = {
   autolearn?: { enabled?: boolean; autoContinue?: boolean; minToolCalls?: number };
   mnemopi?: { scoping?: "global" | "per-project" | "per-project-tagged"; autoRecall?: boolean; autoRetain?: boolean; noEmbeddings?: boolean };
   mcp?: { enableProjectConfig?: boolean; renderMarkdownResults?: boolean; notifications?: boolean; notificationDebounceMs?: number };
-  task?: { prewalk?: boolean; agentModelOverrides?: Record<string, string | string[]>; agentPrewalk?: Record<string, boolean | string>; agentAdvisor?: Record<string, boolean | string>; disabledAgents?: string[] };
+  task?: { eager?: "default" | "preferred" | "always"; prewalk?: boolean; agentModelOverrides?: Record<string, string | string[]>; agentPrewalk?: Record<string, boolean | string>; agentAdvisor?: Record<string, boolean | string>; disabledAgents?: string[] };
 };
 
 const THINKING_LEVELS = new Set(["auto", "minimal", "low", "medium", "high", "xhigh", "max"]);
@@ -41,6 +41,7 @@ const FALLBACK_REVERT_POLICIES = new Set(["cooldown-expiry", "never"]);
 const COMPACTION_STRATEGIES = new Set(["snapcompact", "handoff", "context-full", "shake", "off"]);
 const MEMORY_BACKENDS = new Set(["off", "local", "mnemopi", "hindsight"]);
 const MEMORY_SCOPES = new Set(["global", "per-project", "per-project-tagged"]);
+const TASK_EAGER_VALUES = new Set(["default", "preferred", "always"]);
 
 function configPath(): string {
   return getSettingsPath();
@@ -158,6 +159,7 @@ export function readNativeSettings(): { path: string; settings: NativeSettings }
         ...(typeof mcp.notificationDebounceMs === "number" && Number.isInteger(mcp.notificationDebounceMs) ? { notificationDebounceMs: mcp.notificationDebounceMs } : {}),
       } } : {}),
       ...(Object.keys(task).length ? { task: {
+        ...(TASK_EAGER_VALUES.has(task.eager as string) ? { eager: task.eager as "default" | "preferred" | "always" } : {}),
         ...(typeof task.prewalk === "boolean" ? { prewalk: task.prewalk } : {}),
         ...(stringMap(task.agentModelOverrides) ? { agentModelOverrides: stringMap(task.agentModelOverrides) } : {}),
         ...(booleanStringMap(task.agentPrewalk) ? { agentPrewalk: booleanStringMap(task.agentPrewalk) } : {}),
@@ -213,6 +215,7 @@ export function writeNativeSettings(settings: NativeSettings): void {
     for (const [name, value] of Object.entries(map ?? {})) if (typeof value !== "boolean" && typeof value !== "string") throw new Error(`task.${mapName}.${name} must be a boolean or string`);
   }
   if (settings.task?.disabledAgents !== undefined && (!stringArray(settings.task.disabledAgents) || settings.task.disabledAgents.some((v) => !v.trim()))) throw new Error("task.disabledAgents must contain non-empty strings");
+  if (settings.task?.eager !== undefined && !TASK_EAGER_VALUES.has(settings.task.eager)) throw new Error("Invalid task eager preference");
   if (settings.defaultThinkingLevel !== undefined && !THINKING_LEVELS.has(settings.defaultThinkingLevel)) throw new Error("Invalid default thinking level");
   if (settings.textVerbosity !== undefined && !TEXT_VERBOSITIES.has(settings.textVerbosity)) throw new Error("Invalid text verbosity");
   if (settings.personality !== undefined && !PERSONALITIES.has(settings.personality)) throw new Error("Invalid personality");
@@ -264,6 +267,7 @@ export function writeNativeSettings(settings: NativeSettings): void {
   for (const [key, value] of Object.entries(settings.autolearn ?? {})) doc.setIn(["autolearn", key], value);
   for (const [key, value] of Object.entries(settings.mnemopi ?? {})) doc.setIn(["mnemopi", key], value);
   for (const [key, value] of Object.entries(settings.mcp ?? {})) doc.setIn(["mcp", key], value);
+  if (settings.task?.eager !== undefined) doc.setIn(["task", "eager"], settings.task.eager);
   if (settings.task?.prewalk !== undefined) doc.setIn(["task", "prewalk"], settings.task.prewalk);
   if (settings.task?.agentModelOverrides !== undefined) doc.setIn(["task", "agentModelOverrides"], settings.task.agentModelOverrides);
   if (settings.task?.agentPrewalk !== undefined) doc.setIn(["task", "agentPrewalk"], settings.task.agentPrewalk);

@@ -480,7 +480,7 @@ function PackageDetail({
                 fontSize: 10,
                 padding: "1px 5px",
                 borderRadius: 3,
-                background: "rgba(120,120,120,0.12)",
+                background: "var(--bg-subtle)",
                 color: "var(--text-dim)",
               }}
             >

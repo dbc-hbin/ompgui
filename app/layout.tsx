@@ -1,28 +1,11 @@
 import type { Metadata, Viewport } from "next";
-import { Noto_Sans_Mono, Noto_Serif_SC, Source_Serif_4 } from "next/font/google";
+import { Noto_Sans_Mono } from "next/font/google";
+import "pretendard/dist/web/variable/pretendardvariable.css";
 import "./globals.css";
 
 const notoSansMono = Noto_Sans_Mono({
   subsets: ["latin", "cyrillic"],
   variable: "--font-noto-mono",
-  display: "swap",
-});
-
-// Display serif pair for the warm-humanistic heading voice: Source Serif 4
-// covers latin, Noto Serif SC covers CJK. Both expose CSS variables consumed
-// by --font-serif in globals.css.
-const sourceSerif = Source_Serif_4({
-  subsets: ["latin"],
-  variable: "--font-source-serif",
-  display: "swap",
-});
-
-const notoSerifSC = Noto_Serif_SC({
-  // CJK glyphs are served via unicode-range slices regardless of subset;
-  // "latin" satisfies next/font's preloading requirement.
-  subsets: ["latin"],
-  weight: ["600", "700"],
-  variable: "--font-noto-serif",
   display: "swap",
 });
 
@@ -59,14 +42,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" translate="no" className={`${notoSansMono.variable} ${sourceSerif.variable} ${notoSerifSC.variable} notranslate`} suppressHydrationWarning>
+    <html lang="en" translate="no" className={`${notoSansMono.variable} notranslate`} suppressHydrationWarning>
       <head>
         <meta name="google" content="notranslate" />
         {/* Pre-hydration: apply stored theme before first paint to avoid a flash
             of the wrong theme. Matches html.dark selector in globals.css. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem("ompgui-theme")||localStorage.getItem("omp-theme"),d=matchMedia("(prefers-color-scheme: dark)").matches;if(t==="dark"||(t!=="light"&&t!=="dark"&&d))document.documentElement.classList.add("dark")}catch(e){}})();`,
+            __html: `(function(){try{var r=document.documentElement,t=localStorage.getItem("ompgui-theme")||localStorage.getItem("omp-theme"),p=localStorage.getItem("ompgui-palette"),d=matchMedia("(prefers-color-scheme: dark)").matches;r.dataset.palette=p==="omp"?"omp":"warm";if(t==="dark"||(t!=="light"&&t!=="dark"&&d))r.classList.add("dark")}catch(e){document.documentElement.dataset.palette="warm"}})();`,
           }}
         />
         <script

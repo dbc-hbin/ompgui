@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 export type ThemePreference = "light" | "dark" | "system";
+export type ThemePalette = "warm" | "omp";
 type Theme = "light" | "dark";
 
 const STORAGE_KEY = "ompgui-theme";
+const PALETTE_STORAGE_KEY = "ompgui-palette";
 const listeners = new Set<() => void>();
 
 function subscribe(cb: () => void): () => void {
@@ -20,6 +22,19 @@ function storedPreference(): ThemePreference {
     return value === "light" || value === "dark" || value === "system" ? value : "system";
   } catch {
     return "system";
+  }
+}
+
+export function normalizeThemePalette(value: string | null | undefined): ThemePalette {
+  return value === "omp" ? "omp" : "warm";
+}
+
+function storedPalette(): ThemePalette {
+  if (typeof window === "undefined") return "warm";
+  try {
+    return normalizeThemePalette(localStorage.getItem(PALETTE_STORAGE_KEY));
+  } catch {
+    return "warm";
   }
 }
 
@@ -42,8 +57,22 @@ function applyTheme(preference: ThemePreference): void {
   listeners.forEach((cb) => cb());
 }
 
+function applyPalette(palette: ThemePalette): void {
+  document.documentElement.dataset.palette = palette;
+  try {
+    localStorage.setItem(PALETTE_STORAGE_KEY, palette);
+  } catch {
+    // Palette selection remains usable when storage is unavailable.
+  }
+  listeners.forEach((cb) => cb());
+}
+
 function getServerSnapshot(): ThemePreference {
   return "system";
+}
+
+function getPaletteServerSnapshot(): ThemePalette {
+  return "warm";
 }
 
 type ToggleOrigin = { x: number; y: number };
@@ -63,12 +92,17 @@ function motionDurationMs(variable: string, fallback: number): number {
 
 export function useTheme() {
   const preference = useSyncExternalStore(subscribe, storedPreference, getServerSnapshot);
+  const palette = useSyncExternalStore(subscribe, storedPalette, getPaletteServerSnapshot);
   // The OS preference is browser-only. Deferring it until after hydration keeps
   // the initial client tree identical to the server's system/light snapshot.
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => { setHydrated(true); }, []);
   const prefersDark = hydrated && window.matchMedia("(prefers-color-scheme: dark)").matches;
   const theme = resolveTheme(preference, prefersDark);
+
+  useEffect(() => {
+    document.documentElement.dataset.palette = palette;
+  }, [palette]);
 
   useEffect(() => {
     if (preference !== "system" || typeof window === "undefined") return;
@@ -106,6 +140,7 @@ export function useTheme() {
   }, []);
 
   const toggleTheme = useCallback((origin?: ToggleOrigin) => setTheme(nextThemePreference(preference), origin), [preference, setTheme]);
+  const setPalette = useCallback((next: ThemePalette) => applyPalette(next), []);
 
-  return { theme, preference, isDark: theme === "dark", setTheme, toggleTheme };
+  return { theme, preference, palette, isDark: theme === "dark", setTheme, setPalette, toggleTheme };
 }

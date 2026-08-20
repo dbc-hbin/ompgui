@@ -2019,7 +2019,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
           />
 
           {/* Toolbar: attachment · model · settings · reasoning · fast · context ring · send/stop */}
-          <div style={{
+          <div className="composer-toolbar" style={{
             display: "flex",
             alignItems: "center",
             gap: 2,
@@ -2030,6 +2030,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
           }}>
             {/* Attachment */}
             <button
+              className="composer-attachment ui-focus-ring"
               onClick={() => fileInputRef.current?.click()}
               disabled={isStreaming}
               title={t("chatInput.attachFile")}
@@ -2062,8 +2063,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
             {/* Model selector — compact text button with dropdown */}
             {(modelOptions.length > 0 || currentName || modelError || showModelsLoading) && onModelChange && (
-              <div ref={dropdownRef} style={{ position: "relative", minWidth: 0 }}>
+              <div ref={dropdownRef} className="composer-model-control" style={{ position: "relative", minWidth: 0 }}>
                 <button
+                  className="composer-model-button ui-focus-ring"
                   onClick={(e) => {
                     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                     setModelDropdownRect({ top: rect.top, left: rect.left, width: rect.width });
@@ -2221,8 +2223,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             {/* Reasoning level selector — stays visible while the agent
                 runs (disabled) so the level never looks like it reset. */}
             {onThinkingLevelChange && (
-              <div ref={thinkingDropdownRef} style={{ position: "relative" }}>
+              <div ref={thinkingDropdownRef} className="composer-thinking-control" style={{ position: "relative" }}>
                 <button
+                  className="composer-thinking-button ui-focus-ring"
                   onClick={() => setThinkingDropdownOpen((v) => !v)}
                   disabled={isStreaming}
                   title={t("chatInput.changeReasoningTitle", { level: thinkingDisplayLabel })}
@@ -2260,7 +2263,10 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 </button>
                 {thinkingDropdownOpen && (
                   <div className="dropdown-surface" style={{
-                    position: "absolute", bottom: "calc(100% + 6px)", left: 0,
+                    position: "absolute",
+                    bottom: "calc(100% + 6px)",
+                    left: isMobile ? "auto" : 0,
+                    right: isMobile ? 0 : undefined,
                     zIndex: 100, minWidth: 250, maxWidth: "calc(100vw - 32px)",
                   }}>
                     {thinkingLevelOptions.map((lvl) => {
@@ -2311,6 +2317,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 for the next prompt. */}
             {fastModeSupported && onFastModeChange && (
               <button
+                className="composer-fast-toggle ui-focus-ring"
                 type="button"
                 onClick={() => { if (isStreaming) return; onFastModeChange(!fastModeEnabled); }}
                 disabled={isStreaming}
@@ -2338,11 +2345,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               </button>
             )}
 
-            <div style={{ flex: 1 }} />
+            <div className="composer-toolbar-spacer" style={{ flex: 1 }} />
 
             {/* Context usage ring — small, percentage only, no label */}
             {contextUsage?.percent != null && (
               <span
+                className="composer-context-ring"
                 title={`${Math.round(clampedContextPercent)}% · ${formatCompactNumber(contextUsage.tokens ?? 0, locale)} / ${formatCompactNumber(contextUsage.contextWindow, locale)}`}
                 style={{ position: "relative", width: 26, height: 26, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
               >
@@ -2365,6 +2373,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             {/* Primary action: Send (idle) / Stop (running) */}
             {isStreaming ? (
               <button
+                className="composer-primary-action ui-focus-ring"
                 type="button"
                 onClick={isCompacting ? onAbortCompaction : onAbort}
                 title={t("chatInput.stopAgent")}
@@ -2385,10 +2394,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 <svg width="9" height="9" viewBox="0 0 10 10" fill="none" aria-hidden="true">
                   <rect x="1.5" y="1.5" width="7" height="7" rx="1.5" fill="currentColor" />
                 </svg>
-                {t("chatInput.stop")}
+                <span className="composer-primary-label">{t("chatInput.stop")}</span>
               </button>
             ) : (
               <button
+                className="composer-primary-action ui-focus-ring"
                 type="button"
                 onClick={handleSend}
                 disabled={!value.trim() && !attachedImages.length && !attachedTextFiles.length}
@@ -2411,7 +2421,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   <line x1="2" y1="7" x2="11" y2="7" />
                   <polyline points="7.5 3 12 7 7.5 11" />
                 </svg>
-                {t("chatInput.send")}
+                <span className="composer-primary-label">{t("chatInput.send")}</span>
               </button>
             )}
           </div>

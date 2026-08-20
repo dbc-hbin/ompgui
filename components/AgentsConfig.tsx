@@ -245,7 +245,7 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
       </header>
 
       {statusNotice && (
-        <div role="status" style={{ padding: "8px 12px", borderRadius: "var(--radius-control)", background: "color-mix(in srgb, var(--status-success, #10b981) 12%, transparent)", border: "1px solid var(--status-success, #10b981)", color: "var(--status-success, #10b981)", fontSize: 12 }}>
+        <div role="status" style={{ padding: "8px 12px", borderRadius: "var(--radius-control)", background: "color-mix(in srgb, var(--status-success) 12%, transparent)", border: "1px solid var(--status-success)", color: "var(--status-success)", fontSize: 12 }}>
           {statusNotice}
         </div>
       )}
@@ -398,11 +398,11 @@ function AgentCard({
 
   const scopeBadgeColor =
     agent.source === "project"
-      ? "var(--accent)"
+      ? "var(--source-project)"
       : agent.source === "user"
-      ? "#3b82f6"
+      ? "var(--source-user)"
       : agent.source === "extension"
-      ? "#a855f7"
+      ? "var(--source-extension)"
       : "var(--text-muted)";
 
   return (
@@ -691,7 +691,7 @@ function AgentModal({
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "grid", placeItems: "center", zIndex: 1000, padding: 16 }}>
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay-backdrop)", display: "grid", placeItems: "center", zIndex: 1000, padding: 16 }}>
       <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: "var(--radius-modal)", boxShadow: "var(--shadow-modal)", width: "min(100%, 540px)", maxHeight: "90vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <header style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
