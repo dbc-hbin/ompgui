@@ -489,7 +489,6 @@ export function AppShell() {
   const pendingRightPanelWidthRef = useRef(RIGHT_PANEL_DEFAULT_WIDTH);
   const rightPanelResizeHandlersRef = useRef<{ onMove: (event: PointerEvent) => void; onUp: () => void } | null>(null);
   const rightPanelWidthMountedRef = useRef(false);
-  const rightPanelVisible = rightPanelOpen && fileTabs.length > 0;
 
   useEffect(() => {
     setRightPanelWidth(loadRightPanelWidth());
@@ -1199,7 +1198,7 @@ export function AppShell() {
                   display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
                   paddingLeft: isMobile ? 0 : 12,
                   // The toggle overlays this corner in the pre-merge layout.
-                  paddingRight: isMobile ? (rightPanelVisible ? 0 : 44) : rightPanelVisible ? 12 : 48,
+                  paddingRight: isMobile ? (rightPanelOpen ? 0 : 44) : rightPanelOpen ? 12 : 48,
                   height: "100%",
                   minWidth: isMobile ? 44 : 0,
                   overflow: "hidden",
@@ -1549,7 +1548,7 @@ export function AppShell() {
       </main>
 
       {/* Right panel resize handle — desktop only, on the panel's left edge. */}
-      {!isMobile && rightPanelVisible && (
+      {!isMobile && rightPanelOpen && (
         <div
           role="separator"
           aria-orientation="vertical"
@@ -1582,7 +1581,7 @@ export function AppShell() {
       {/* Right panel: file viewer — always mounted, width animated via CSS */}
       <div
         ref={rightPanelContainerRef}
-        className={`right-panel-container${rightPanelVisible ? " right-panel-open" : " right-panel-closed"}${rightPanelResizing ? " right-panel-resizing" : ""}`}
+        className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}${rightPanelResizing ? " right-panel-resizing" : ""}`}
         style={{
           display: "flex",
           flexDirection: "column",
@@ -1612,7 +1611,7 @@ export function AppShell() {
                 cwd={activeCwd ?? undefined}
                 sourceSessionId={tab.sourceSessionId}
                 gitRefreshKey={explorerRefreshKey}
-                onMentionLines={tab.id === activeFileTabId && rightPanelVisible ? handleFileLineMention : undefined}
+                onMentionLines={tab.id === activeFileTabId && rightPanelOpen ? handleFileLineMention : undefined}
                 onOpenFile={(filePath) => handleOpenFile(
                   filePath,
                   getFileName(filePath),
@@ -1630,22 +1629,20 @@ export function AppShell() {
     </div>
     {/* File panel toggle — pre-merge overlay placement avoids a layout column. */}
     <button
-      disabled={fileTabs.length === 0}
       onClick={() => setRightPanelOpen((open) => !open)}
-      title={fileTabs.length === 0 ? t("appShell.noFileOpen") : rightPanelVisible ? t("appShell.hideFilePanel") : t("appShell.showFilePanel")}
-      aria-label={rightPanelVisible ? t("appShell.hideFilePanel") : t("appShell.showFilePanel")}
+      title={rightPanelOpen ? t("appShell.hideFilePanel") : t("appShell.showFilePanel")}
+      aria-label={rightPanelOpen ? t("appShell.hideFilePanel") : t("appShell.showFilePanel")}
       style={{
         position: "fixed", top: 0, right: 0, zIndex: 300,
         display: "flex", alignItems: "center", justifyContent: "center",
         width: isMobile ? 44 : 36, height: isMobile ? 44 : 36, padding: 0,
         background: "var(--bg-panel)", border: "none", borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
-        color: rightPanelVisible ? "var(--text)" : "var(--text-muted)",
-        opacity: fileTabs.length === 0 ? 0.55 : 1,
-        cursor: fileTabs.length === 0 ? "default" : "pointer",
-        transition: "color var(--dur-fast) var(--ease-out-warm), opacity var(--dur-fast) var(--ease-out-warm)",
+        color: rightPanelOpen ? "var(--text)" : "var(--text-muted)",
+        cursor: "pointer",
+        transition: "color var(--dur-fast) var(--ease-out-warm)",
       }}
       onMouseEnter={(event) => { event.currentTarget.style.color = "var(--text)"; }}
-      onMouseLeave={(event) => { event.currentTarget.style.color = rightPanelVisible ? "var(--text)" : "var(--text-muted)"; }}
+      onMouseLeave={(event) => { event.currentTarget.style.color = rightPanelOpen ? "var(--text)" : "var(--text-muted)"; }}
     >
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
