@@ -47,7 +47,7 @@ export function TodoList({ phases = [], collapsible = false, defaultExpanded = f
   return (
     <section
       aria-label={t("chatWindow.todoList")}
-      className={`overflow-hidden border border-border bg-bg-subtle ${collapsible ? "" : "my-2"}`}
+      className={`overflow-hidden border border-border/80 bg-bg-panel/90 backdrop-blur-sm shadow-xs ${collapsible ? "" : "my-2"}`}
       style={{ borderRadius: "var(--radius-card)" }}
     >
       {collapsible ? (
@@ -56,7 +56,7 @@ export function TodoList({ phases = [], collapsible = false, defaultExpanded = f
           aria-expanded={!collapsed}
           onClick={() => setCollapsed((value) => !value)}
           title={collapsed ? t("chatWindow.expandPanel") : t("chatWindow.collapsePanel")}
-          className={`${headerRowClass} ${headerBorderClass} w-full cursor-pointer text-left`}
+          className={`${headerRowClass} ${headerBorderClass} w-full cursor-pointer text-left transition-colors hover:bg-bg-hover/50`}
           style={{ background: "none" }}
         >
           <ListChecks size={15} strokeWidth={1.8} aria-hidden />

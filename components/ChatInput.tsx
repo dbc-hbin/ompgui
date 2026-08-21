@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, forwardRef, memo, KeyboardEvent } from "react";
-import { ChevronDown, ListChecks, Search, Sparkles, Target } from "lucide-react";
+import { ArrowUp, ChevronDown, CornerDownLeft, ListChecks, Plus, Search, Send, Sparkles, Square, Target } from "lucide-react";
 import { getSubmitDuringRunBehavior } from "@/lib/composer-prefs";
 import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
 import type { ActiveGoal, ActivePlan } from "@/lib/web-mode-state";
@@ -1428,9 +1428,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     <div
       style={{
         flexShrink: 0,
-        background: "transparent",
-         padding: "0 16px calc(8px + env(safe-area-inset-bottom))",
-        paddingRight: isMobile ? 16 : 52, // desktop: 16px base + 36px for ChatMinimap alignment
+        width: "100%", boxSizing: "border-box",
+        padding: "0 16px calc(12px + env(safe-area-inset-bottom))",
+        paddingRight: 16,
       }}
     >
       {/* Hidden file input */}
@@ -1995,7 +1995,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             onCompositionEnd={(e) => {
               isComposingRef.current = false;
               lastCompositionEndAtRef.current = Date.now();
-              const el = e.currentTarget;
+               const el = e.currentTarget;
               updateAtQuery(el.value, el.selectionStart);
             }}
             onInput={handleInput}
@@ -2008,8 +2008,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               border: "none",
               outline: "none",
               resize: "none",
-              color: "var(--text)",
-              fontSize: 14,
+              color: "var(--text)", 
+              fontSize: isMobile ? 15 : 14,
               lineHeight: 1.6,
               fontFamily: "inherit",
               minHeight: 24,
@@ -2022,11 +2022,13 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
           <div className="composer-toolbar" style={{
             display: "flex",
             alignItems: "center",
-            gap: 2,
-            marginTop: 8,
-            paddingTop: 8,
-            borderTop: "1px solid color-mix(in srgb, var(--border) 62%, transparent)",
-            flexWrap: isMobile ? "wrap" : "nowrap",
+            justifyContent: "flex-start",
+            gap: isMobile ? 5 : 2,
+            marginTop: isMobile ? 6 : 8,
+            paddingTop: isMobile ? 0 : 8,
+            borderTop: isMobile ? "none" : "1px solid color-mix(in srgb, var(--border) 62%, transparent)",
+            width: "100%",
+            boxSizing: "border-box",
           }}>
             {/* Attachment */}
             <button
@@ -2036,9 +2038,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               title={t("chatInput.attachFile")}
               aria-label={t("chatInput.attachFile")}
               style={{
-                flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                width: 28, height: 28, padding: 0,
-                background: "none", border: "none",
+                flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center",
+                width: isMobile ? 26 : 28, height: isMobile ? 26 : 28, padding: 0,
+                background: isMobile ? "transparent" : "none", border: "none",
                 borderRadius: 7,
                 color: (attachedImages.length || attachedTextFiles.length) ? "var(--accent)" : "var(--text-muted)",
                 cursor: isStreaming ? "not-allowed" : "pointer",
@@ -2055,15 +2057,19 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 e.currentTarget.style.color = (attachedImages.length || attachedTextFiles.length) ? "var(--accent)" : "var(--text-muted)";
               }}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-              </svg>
+              {isMobile ? (
+                <Plus size={18} strokeWidth={2} aria-hidden="true" />
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+              )}
             </button>
 
             {/* Model selector — compact text button with dropdown */}
             {(modelOptions.length > 0 || currentName || modelError || showModelsLoading) && onModelChange && (
-              <div ref={dropdownRef} className="composer-model-control" style={{ position: "relative", minWidth: 0 }}>
+              <div ref={dropdownRef} className="composer-model-control" style={{ position: "relative", minWidth: 0, maxWidth: isMobile ? 120 : undefined }}>
                 <button
                   className="composer-model-button ui-focus-ring"
                   onClick={(e) => {
@@ -2073,13 +2079,13 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   }}
                   disabled={modelSelectorDisabled}
                   style={{
-                    display: "flex", alignItems: "center", gap: 5,
-                    height: 28,
-                    maxWidth: 190,
-                    padding: "0 8px",
+                    display: "inline-flex", alignItems: "center", gap: 5,
+                    height: isMobile ? 32 : 28,
+                    maxWidth: isMobile ? "100%" : 190,
+                    padding: isMobile ? "0 10px" : "0 8px",
                     overflow: "hidden",
-                    background: modelDropdownOpen ? "var(--bg-hover)" : "none",
-                    border: "none",
+                    background: modelDropdownOpen ? "var(--bg-hover)" : isMobile ? "color-mix(in srgb, var(--bg-selected) 60%, transparent)" : "none",
+                    border: isMobile ? "1px solid color-mix(in srgb, var(--border) 60%, transparent)" : "none",
                     borderRadius: 7,
                     color: "var(--text-muted)",
                     cursor: modelSelectorDisabled ? "not-allowed" : "pointer",
@@ -2232,13 +2238,13 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   aria-label={`${t("chatInput.changeReasoning")}: ${thinkingDisplayLabel}`}
                   style={{
                     display: "flex", alignItems: "center", gap: 5,
-                    height: 28,
-                    padding: "0 8px",
-                    background: thinkingDropdownOpen ? "var(--bg-hover)" : "none",
-                    border: "none",
+                    height: isMobile ? 32 : 28,
+                    padding: isMobile ? "0 9px" : "0 8px",
+                    background: thinkingDropdownOpen ? "var(--bg-hover)" : isMobile ? "color-mix(in srgb, var(--bg-selected) 50%, transparent)" : "none",
+                    border: isMobile ? "1px solid color-mix(in srgb, var(--border) 60%, transparent)" : "none",
                     borderRadius: 7,
                     color: "var(--text-muted)",
-                    cursor: isStreaming ? "not-allowed" : "pointer",
+                    cursor: isStreaming ? "not-allowed" : "pointer", flexShrink: 0,
                     opacity: isStreaming ? 0.5 : 1,
                     fontSize: 12,
                     transition: "background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm)",
@@ -2314,7 +2320,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             {/* Fast toggle — only for models that support fast mode. Stays
                 visible while the agent runs (disabled) so it does not look
                 like fast mode was reset; the toggle affects the family tier
-                for the next prompt. */}
+                for the next prompt. Desktop only. */}
             {fastModeSupported && onFastModeChange && (
               <button
                 className="composer-fast-toggle ui-focus-ring"
@@ -2348,26 +2354,38 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             <div className="composer-toolbar-spacer" style={{ flex: 1 }} />
 
             {/* Context usage ring — small, percentage only, no label */}
-            {contextUsage?.percent != null && (
-              <span
+            {Boolean(contextUsage) && (
+              <div
+                role="progressbar"
+                aria-valuenow={Math.round(clampedContextPercent)}
+                aria-valuemin={0}
+                aria-valuemax={100}
                 className="composer-context-ring"
-                title={`${Math.round(clampedContextPercent)}% · ${formatCompactNumber(contextUsage.tokens ?? 0, locale)} / ${formatCompactNumber(contextUsage.contextWindow, locale)}`}
-                style={{ position: "relative", width: 26, height: 26, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                title={`${Math.round(clampedContextPercent)}% · ${formatCompactNumber(contextUsage?.tokens ?? 0, locale)} / ${formatCompactNumber(contextUsage?.contextWindow ?? 0, locale)}`}
+                style={{
+                  position: "relative",
+                  flexShrink: 0,
+                  width: isMobile ? 33 : 26,
+                  height: isMobile ? 33 : 28,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  marginRight: isMobile ? 2 : 0,
+                }}
               >
-                <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true" style={{ position: "absolute", inset: 0 }}>
-                  <circle cx="13" cy="13" r="9.5" fill="none" stroke="var(--border)" strokeWidth="2.5" />
+                <svg width={isMobile ? 30 : 26} height={isMobile ? 30 : 26} viewBox="0 0 26 26" aria-hidden="true">
+                  <circle cx="13" cy="13" r="9.5" fill="none" stroke="color-mix(in srgb, var(--border) 80%, transparent)" strokeWidth="2.5" />
                   <circle
-                    cx="13" cy="13" r="9.5" fill="none"
                     stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round"
-                    strokeDasharray={RING_CIRCUMFERENCE}
+                    strokeDasharray={RING_CIRCUMFERENCE} 
                     strokeDashoffset={RING_CIRCUMFERENCE * (1 - clampedContextPercent / 100)}
                     transform="rotate(-90 13 13)"
                   />
                 </svg>
-                <span style={{ fontSize: 8, fontWeight: 600, color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" }}>
+                <span style={{ position: "absolute", fontSize: isMobile ? 9 : 8, fontWeight: 600, color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" }}>
                   {Math.round(clampedContextPercent)}%
                 </span>
-              </span>
+              </div>
             )}
 
             {/* Primary action: Send (idle) / Stop (running) */}
@@ -2378,12 +2396,14 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 onClick={isCompacting ? onAbortCompaction : onAbort}
                 title={t("chatInput.stopAgent")}
                 style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  height: 28,
-                  padding: "0 14px",
+                  display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+                  width: isMobile ? 32 : "auto",
+                  height: isMobile ? 32 : 28,
+                  minWidth: isMobile ? 32 : undefined,
+                  padding: isMobile ? 0 : "0 14px",
                   background: "var(--accent-strong)",
-                  border: "none",
-                  borderRadius: 8,
+                  border: "none", flexShrink: 0,
+                  borderRadius: isMobile ? "50%" : 8,
                   color: "var(--on-accent)",
                   cursor: "pointer",
                   fontSize: 12,
@@ -2391,10 +2411,14 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   transition: "background var(--dur-fast) var(--ease-out-warm)",
                 }}
               >
-                <svg width="9" height="9" viewBox="0 0 10 10" fill="none" aria-hidden="true">
-                  <rect x="1.5" y="1.5" width="7" height="7" rx="1.5" fill="currentColor" />
-                </svg>
-                <span className="composer-primary-label">{t("chatInput.stop")}</span>
+                {isMobile ? (
+                  <Square size={12} fill="currentColor" stroke="none" aria-hidden="true" />
+                ) : (
+                  <svg width="9" height="9" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+                    <rect x="1.5" y="1.5" width="7" height="7" rx="1.5" fill="currentColor" />
+                  </svg>
+                )}
+                {!isMobile && <span className="composer-primary-label">{t("chatInput.stop")}</span>}
               </button>
             ) : (
               <button
@@ -2403,25 +2427,31 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 onClick={handleSend}
                 disabled={!value.trim() && !attachedImages.length && !attachedTextFiles.length}
                 style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  height: 28,
-                  padding: "0 14px",
-                  background: (value.trim() || attachedImages.length || attachedTextFiles.length) ? "var(--accent-strong)" : "var(--bg-panel)",
-                  border: "none",
-                  borderRadius: 8,
+                  display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+                  width: isMobile ? 32 : "auto",
+                  height: isMobile ? 32 : 28,
+                  minWidth: isMobile ? 32 : undefined,
+                  padding: isMobile ? 0 : "0 14px",
+                  background: (value.trim() || attachedImages.length || attachedTextFiles.length) ? "var(--accent-strong)" : "var(--bg-hover)",
+                  border: "none", flexShrink: 0,
+                  borderRadius: isMobile ? "50%" : 8,
                   color: (value.trim() || attachedImages.length || attachedTextFiles.length) ? "var(--on-accent)" : "var(--text-dim)",
                   cursor: (value.trim() || attachedImages.length || attachedTextFiles.length) ? "pointer" : "not-allowed",
                   fontSize: 12,
                   fontWeight: 600,
-                  boxShadow: (value.trim() || attachedImages.length || attachedTextFiles.length) ? "var(--shadow-card)" : "none",
+                  boxShadow: (value.trim() || attachedImages.length || attachedTextFiles.length) ? "0 2px 8px color-mix(in srgb, var(--accent) 30%, transparent)" : "none",
                   transition: "background var(--dur-fast) var(--ease-out-warm), box-shadow var(--dur-fast) var(--ease-out-warm)",
                 }}
               >
-                <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="2" y1="7" x2="11" y2="7" />
-                  <polyline points="7.5 3 12 7 7.5 11" />
-                </svg>
-                <span className="composer-primary-label">{t("chatInput.send")}</span>
+                {isMobile ? (
+                  <ArrowUp size={16} strokeWidth={2.4} aria-hidden="true" />
+                ) : (
+                  <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="2" y1="7" x2="11" y2="7" />
+                    <polyline points="7.5 3 12 7 7.5 11" />
+                  </svg>
+                )}
+                {!isMobile && <span className="composer-primary-label">{t("chatInput.send")}</span>}
               </button>
             )}
           </div>

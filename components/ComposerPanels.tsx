@@ -136,7 +136,7 @@ function SubagentsPanel({ subagents, onSelectSubagent, defaultExpanded = false }
   return (
     <section
       aria-label={t("chatWindow.subagentsPanel")}
-      className="overflow-hidden border border-border bg-bg-subtle"
+      className="overflow-hidden border border-border/80 bg-bg-panel/90 backdrop-blur-sm shadow-xs"
       style={{ borderRadius: "var(--radius-card)" }}
     >
       <button
@@ -144,7 +144,7 @@ function SubagentsPanel({ subagents, onSelectSubagent, defaultExpanded = false }
         aria-expanded={!collapsed}
         onClick={() => setCollapsed((value) => !value)}
         title={collapsed ? t("chatWindow.expandPanel") : t("chatWindow.collapsePanel")}
-        className={`ui-focus-ring flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-xs text-text-muted ${collapsed ? "" : "border-b border-border"}`}
+        className={`ui-focus-ring flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-xs text-text-muted transition-colors hover:bg-bg-hover/50 ${collapsed ? "" : "border-b border-border"}`}
         style={{ background: "none" }}
       >
         <Network size={14} strokeWidth={1.8} aria-hidden />

@@ -1862,67 +1862,98 @@ html.dark .dropdown-surface :is(select, option) {
   .chat-stats-center {
     display: none !important;
   }
+  .chat-input-shell {
+    border-radius: 24px !important;
+    padding: 14px 16px 10px 16px !important;
+    background: var(--bg-panel) !important;
+    border: 1px solid color-mix(in srgb, var(--border) 85%, transparent) !important;
+    box-shadow: 0 4px 24px -2px color-mix(in srgb, var(--text) 7%, transparent) !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
   .composer-toolbar {
-    display: grid !important;
-    grid-template-columns: 48px minmax(0, 1fr) auto auto;
+    display: flex !important;
+    flex-direction: row !important;
     align-items: center;
-    gap: 6px !important;
+    gap: 5px !important;
+    margin-top: 8px !important;
+    padding-top: 0 !important;
+    border-top: none !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
   }
   .composer-attachment {
-    order: 1;
-    width: 48px !important;
-    height: 48px !important;
-    border-radius: var(--radius-control) !important;
+    order: 1 !important;
+    width: 26px !important;
+    height: 26px !important;
+    border-radius: 50% !important;
+    background: transparent !important;
     touch-action: manipulation;
+    flex-shrink: 0 !important;
   }
   .composer-model-control {
-    order: 2;
-    min-width: 0;
+    order: 2 !important;
+    min-width: 0 !important;
+    max-width: fit-content !important;
+    flex-shrink: 1 !important;
+    display: flex !important;
   }
   .composer-model-button {
-    width: 100%;
+    width: auto !important;
     max-width: none !important;
-    height: 48px !important;
+    height: 32px !important;
     padding-inline: 10px !important;
-    border-radius: var(--radius-control) !important;
-    font-size: 13px !important;
+    border-radius: 9999px !important;
+    background: color-mix(in srgb, var(--bg-selected) 60%, transparent) !important;
+    color: var(--text) !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
     touch-action: manipulation;
   }
   .composer-thinking-control {
-    order: 3;
+    order: 3 !important;
+    display: flex !important;
   }
   .composer-thinking-button {
-    height: 48px !important;
-    min-width: 68px;
-    justify-content: center;
-    padding-inline: 10px !important;
-    border-radius: var(--radius-control) !important;
-    font-size: 13px !important;
+    min-width: 0;
+    height: 32px !important;
+    padding-inline: 9px !important;
+    border-radius: 9999px !important;
+    font-size: 12px !important;
     touch-action: manipulation;
   }
   .composer-primary-action {
-    order: 4;
-    height: 48px !important;
-    min-width: 74px;
-    justify-content: center;
-    padding-inline: 12px !important;
-    border-radius: var(--radius-control) !important;
-    font-size: 13px !important;
+    order: 10 !important;
+    width: 32px !important;
+    margin-left: 0 !important;
+    min-width: 32px !important;
+    height: 32px !important;
+    padding: 0 !important;
+    border-radius: 9999px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
     touch-action: manipulation;
   }
   .composer-fast-toggle {
-    order: 5;
-    grid-column: 1 / span 2;
-    justify-self: start;
-    height: 36px !important;
+    display: none !important;
   }
   .composer-toolbar-spacer {
-    display: none;
+    order: 5 !important;
+    display: flex !important;
+    flex: 1 1 auto !important;
+    min-width: 8px !important;
   }
   .composer-context-ring {
-    order: 6;
-    grid-column: 3;
-    justify-self: end;
+    order: 9 !important;
+    display: inline-flex !important;
+    width: 33px !important;
+    min-width: 33px !important;
+    height: 33px !important;
+    align-items: center !important;
+    justify-content: center !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
   }
   .sidebar-container {
     position: fixed !important;
@@ -1968,20 +1999,5 @@ html.dark .dropdown-surface :is(select, option) {
   .directory-picker-footer {
     flex-wrap: wrap;
     padding-bottom: max(10px, env(safe-area-inset-bottom)) !important;
-  }
-}
-
-@media (max-width: 420px) {
-  .composer-primary-action {
-    width: 48px;
-    min-width: 48px;
-    padding-inline: 0 !important;
-  }
-  .composer-primary-label {
-    display: none;
-  }
-  .composer-thinking-button {
-    min-width: 60px;
-    padding-inline: 8px !important;
   }
 }

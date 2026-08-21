@@ -745,7 +745,15 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
       advisorEnabled={advisorEnabled}
       queuedMessages={queuedMessages}
       inputHistory={inputHistory}
-      contextUsage={contextUsage}
+      contextUsage={contextUsage ?? (sessionStats?.tokens?.total ? {
+        tokens: sessionStats.tokens.total,
+        contextWindow: 128000,
+        percent: Math.min(100, (sessionStats.tokens.total / 128000) * 100),
+      } : {
+        tokens: 0,
+        contextWindow: 128000,
+        percent: 0,
+      })}
       onRemoveQueuedMessage={removeQueuedMessage}
       onPromoteQueuedToSteer={promoteQueuedToSteer}
       slashCommands={slashCommands}
@@ -841,8 +849,8 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
 
       {isEmptyNew ? (
         <div className="relative flex flex-1 flex-col overflow-hidden">
-          <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8" style={{ minHeight: 0 }}>
-          <div className="w-full" style={{ maxWidth: CHAT_COLUMN_MAX_WIDTH }}>
+          <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto py-8" style={{ minHeight: 0 }}>
+          <div className="w-full" style={{ maxWidth: CHAT_COLUMN_MAX_WIDTH, padding: 0 }}>
             <div
                className="mb-3 empty-chat-brand"
               style={{
@@ -1001,11 +1009,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
       </div>
 
       <div className="relative" style={{ flexShrink: 0 }}>
-        <div
-          style={{
-            padding: `0 ${CHAT_COLUMN_PADDING}px`,
-          }}
-        >
+        <div style={{ padding: "0 16px" }}>
           <div style={{ maxWidth: CHAT_COLUMN_MAX_WIDTH, margin: "0 auto" }}>
             <ComposerPanels
               todoPhases={todoPhases}
