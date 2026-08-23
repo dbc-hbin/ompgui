@@ -1392,6 +1392,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     if (lvl === "auto" || !thinkingLevelMap) return lvl;
     return thinkingLevelMap[lvl] ?? lvl;
   })();
+  // Keep the mobile composer trigger narrow without changing the underlying
+  // OMP thinking level or the full label used by the menu/accessibility copy.
+  const thinkingTriggerLabel = thinkingDisplayLabel.toLowerCase() === "medium"
+    ? "med"
+    : thinkingDisplayLabel;
   const clampedContextPercent = clampContextPercent(contextUsage?.percent);
   const contextPercentLabel = formatRingPercent(clampedContextPercent);
   const hasContextRing = Boolean(contextUsage && contextUsage.percent != null && contextUsage.contextWindow > 0);
@@ -2260,7 +2265,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                     <line x1="7" y1="18" x2="12" y2="18" />
                     <line x1="8" y1="21" x2="11" y2="21" />
                   </svg>
-                  <span style={{ whiteSpace: "nowrap" }}>{thinkingDisplayLabel}</span>
+                  <span style={{ whiteSpace: "nowrap" }}>{thinkingTriggerLabel}</span>
                   <ChevronDown size={12} strokeWidth={1.8} style={{ flexShrink: 0, opacity: 0.7 }} aria-hidden="true" />
                 </button>
                 {thinkingDropdownOpen && (

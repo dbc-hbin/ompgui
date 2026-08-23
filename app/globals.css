@@ -2164,7 +2164,7 @@ html.dark .dropdown-surface :is(select, option) {
   }
   .composer-toolbar {
     display: grid !important;
-    grid-template-columns: 44px minmax(0, 1fr) auto var(--composer-ring-size) auto;
+    grid-template-columns: 36px minmax(0, 1fr) auto var(--composer-ring-size) auto;
     align-items: center;
     gap: 6px !important;
   }
@@ -2172,8 +2172,8 @@ html.dark .dropdown-surface :is(select, option) {
     order: 1;
     grid-column: 1;
     grid-row: 1;
-    width: 44px !important;
-    height: 48px !important;
+    width: 36px !important;
+    height: 44px !important;
     border-radius: var(--radius-control) !important;
     touch-action: manipulation;
   }
@@ -2197,15 +2197,16 @@ html.dark .dropdown-surface :is(select, option) {
     grid-column: 3;
     grid-row: 1;
     min-width: 0;
+    max-width: 66px;
   }
   /* Keep the effort picker compact: icon + label only, no minimum width —
      every pixel here is taken from the model chip next to it. */
   .composer-thinking-button {
-    height: 48px !important;
+    height: 44px !important;
     min-width: 0;
     justify-content: center;
-    gap: 4px !important;
-    padding-inline: 7px !important;
+    gap: 3px !important;
+    padding-inline: 4px !important;
     border-radius: var(--radius-control) !important;
     font-size: 12px !important;
     touch-action: manipulation;
@@ -2311,15 +2312,15 @@ html.dark .dropdown-surface :is(select, option) {
 
 @media (max-width: 420px) {
   .composer-toolbar {
-    grid-template-columns: 40px minmax(0, 1fr) minmax(0, 70px) var(--composer-ring-size) 48px;
+    grid-template-columns: 36px minmax(0, 1fr) minmax(0, 66px) var(--composer-ring-size) 48px;
     gap: 2px !important;
   }
   .composer-attachment {
-    width: 40px !important;
+    width: 36px !important;
   }
   .composer-thinking-control {
-    width: 70px;
-    max-width: 70px;
+    width: 66px;
+    max-width: 66px;
     overflow: hidden;
   }
   .composer-thinking-button {

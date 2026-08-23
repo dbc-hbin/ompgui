@@ -211,6 +211,24 @@ test("opens the context popup with the resolved percent and window summary", () 
   });
 });
 
+test("compacts the medium thinking trigger without changing accessible copy", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(ChatInput, {
+      onSend() {},
+      onAbort() {},
+      onThinkingLevelChange() {},
+      isStreaming: false,
+      thinkingLevel: "medium",
+      thinkingLevelMap: { medium: "medium" },
+      availableThinkingLevels: ["medium", "xhigh"],
+    }),
+  );
+
+  assert.match(html, />med</);
+  assert.match(html, /aria-label="[^"]*medium"/);
+  assert.doesNotMatch(html, />medium</);
+});
+
 test("filters model options by display name, identifier, and provider", () => {
   const options = [
     { provider: "OpenAI", modelId: "gpt-5.2", name: "GPT-5.2" },
