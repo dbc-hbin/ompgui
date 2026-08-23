@@ -2164,19 +2164,23 @@ html.dark .dropdown-surface :is(select, option) {
   }
   .composer-toolbar {
     display: grid !important;
-    grid-template-columns: 48px minmax(0, 1fr) auto auto;
+    grid-template-columns: 44px minmax(0, 1fr) auto var(--composer-ring-size) auto;
     align-items: center;
     gap: 6px !important;
   }
   .composer-attachment {
     order: 1;
-    width: 48px !important;
+    grid-column: 1;
+    grid-row: 1;
+    width: 44px !important;
     height: 48px !important;
     border-radius: var(--radius-control) !important;
     touch-action: manipulation;
   }
   .composer-model-control {
     order: 2;
+    grid-column: 2;
+    grid-row: 1;
     min-width: 0;
   }
   .composer-model-button {
@@ -2190,6 +2194,8 @@ html.dark .dropdown-surface :is(select, option) {
   }
   .composer-thinking-control {
     order: 3;
+    grid-column: 3;
+    grid-row: 1;
     min-width: 0;
   }
   /* Keep the effort picker compact: icon + label only, no minimum width —
@@ -2205,7 +2211,9 @@ html.dark .dropdown-surface :is(select, option) {
     touch-action: manipulation;
   }
   .composer-primary-action {
-    order: 4;
+    order: 5;
+    grid-column: 5;
+    grid-row: 1;
     height: 48px !important;
     min-width: 74px;
     justify-content: center;
@@ -2227,17 +2235,20 @@ html.dark .dropdown-surface :is(select, option) {
     display: none;
   }
   .composer-queue-action-steer {
-    order: 5;
+    order: 6;
+    grid-row: 2;
     grid-column: 1;
     justify-self: start;
   }
   .composer-queue-action-followup {
-    order: 6;
+    order: 7;
+    grid-row: 2;
     grid-column: 2;
     justify-self: start;
   }
   .composer-fast-toggle {
-    order: 7;
+    order: 8;
+    grid-row: 2;
     grid-column: 1 / span 2;
     justify-self: start;
     height: 36px !important;
@@ -2246,8 +2257,9 @@ html.dark .dropdown-surface :is(select, option) {
     display: none;
   }
   .composer-context-ring-wrap {
-    order: 8;
-    grid-column: 3;
+    order: 4;
+    grid-column: 4;
+    grid-row: 1;
     justify-self: end;
   }
   .sidebar-container {
@@ -2298,6 +2310,22 @@ html.dark .dropdown-surface :is(select, option) {
 }
 
 @media (max-width: 420px) {
+  .composer-toolbar {
+    grid-template-columns: 40px minmax(0, 1fr) minmax(0, 70px) var(--composer-ring-size) 48px;
+    gap: 2px !important;
+  }
+  .composer-attachment {
+    width: 40px !important;
+  }
+  .composer-thinking-control {
+    width: 70px;
+    max-width: 70px;
+    overflow: hidden;
+  }
+  .composer-thinking-button {
+    width: 100%;
+    overflow: hidden;
+  }
   .composer-primary-action {
     width: 48px;
     min-width: 48px;
@@ -2307,10 +2335,7 @@ html.dark .dropdown-surface :is(select, option) {
     display: none;
   }
   .composer-thinking-button {
-    padding-inline: 6px !important;
-  }
-  .composer-toolbar {
-    gap: 4px !important;
+    padding-inline: 4px !important;
   }
 }
 
