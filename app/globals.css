@@ -227,6 +227,8 @@ html[data-palette="omp"].dark {
   --composer-attachment-w: var(--control-height-sm);
   --composer-thinking-max-w: 66px;
   --composer-send-size: 34px;
+  --composer-shell-padding: var(--space-5) var(--space-5) var(--space-4) calc(var(--space-5) + var(--space-1));
+  --composer-toolbar-separation: var(--space-2);
   --sidebar-mobile-width: 280px;
   --accent-subtle: color-mix(in srgb, var(--accent) 12%, transparent);
   --status-success-subtle: color-mix(in srgb, var(--status-success) 12%, transparent);
@@ -1793,10 +1795,11 @@ html.dark .dropdown-surface :is(select, option) {
   :root {
     --shell-topbar-height: 44px;
     --composer-ring-size: 28px;
-    --composer-control-h: 44px;
+    --composer-control-h: var(--control-height);
     --composer-attachment-w: 36px;
     --composer-thinking-max-w: 66px;
     --composer-send-size: 34px;
+    --composer-shell-padding: var(--space-5) var(--space-5) var(--space-2) calc(var(--space-5) + var(--space-1));
   }
   .shell-toolbar-btn {
     width: 40px;

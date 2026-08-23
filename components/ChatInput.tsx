@@ -2014,7 +2014,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               background: "var(--bg)",
               border: `1px solid ${bashMode ? "var(--tool-bg)" : "color-mix(in srgb, var(--border) 70%, transparent)"}`,
               borderRadius: "var(--radius-card)",
-              padding: "12px 12px 10px 14px",
+              padding: "var(--composer-shell-padding)",
               boxShadow: "var(--shadow-card)",
               transition: "border-color var(--dur-fast) var(--ease-out-warm), background var(--dur-fast) var(--ease-out-warm), box-shadow var(--dur-fast) var(--ease-out-warm)",
             } as React.CSSProperties}
@@ -2066,8 +2066,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             display: "flex",
             alignItems: "center",
             gap: 2,
-            marginTop: 8,
-            paddingTop: 8,
+            marginTop: "var(--composer-toolbar-separation)",
+            paddingTop: "var(--composer-toolbar-separation)",
             borderTop: "1px solid color-mix(in srgb, var(--border) 62%, transparent)",
             flexWrap: isMobile ? "wrap" : "nowrap",
           }}>
