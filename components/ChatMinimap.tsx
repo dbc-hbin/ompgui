@@ -449,7 +449,7 @@ export const ChatMinimap = memo(function ChatMinimap({ messages, scrollContainer
           >
             <div
               style={{
-                fontSize: 11,
+                fontSize: "var(--text-sm)",
                 color: isNearest ? "var(--text)" : "var(--text-muted)",
                 lineHeight: 1.4,
                 whiteSpace: "nowrap",

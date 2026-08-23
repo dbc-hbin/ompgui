@@ -96,7 +96,7 @@ const CommandPalette = dynamic(() => import("./CommandPalette").then((m) => m.Co
 function PanelLoadingFallback() {
   const { t } = useI18n();
   return (
-    <div role="status" style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
+    <div role="status" style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: "var(--text-md)" }}>
       {t("appShell.loading")}
     </div>
   );
@@ -106,7 +106,7 @@ function PanelLoadingFallback() {
 function ModalLoadingFallback() {
   const { t } = useI18n();
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "var(--overlay-backdrop)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: "var(--z-dialog-backdrop)", background: "var(--overlay-backdrop)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: "var(--text-md)" }}>
       {t("appShell.loading")}
     </div>
   );
@@ -215,10 +215,10 @@ export function AppShell() {
         const cmd = data.updateCommand || "omp update";
         toast.info(
           translate("appShell.ompUpdateAvailable"),
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", marginTop: "var(--space-2)" }}>
             <div>{translate("appShell.updateVersion", { current: data.currentVersion ?? "?", available: data.availableVersion })}</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <code style={{ background: "var(--bg-panel)", padding: "3px 7px", borderRadius: "var(--radius-control)", fontSize: 11, fontFamily: "var(--font-mono)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+              <code style={{ background: "var(--bg-panel)", padding: "3px 7px", borderRadius: "var(--radius-control)", fontSize: "var(--text-sm)", fontFamily: "var(--font-mono)" }}>
                 {cmd}
               </code>
               <button
@@ -228,7 +228,7 @@ export function AppShell() {
                     .then(() => toast.success(translate("appShell.commandCopied")))
                     .catch(() => toast.error(translate("appShell.commandCopyFailed")));
                 }}
-                style={{ padding: "3px 7px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", color: "var(--text)", cursor: "pointer", fontSize: 11 }}
+                style={{ padding: "3px 7px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", color: "var(--text)", cursor: "pointer", fontSize: "var(--text-sm)" }}
               >
                 {translate("appShell.copyCommand")}
               </button>
@@ -249,10 +249,10 @@ export function AppShell() {
         const cmd = data.updateCommand || "npm install -g ompgui";
         toast.info(
           translate("appShell.appUpdateAvailable"),
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", marginTop: "var(--space-2)" }}>
             <div>{translate("appShell.updateVersion", { current: data.currentVersion ?? "?", available: data.availableVersion })}</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <code style={{ background: "var(--bg-panel)", padding: "3px 7px", borderRadius: "var(--radius-control)", fontSize: 11, fontFamily: "var(--font-mono)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+              <code style={{ background: "var(--bg-panel)", padding: "3px 7px", borderRadius: "var(--radius-control)", fontSize: "var(--text-sm)", fontFamily: "var(--font-mono)" }}>
                 {cmd}
               </code>
               <button
@@ -262,7 +262,7 @@ export function AppShell() {
                     .then(() => toast.success(translate("appShell.commandCopied")))
                     .catch(() => toast.error(translate("appShell.commandCopyFailed")));
                 }}
-                style={{ padding: "3px 7px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", color: "var(--text)", cursor: "pointer", fontSize: 11 }}
+                style={{ padding: "3px 7px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", color: "var(--text)", cursor: "pointer", fontSize: "var(--text-sm)" }}
               >
                 {translate("appShell.copyCommand")}
               </button>
@@ -984,7 +984,7 @@ export function AppShell() {
         style={{
           position: "fixed",
           inset: 0,
-          zIndex: 199,
+          zIndex: "var(--z-sidebar-backdrop)",
           background: "color-mix(in srgb, var(--text) 28%, transparent)",
           opacity: sidebarOpen ? 1 : 0,
           pointerEvents: sidebarOpen ? "auto" : "none",
@@ -1004,7 +1004,7 @@ export function AppShell() {
           display: "flex",
           flexDirection: "column",
           flexShrink: 0,
-          zIndex: 200,
+          zIndex: "var(--z-sidebar)",
           // Desktop-only: the width is user-adjustable via the resize handle.
           ...(!isMobile ? { "--sidebar-width": `${sidebarWidth}px` } : {}),
         }}
@@ -1029,7 +1029,7 @@ export function AppShell() {
             marginLeft: -5,
             cursor: "col-resize",
             background: "transparent",
-            zIndex: 205,
+            zIndex: "var(--z-resize-handle)",
             outline: "none",
             transition: "background var(--dur-fast) var(--ease-out-warm)",
           }}
@@ -1045,7 +1045,7 @@ export function AppShell() {
         {/* Top bar: compact icon-led control bar */}
         <div ref={topBarRef} className="shell-topbar">
         {/* Utility group: sidebar, theme, language */}
-        <div style={{ display: "flex", alignItems: "center", gap: 4, height: "100%", paddingLeft: isMobile ? 4 : 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", height: "100%", paddingLeft: isMobile ? "var(--space-2)" : "var(--space-4)" }}>
           <button
             onClick={handleSidebarToggle}
             title={sidebarOpen ? t("appShell.hideSidebar") : t("appShell.showSidebar")}
@@ -1072,7 +1072,7 @@ export function AppShell() {
           <>
             <div className="shell-toolbar-divider" aria-hidden="true" />
             {/* Session controls: history, generate title, branches, system */}
-            <div style={{ display: "flex", alignItems: "center", gap: 4, height: "100%" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", height: "100%" }}>
               <button
                 onClick={handleViewFullHistory}
                 disabled={!selectedSession}
@@ -1199,7 +1199,7 @@ export function AppShell() {
                   <Info size={16} strokeWidth={1.8} aria-hidden="true" />
                 )}
                 {!isMobile && tok && tok.input > 0 && (
-                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="5" y1="8.5" x2="5" y2="1.5" /><polyline points="2 4 5 1.5 8 4" />
                     </svg>
@@ -1207,7 +1207,7 @@ export function AppShell() {
                   </span>
                 )}
                 {!isMobile && tok && tok.output > 0 && (
-                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="5" y1="1.5" x2="5" y2="8.5" /><polyline points="2 6 5 8.5 8 6" />
                     </svg>
@@ -1215,7 +1215,7 @@ export function AppShell() {
                   </span>
                 )}
                 {!isMobile && tok && tok.cacheRead > 0 && (
-                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M8.5 5a3.5 3.5 0 1 1-1-2.45" /><polyline points="6.5 1.5 8.5 2.5 7.5 4.5" />
                     </svg>
@@ -1228,7 +1228,7 @@ export function AppShell() {
                   </span>
                 )}
                 {ctxStr && (
-                  <span style={{ display: "flex", alignItems: "center", gap: 4, color: ctxColor, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", color: ctxColor, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M1 9 L1 5 Q1 1 5 1 Q9 1 9 5 L9 9" /><line x1="1" y1="9" x2="9" y2="9" />
                     </svg>
@@ -1252,7 +1252,7 @@ export function AppShell() {
               // Scroll (not clip) when the window is too narrow for the stat
               // columns — usage/cost must never be cut off.
               overflow: "auto",
-              zIndex: 500,
+              zIndex: "var(--z-dropdown)",
             }}>
               {activeTopPanel === "system" && (
                 <div style={{
@@ -1263,9 +1263,9 @@ export function AppShell() {
                     <div style={{
                       maxHeight: "min(600px, 75vh)",
                       overflowY: "auto",
-                      padding: "12px 16px",
+                      padding: "var(--space-5) var(--space-6)",
                       color: "var(--text-muted)",
-                      fontSize: 12,
+                      fontSize: "var(--text-md)",
                       lineHeight: 1.6,
                       whiteSpace: "pre-wrap",
                       fontFamily: "var(--font-mono)",
@@ -1273,11 +1273,11 @@ export function AppShell() {
                       {systemPrompt}
                     </div>
                   ) : systemPrompt === "" ? (
-                    <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
+                    <div style={{ padding: "10px var(--space-6)", fontSize: "var(--text-md)", color: "var(--text-muted)", fontStyle: "italic" }}>
                       {t("appShell.systemPromptEmpty")}
                     </div>
                   ) : (
-                    <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
+                    <div style={{ padding: "10px var(--space-6)", fontSize: "var(--text-md)", color: "var(--text-muted)", fontStyle: "italic" }}>
                       {systemPromptLoading ? t("appShell.systemPromptLoading") : t("appShell.systemPromptLoadHint")}
                     </div>
                   )}
@@ -1288,7 +1288,7 @@ export function AppShell() {
                   background: "var(--bg-panel)",
                   borderBottom: "1px solid var(--border)",
                   boxShadow: "var(--shadow-pop)",
-                  padding: "12px 16px",
+                  padding: "var(--space-5) var(--space-6)",
                 }}>
                   {sessionStats ? (() => {
                     const sessionRows = [
@@ -1322,12 +1322,12 @@ export function AppShell() {
                       compact = false,
                     ) => (
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{title}</div>
+                          <div style={{ fontSize: "var(--text-sm)", fontWeight: 700, color: "var(--text)", marginBottom: "var(--space-3)" }}>{title}</div>
                           <div style={{
                             display: "grid",
                             gridTemplateColumns: compact ? "max-content max-content" : "auto minmax(0, 1fr)",
                             columnGap: compact ? 14 : 12,
-                            rowGap: 4,
+                            rowGap: "var(--space-2)",
                             justifyContent: compact ? "start" : undefined,
                           }}>
                             {sectionRows.map(([label, value]) => (
@@ -1394,8 +1394,8 @@ export function AppShell() {
                     };
                     const sessionInfoSection = (
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{t("appShell.sectionSessionInfo")}</div>
-                        <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", columnGap: 12, rowGap: 8, alignItems: "start" }}>
+                        <div style={{ fontSize: "var(--text-sm)", fontWeight: 700, color: "var(--text)", marginBottom: "var(--space-3)" }}>{t("appShell.sectionSessionInfo")}</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", columnGap: "var(--space-5)", rowGap: "var(--space-4)", alignItems: "start" }}>
                           {sessionRows.map((row) => (
                             <div key={`session-info:${row.label}`} style={{ display: "contents" }}>
                               <div style={{ color: "var(--text-dim)", whiteSpace: "nowrap" }}>{row.label}</div>
@@ -1419,8 +1419,8 @@ export function AppShell() {
                         gridTemplateColumns: isMobile
                           ? "1fr"
                           : "minmax(300px, 1.7fr) minmax(120px, 0.55fr) minmax(160px, 0.75fr)",
-                        gap: isMobile ? 16 : 24,
-                        fontSize: 12,
+                        gap: isMobile ? "var(--space-6)" : "var(--space-8)",
+                        fontSize: "var(--text-md)",
                         lineHeight: 1.5,
                         fontFamily: "var(--font-mono)",
                       }}>
@@ -1430,7 +1430,7 @@ export function AppShell() {
                       </div>
                     );
                   })() : (
-                    <div style={{ fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
+                    <div style={{ fontSize: "var(--text-md)", color: "var(--text-muted)", fontStyle: "italic" }}>
                       {t("appShell.sessionInfoLoadHint")}
                     </div>
                   )}
@@ -1467,23 +1467,23 @@ export function AppShell() {
           ) : initialCwdStatus === "validating" ? (
             <div
               role="status"
-              style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 24, color: "var(--text-muted)", textAlign: "center" }}
+              style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "var(--space-4)", padding: "var(--space-8)", color: "var(--text-muted)", textAlign: "center" }}
             >
-              <div style={{ fontSize: 14, color: "var(--text)" }}>{t("appShell.openingWorkspace")}</div>
-              <div style={{ maxWidth: "min(720px, 100%)", overflowWrap: "anywhere", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+              <div style={{ fontSize: "var(--text-lg)", color: "var(--text)" }}>{t("appShell.openingWorkspace")}</div>
+              <div style={{ maxWidth: "min(720px, 100%)", overflowWrap: "anywhere", fontFamily: "var(--font-mono)", fontSize: "var(--text-md)" }}>
                 {initialNavigation.requestedCwd}
               </div>
             </div>
           ) : initialCwdStatus === "error" ? (
             <div
               role="alert"
-              style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 24, color: "var(--text-muted)", textAlign: "center" }}
+              style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "var(--space-4)", padding: "var(--space-8)", color: "var(--text-muted)", textAlign: "center" }}
             >
-              <div style={{ fontSize: 14, color: "var(--status-error)" }}>{t("appShell.unableToOpenWorkspace")}</div>
-              <div style={{ maxWidth: "min(720px, 100%)", overflowWrap: "anywhere", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+              <div style={{ fontSize: "var(--text-lg)", color: "var(--status-error)" }}>{t("appShell.unableToOpenWorkspace")}</div>
+              <div style={{ maxWidth: "min(720px, 100%)", overflowWrap: "anywhere", fontFamily: "var(--font-mono)", fontSize: "var(--text-md)" }}>
                 {initialNavigation.requestedCwd}
               </div>
-              <div style={{ maxWidth: 720, fontSize: 12 }}>{initialCwdError}</div>
+              <div style={{ maxWidth: 720, fontSize: "var(--text-md)" }}>{initialCwdError}</div>
             </div>
           ) : !showPlaceholder ? (
             <PanelLoadingFallback />
@@ -1493,15 +1493,15 @@ export function AppShell() {
                 <span className="display-serif">{t("appShell.selectSessionHint")}</span>
               </div>
             ) : (
-              <div style={{ position: "absolute", top: 12, left: 12, display: "flex", alignItems: "flex-start", gap: 8, userSelect: "none", pointerEvents: "none" }}>
+              <div style={{ position: "absolute", top: "var(--space-5)", left: "var(--space-5)", display: "flex", alignItems: "flex-start", gap: "var(--space-4)", userSelect: "none", pointerEvents: "none" }}>
                 <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7, flexShrink: 0 }}>
                   <line x1="20" y1="12" x2="4" y2="12" /><polyline points="10 6 4 12 10 18" />
                 </svg>
                 <div>
-                  <div className="display-serif" style={{ fontSize: 20, color: "var(--text)", marginBottom: 8 }}>{t("appShell.getStarted")}</div>
-                  <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.8 }}>
-                    <span style={{ color: "var(--text-dim)", marginRight: 6 }}>1.</span>{t("appShell.getStartedStep1")}<br />
-                    <span style={{ color: "var(--text-dim)", marginRight: 6 }}>2.</span>
+                  <div className="display-serif" style={{ fontSize: 20, color: "var(--text)", marginBottom: "var(--space-4)" }}>{t("appShell.getStarted")}</div>
+                  <div style={{ fontSize: "var(--text-md)", color: "var(--text-muted)", lineHeight: 1.8 }}>
+                    <span style={{ color: "var(--text-dim)", marginRight: "var(--space-3)" }}>1.</span>{t("appShell.getStartedStep1")}<br />
+                    <span style={{ color: "var(--text-dim)", marginRight: "var(--space-3)" }}>2.</span>
                     {(() => {
                       // One translatable sentence; the {models} slot is rendered
                       // as the emphasized button name so word order stays free.
@@ -1542,7 +1542,7 @@ export function AppShell() {
             marginRight: -5,
             cursor: "col-resize",
             background: "transparent",
-            zIndex: 205,
+            zIndex: "var(--z-resize-handle)",
             outline: "none",
             transition: "background var(--dur-fast) var(--ease-out-warm)",
           }}
@@ -1566,7 +1566,7 @@ export function AppShell() {
         }}
       >
         {/* Right panel tab bar */}
-        <div style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 36 }}>
+        <div style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: "var(--control-height-lg)" }}>
           <div style={{ flex: 1, overflow: "hidden" }}>
             <TabBar
               tabs={fileTabs}
@@ -1595,7 +1595,7 @@ export function AppShell() {
               />
             </div>
           )) : (
-            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
+            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: "var(--text-md)" }}>
               {t("appShell.noFileOpen")}
             </div>
           )}

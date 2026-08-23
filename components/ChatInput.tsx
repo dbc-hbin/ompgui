@@ -2347,15 +2347,15 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             <div className="composer-toolbar-spacer" style={{ flex: 1 }} />
 
             {/* Context usage ring — a compact button with an anchored summary. */}
-            {hasContextRing && contextSummary && contextUsage && (
-              <div ref={contextDropdownRef} className="composer-context-ring-wrap">
+            <div ref={contextDropdownRef} className="composer-context-ring-wrap">
                 <button
                   type="button"
                   className="composer-context-ring"
-                  aria-haspopup="dialog"
+                  aria-haspopup={hasContextRing ? "dialog" : undefined}
                   aria-expanded={contextDropdownOpen}
-                  aria-label="Context window usage"
-                  title={contextSummary}
+                  aria-label={hasContextRing ? "Context window usage" : "Context window usage unavailable"}
+                  title={contextSummary ?? undefined}
+                  disabled={!hasContextRing}
                   onClick={() => setContextDropdownOpen((open) => !open)}
                 >
                   <svg width="100%" height="100%" viewBox="0 0 26 26" aria-hidden="true" style={{ position: "absolute", inset: 0 }}>
@@ -2372,13 +2372,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                     {contextPercentLabel}
                   </span>
                 </button>
-                {contextDropdownOpen && (
+                {hasContextRing && contextSummary && contextDropdownOpen && (
                   <div className="dropdown-surface composer-context-ring-popup" role="dialog" aria-label="Context window usage">
                     <span className="composer-context-ring-popup-summary">{contextSummary}</span>
                   </div>
                 )}
               </div>
-            )}
 
             {/* Queue-during-run actions: Steer injects into the current turn,
                 Follow-up schedules after it. These visible buttons were
@@ -2423,6 +2422,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 type="button"
                 onClick={isCompacting ? onAbortCompaction : onAbort}
                 title={t("chatInput.stopAgent")}
+                aria-label={t("chatInput.stopAgent")}
                 data-state="stop"
               >
                 <svg width="9" height="9" viewBox="0 0 10 10" fill="none" aria-hidden="true">
@@ -2436,9 +2436,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 type="button"
                 onClick={handleSend}
                 disabled={!value.trim() && !attachedImages.length && !attachedTextFiles.length}
+                title={t("chatInput.send")}
+                aria-label={t("chatInput.send")}
                 data-state="send"
               >
-                <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <line x1="2" y1="7" x2="11" y2="7" />
                   <polyline points="7.5 3 12 7 7.5 11" />
                 </svg>

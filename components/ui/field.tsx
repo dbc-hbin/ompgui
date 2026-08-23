@@ -5,9 +5,10 @@
  *
  * Tokens come from app/globals.css (--bg, --bg-panel, --border, --accent,
  * --accent-strong, --accent-hover, --text, --text-muted, --text-dim,
- * --radius-control, --radius-card, --shadow-card, --shadow-pop). No global
- * CSS edits — focus glow + invalid state are implemented inline via React
- * state on focus / blur so we don't need to touch globals.css.
+ * --radius-control, --radius-card, --shadow-card, --shadow-pop, --space-*,
+ * --text-*, --control-height-*). No global CSS edits — focus glow + invalid
+ * state are implemented inline via React state on focus / blur so we don't need
+ * to touch globals.css.
  */
 import {
   cloneElement,
@@ -56,17 +57,17 @@ export function Field({ label, hint, error, required, children, style, id }: Fie
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0, ...style }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", minWidth: 0, ...style }}>
       <label
         htmlFor={fieldId}
         style={{
-          fontSize: 11,
+          fontSize: "var(--text-sm)",
           fontWeight: 500,
           color: error ? "var(--accent)" : "var(--text-muted)",
           letterSpacing: "0.01em",
           display: "flex",
           alignItems: "center",
-          gap: 4,
+          gap: "var(--space-2)",
         }}
       >
         {label}
@@ -76,7 +77,7 @@ export function Field({ label, hint, error, required, children, style, id }: Fie
       {error ? (
         <FieldError id={errorId}>{error}</FieldError>
       ) : hint ? (
-        <span id={hintId} style={{ fontSize: 10, color: "var(--text-dim)", lineHeight: 1.4 }}>{hint}</span>
+        <span id={hintId} style={{ fontSize: "var(--text-xs)", color: "var(--text-dim)", lineHeight: 1.4 }}>{hint}</span>
       ) : null}
     </div>
   );
@@ -90,11 +91,11 @@ function FieldError({ children, id }: { children: ReactNode; id?: string }) {
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 4,
-        fontSize: 12,
+        gap: "var(--space-2)",
+        fontSize: "var(--text-md)",
         color: "var(--accent)",
         lineHeight: 1.3,
-        marginTop: 1,
+        marginTop: "calc(var(--space-1) / 2)",
       }}
     >
       <AlertCircle size={12} aria-hidden="true" />
@@ -119,8 +120,8 @@ export function FieldGroup({
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: 10,
-        padding: "12px 14px",
+        gap: "calc(var(--space-5) - var(--space-1))",
+        padding: "var(--space-5) calc(var(--space-5) + var(--space-1))",
         background: "var(--bg-panel)",
         border: "1px solid var(--border)",
         borderRadius: "var(--radius-card)",
@@ -131,7 +132,7 @@ export function FieldGroup({
     >
       <div
         style={{
-          fontSize: 11,
+          fontSize: "var(--text-sm)",
           fontWeight: 600,
           color: "var(--text-muted)",
           textTransform: "uppercase",
@@ -140,7 +141,7 @@ export function FieldGroup({
       >
         {label}
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>{children}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "calc(var(--space-5) - var(--space-1))", minWidth: 0 }}>{children}</div>
     </section>
   );
 }
@@ -153,12 +154,12 @@ interface InputShellStyleOptions {
 
 function inputShellStyle({ invalid }: InputShellStyleOptions): CSSProperties {
   return {
-    padding: "6px 9px",
+    padding: "var(--space-3) calc(var(--space-4) + var(--space-1) / 2)",
     background: "var(--bg)",
     border: `1px solid ${invalid ? "var(--accent)" : "var(--border)"}`,
     borderRadius: "var(--radius-control)",
     color: "var(--text)",
-    fontSize: 12,
+    fontSize: "var(--text-md)",
     outline: "none",
     width: "100%",
     boxSizing: "border-box",
@@ -337,7 +338,7 @@ export function SecretInput({
         style={{
           ...inputShellStyle({ invalid: isInvalid }),
           ...focusGlowStyle(focused, isInvalid),
-          paddingRight: 34,
+          paddingRight: "calc(var(--control-height-lg) - var(--space-1))",
           fontFamily: "var(--font-mono)",
           opacity: disabled ? 0.6 : 1,
         }}
@@ -349,11 +350,11 @@ export function SecretInput({
         title={visible ? hideLabel : showLabel}
         style={{
           position: "absolute",
-          right: 5,
+          right: "calc(var(--space-2) + var(--space-1) / 2)",
           top: "50%",
           transform: "translateY(-50%)",
-          width: 24,
-          height: 24,
+          width: "calc(var(--control-height-sm) - var(--space-2))",
+          height: "calc(var(--control-height-sm) - var(--space-2))",
           padding: 0,
           border: "none",
           background: "transparent",
@@ -362,7 +363,7 @@ export function SecretInput({
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          borderRadius: 4,
+          borderRadius: "calc(var(--radius-control) / 2)",
         }}
       >
         {visible ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
@@ -414,7 +415,7 @@ export function Select({
         color: value ? "var(--text)" : "var(--text-dim)",
         appearance: "none",
         width: "100%",
-        paddingRight: 24,
+        paddingRight: "var(--space-8)",
         opacity: disabled ? 0.6 : 1,
       }}
     >
@@ -435,7 +436,7 @@ export function Select({
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
-      style={{ position: "absolute", right: 8, color: "var(--text-dim)", pointerEvents: "none" }}
+      style={{ position: "absolute", right: "var(--space-4)", color: "var(--text-dim)", pointerEvents: "none" }}
     >
       <polyline points="6 9 12 15 18 9" />
     </svg>
@@ -458,9 +459,9 @@ export function Check({ label, checked, onChange, disabled }: CheckProps) {
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 6,
+        gap: "var(--space-3)",
         cursor: disabled ? "not-allowed" : "pointer",
-        fontSize: 12,
+        fontSize: "var(--text-md)",
         color: disabled ? "var(--text-dim)" : "var(--text-muted)",
         opacity: disabled ? 0.7 : 1,
       }}
@@ -534,15 +535,19 @@ export function ConfirmDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         ariaLabel={typeof title === "string" ? title : undefined}
-        style={{ width: 420, maxWidth: "min(92vw, 420px)", padding: 22 }}
+        style={{
+          width: 420,
+          maxWidth: "min(92vw, 420px)",
+          padding: "calc(var(--space-8) - var(--space-1))",
+        }}
       >
         <DialogTitle>{title}</DialogTitle>
-        <div style={{ height: 8 }} />
+        <div style={{ height: "var(--space-4)" }} />
         {description && (
           <p
             style={{
-              margin: "0 0 18px",
-              fontSize: 13,
+              margin: "0 0 calc(var(--space-6) + var(--space-1))",
+              fontSize: "var(--text-base)",
               lineHeight: 1.55,
               color: "var(--text-muted)",
             }}
@@ -550,18 +555,18 @@ export function ConfirmDialog({
             {description}
           </p>
         )}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--space-4)" }}>
           <button
             type="button"
             onClick={() => onOpenChange(false)}
             style={{
-              padding: "6px 14px",
+              padding: "var(--space-3) calc(var(--space-5) + var(--space-1))",
               background: "none",
               border: "1px solid var(--border)",
               borderRadius: "var(--radius-control)",
               color: "var(--text-muted)",
               cursor: "pointer",
-              fontSize: 13,
+              fontSize: "var(--text-base)",
             }}
           >
             {cancelLabel ?? "Cancel"}
@@ -571,13 +576,13 @@ export function ConfirmDialog({
             disabled={busy}
             onClick={onConfirm}
             style={{
-              padding: "6px 14px",
+              padding: "var(--space-3) calc(var(--space-5) + var(--space-1))",
               background: "var(--accent-strong)",
               border: "none",
               borderRadius: "var(--radius-control)",
               color: "var(--on-accent)",
               cursor: busy ? "wait" : "pointer",
-              fontSize: 13,
+              fontSize: "var(--text-base)",
               fontWeight: 600,
               opacity: busy ? 0.7 : 1,
               transition: "background var(--dur-fast) var(--ease-out-warm)",

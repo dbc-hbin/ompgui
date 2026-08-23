@@ -51,7 +51,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
         background: "var(--bg-panel)",
         overflowX: "auto",
         flexShrink: 0,
-        height: 36,
+        height: "var(--control-height-lg)",
       }}
     >
       {tabs.map((tab) => {
@@ -94,14 +94,14 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 6,
-              height: 36,
-              paddingLeft: 12,
-              paddingRight: 6,
+              gap: "var(--space-3)",
+              height: "var(--control-height-lg)",
+              paddingLeft: "var(--space-5)",
+              paddingRight: "var(--space-3)",
               borderRight: "1px solid var(--border)",
               background: isActive ? "var(--bg)" : "var(--bg-panel)",
               cursor: "pointer",
-              fontSize: 12,
+              fontSize: "var(--text-md)",
               color: isActive ? "var(--text)" : "var(--text-muted)",
               whiteSpace: "nowrap",
               maxWidth: 180,
@@ -149,7 +149,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               onMouseLeave={() => setHoveredClose(null)}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
-                width: 24, height: 24,
+                width: "var(--space-8)", height: "var(--space-8)",
                 background: hoveredClose === tab.id ? "var(--bg-hover)" : "transparent",
                 border: "none",
                 borderRadius: "var(--radius-control)",

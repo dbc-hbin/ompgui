@@ -218,7 +218,7 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: 12,
+        gap: "var(--space-5)",
         padding: embedded ? 0 : isMobile ? "12px 14px" : 20,
         color: "var(--text)",
         minHeight: 0,
@@ -227,41 +227,41 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
         overflowX: "hidden",
       }}
     >
-      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--space-5)", flexWrap: "wrap" }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, display: "flex", alignItems: "center", gap: "var(--space-4)" }}>
             <Bot size={18} style={{ color: "var(--accent)" }} />
             {t("agentsConfig.title")}
           </h2>
-          <p style={{ margin: "3px 0 0", fontSize: 12, color: "var(--text-muted)" }}>
+          <p style={{ margin: "3px 0 0", fontSize: "var(--text-md)", color: "var(--text-muted)" }}>
             {t("agentsConfig.description")}
           </p>
         </div>
         {onClose && (
-          <button type="button" onClick={onClose} aria-label="Close" style={{ background: "transparent", border: 0, color: "var(--text-muted)", cursor: "pointer", padding: 4 }}>
+          <button type="button" onClick={onClose} aria-label="Close" style={{ background: "transparent", border: 0, color: "var(--text-muted)", cursor: "pointer", padding: "var(--space-2)" }}>
             <X size={18} />
           </button>
         )}
       </header>
 
       {statusNotice && (
-        <div role="status" style={{ padding: "8px 12px", borderRadius: "var(--radius-control)", background: "color-mix(in srgb, var(--status-success) 12%, transparent)", border: "1px solid var(--status-success)", color: "var(--status-success)", fontSize: 12 }}>
+        <div role="status" style={{ padding: "8px 12px", borderRadius: "var(--radius-control)", background: "var(--status-success-subtle)", border: "1px solid var(--status-success)", color: "var(--status-success)", fontSize: "var(--text-md)" }}>
           {statusNotice}
         </div>
       )}
 
       {error && (
-        <div role="alert" style={{ padding: "8px 12px", borderRadius: "var(--radius-control)", background: "color-mix(in srgb, var(--status-error) 12%, transparent)", border: "1px solid var(--status-error)", color: "var(--status-error)", fontSize: 12 }}>
+        <div role="alert" style={{ padding: "8px 12px", borderRadius: "var(--radius-control)", background: "color-mix(in srgb, var(--status-error) 12%, transparent)", border: "1px solid var(--status-error)", color: "var(--status-error)", fontSize: "var(--text-md)" }}>
           {error}
         </div>
       )}
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", flexShrink: 0 }}>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--space-4)", flexWrap: "wrap", flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap", alignItems: "center" }}>
           <button
             type="button"
             onClick={() => setCreateModalOpen(true)}
-            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: "var(--radius-control)", background: "var(--accent-strong)", color: "var(--on-accent)", border: 0, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: "var(--radius-control)", background: "var(--accent-strong)", color: "var(--on-accent)", border: 0, fontSize: "var(--text-md)", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}
           >
             <Plus size={13} /> {t("agentsConfig.newAgent")}
           </button>
@@ -269,7 +269,7 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
             type="button"
             disabled={unpacking}
             onClick={() => void handleUnpack()}
-            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 12, cursor: unpacking ? "wait" : "pointer", whiteSpace: "nowrap" }}
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", border: "1px solid var(--border)", color: "var(--text)", fontSize: "var(--text-md)", cursor: unpacking ? "wait" : "pointer", whiteSpace: "nowrap" }}
           >
             <Download size={13} /> {unpacking ? t("agentsConfig.unpacking") : t("agentsConfig.unpackBundled")}
           </button>
@@ -277,7 +277,7 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
             type="button"
             onClick={() => void load()}
             aria-label="Refresh"
-            style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, borderRadius: "var(--radius-control)", background: "var(--bg-panel)", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer", flexShrink: 0 }}
+            style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: "var(--control-height-sm)", height: "var(--control-height-sm)", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer", flexShrink: 0 }}
           >
             <RefreshCw size={13} className={loading ? "spin" : ""} />
           </button>
@@ -290,12 +290,12 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t("agentsConfig.searchPlaceholder")}
-            style={{ width: "100%", height: 28, padding: "0 8px 0 26px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", color: "var(--text)", fontSize: 12, outline: "none" }}
+            style={{ width: "100%", height: "var(--control-height-sm)", padding: "0 8px 0 26px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", color: "var(--text)", fontSize: "var(--text-md)", outline: "none" }}
           />
         </div>
       </div>
 
-      <nav aria-label="Agent scopes" style={{ display: "flex", gap: 4, borderBottom: "1px solid var(--border)", overflowX: "auto", flexShrink: 0, WebkitOverflowScrolling: "touch", paddingBottom: 2 }}>
+      <nav aria-label="Agent scopes" style={{ display: "flex", gap: "var(--space-2)", borderBottom: "1px solid var(--border)", overflowX: "auto", flexShrink: 0, WebkitOverflowScrolling: "touch", paddingBottom: 2 }}>
         {scopeTabs.map((tab) => {
           const selected = scopeFilter === tab.id;
           return (
@@ -310,18 +310,18 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
                 color: selected ? "var(--text)" : "var(--text-muted)",
                 fontWeight: selected ? 600 : 400,
                 padding: "6px 10px",
-                fontSize: 12,
+                fontSize: "var(--text-md)",
                 cursor: "pointer",
                 display: "inline-flex",
                 alignItems: "center",
-                gap: 6,
+                gap: "var(--space-3)",
                 whiteSpace: "nowrap",
                 flexShrink: 0,
               }}
             >
               {tab.label}
               {typeof tab.count === "number" && (
-                <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 10, background: selected ? "var(--accent-subtle, var(--border))" : "var(--bg-panel)", color: "var(--text-muted)" }}>
+                <span style={{ fontSize: "var(--text-xs)", padding: "1px 6px", borderRadius: 10, background: selected ? "var(--accent-subtle)" : "var(--bg-panel)", color: "var(--text-muted)" }}>
                   {tab.count}
                 </span>
               )}
@@ -331,12 +331,12 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
       </nav>
 
       {loading ? (
-        <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
+        <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)", fontSize: "var(--text-base)" }}>
           <RefreshCw size={16} className="spin" style={{ display: "inline-block", marginRight: 8 }} />
           Loading…
         </div>
       ) : filteredAgents.length === 0 ? (
-        <div style={{ padding: 40, textAlign: "center", color: "var(--text-dim)", fontSize: 13, background: "var(--bg-panel)", borderRadius: "var(--radius-card)", border: "1px solid var(--border)" }}>
+        <div style={{ padding: 40, textAlign: "center", color: "var(--text-dim)", fontSize: "var(--text-base)", background: "var(--bg-panel)", borderRadius: "var(--radius-card)", border: "1px solid var(--border)" }}>
           {t("agentsConfig.noAgentsFound")}
         </div>
       ) : (
@@ -417,16 +417,16 @@ function AgentCard({
         flexDirection: "column",
         gap: 10,
         opacity: disabled ? 0.6 : 1,
-        transition: "opacity var(--dur-fast) ease",
+        transition: "opacity var(--dur-fast) var(--ease-out-warm)",
       }}
     >
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "var(--space-4)" }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{agent.name}</h3>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-4)", flexWrap: "wrap" }}>
+            <h3 style={{ margin: 0, fontSize: "var(--text-lg)", fontWeight: 600, color: "var(--text)" }}>{agent.name}</h3>
             <span
               style={{
-                fontSize: 10,
+                fontSize: "var(--text-xs)",
                 fontWeight: 600,
                 padding: "1px 6px",
                 borderRadius: 4,
@@ -440,18 +440,18 @@ function AgentCard({
             {agent.isShadowed && (
               <span
                 title={t("agentsConfig.shadowedHint")}
-                style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "var(--bg-subtle)", color: "var(--text-dim)" }}
+                style={{ fontSize: "var(--text-xs)", padding: "1px 6px", borderRadius: 4, background: "var(--bg-subtle)", color: "var(--text-dim)" }}
               >
                 {t("agentsConfig.shadowedBadge")}
               </span>
             )}
           </div>
-          <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)", lineHeight: 1.4 }}>
+          <p style={{ margin: "4px 0 0", fontSize: "var(--text-md)", color: "var(--text-muted)", lineHeight: 1.4 }}>
             {agent.description}
           </p>
         </div>
 
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 11, color: "var(--text-muted)", flexShrink: 0 }}>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-3)", cursor: "pointer", fontSize: "var(--text-sm)", color: "var(--text-muted)", flexShrink: 0 }}>
           <input
             type="checkbox"
             checked={!disabled}
@@ -469,7 +469,7 @@ function AgentCard({
             background: "var(--bg)",
             border: "1px solid var(--border)",
             borderRadius: "var(--radius-control)",
-            fontSize: 11,
+            fontSize: "var(--text-sm)",
             color: "var(--text-dim)",
             maxHeight: 60,
             overflow: "hidden",
@@ -485,27 +485,27 @@ function AgentCard({
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center" }}>
         {isReadOnly ? (
-          <span style={{ fontSize: 11, padding: "2px 7px", borderRadius: 4, background: "color-mix(in srgb, var(--accent) 12%, transparent)", color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <span style={{ fontSize: "var(--text-sm)", padding: "2px 7px", borderRadius: 4, background: "var(--accent-subtle)", color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4 }}>
             <Eye size={11} /> {t("agentsConfig.readOnly")}
           </span>
         ) : (
-          <span style={{ fontSize: 11, padding: "2px 7px", borderRadius: 4, background: "var(--bg)", color: "var(--text-muted)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <span style={{ fontSize: "var(--text-sm)", padding: "2px 7px", borderRadius: 4, background: "var(--bg)", color: "var(--text-muted)", display: "inline-flex", alignItems: "center", gap: 4 }}>
             <Wrench size={11} /> {agent.tools ? `${agent.tools.length} ${t("agentsConfig.tools")}` : "all tools"}
           </span>
         )}
 
         {agent.tools?.map((tool) => (
-          <span key={tool} style={{ fontSize: 10, padding: "1px 5px", borderRadius: 3, background: "var(--bg)", border: "1px solid var(--border)", color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+          <span key={tool} style={{ fontSize: "var(--text-xs)", padding: "1px 5px", borderRadius: 3, background: "var(--bg)", border: "1px solid var(--border)", color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
             {tool}
           </span>
         ))}
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: "auto" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)", borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: "auto" }}>
           <AgentModelOverrideEditor agent={agent} models={models} onChange={(value) => onUpdateOverride("model", value)} />
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--space-3)", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap" }}>
           <button
             type="button"
             onClick={() => onUpdateOverride("advisor", agent.advisorOverride === true ? false : true)}
@@ -515,7 +515,7 @@ function AgentCard({
               border: "1px solid var(--border)",
               background: agent.advisorOverride ? "color-mix(in srgb, var(--accent) 15%, transparent)" : "var(--bg)",
               color: agent.advisorOverride ? "var(--accent)" : "var(--text-dim)",
-              fontSize: 11,
+              fontSize: "var(--text-sm)",
               cursor: "pointer",
             }}
           >
@@ -530,7 +530,7 @@ function AgentCard({
               border: "1px solid var(--border)",
               background: agent.prewalkOverride ? "color-mix(in srgb, var(--accent) 15%, transparent)" : "var(--bg)",
               color: agent.prewalkOverride ? "var(--accent)" : "var(--text-dim)",
-              fontSize: 11,
+              fontSize: "var(--text-sm)",
               cursor: "pointer",
             }}
           >
@@ -538,14 +538,14 @@ function AgentCard({
           </button>
         </div>
 
-          <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
+          <div style={{ display: "flex", gap: "var(--space-2)", marginLeft: "auto" }}>
             {isCustom && (
               <button
                 type="button"
                 onClick={onEdit}
                 title={t("agentsConfig.editAgent")}
                 aria-label={t("agentsConfig.editAgent")}
-                style={{ background: "transparent", border: 0, color: "var(--text-muted)", cursor: "pointer", padding: 4 }}
+                style={{ background: "transparent", border: 0, color: "var(--text-muted)", cursor: "pointer", padding: "var(--space-2)" }}
               >
                 <Edit3 size={14} />
               </button>
@@ -556,7 +556,7 @@ function AgentCard({
                 onClick={onDelete}
                 title={t("agentsConfig.deleteAgent")}
                 aria-label={t("agentsConfig.deleteAgent")}
-                style={{ background: "transparent", border: 0, color: "var(--status-error)", cursor: "pointer", padding: 4 }}
+                style={{ background: "transparent", border: 0, color: "var(--status-error)", cursor: "pointer", padding: "var(--space-2)" }}
               >
                 <Trash2 size={14} />
               </button>
@@ -591,10 +591,10 @@ function AgentModelOverrideEditor({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0, width: "100%" }}>
-      <label htmlFor={listId} style={{ fontSize: 11, color: "var(--text-muted)" }}>
+      <label htmlFor={listId} style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
         {t("agentsConfig.modelOverride")}
       </label>
-      <div style={{ display: "flex", alignItems: "center", gap: 4, width: "100%" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", width: "100%" }}>
         <input
           id={listId}
           list={`${listId}-options`}
@@ -610,7 +610,7 @@ function AgentModelOverrideEditor({
           }}
           placeholder={t("agentsConfig.modelOverridePlaceholder")}
           title={t("agentsConfig.modelOverrideHint")}
-          style={{ minWidth: 0, flex: 1, width: "100%", padding: "4px 7px", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 11, fontFamily: "var(--font-mono)" }}
+          style={{ minWidth: 0, flex: 1, width: "100%", padding: "4px 7px", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: "var(--text-sm)", fontFamily: "var(--font-mono)" }}
         />
         {persisted && (
           <button
@@ -628,7 +628,7 @@ function AgentModelOverrideEditor({
           {models.map((model) => <option key={model.selector} value={model.selector}>{model.label}</option>)}
         </datalist>
       </div>
-      <span style={{ fontSize: 10, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <span style={{ fontSize: "var(--text-xs)", color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {persisted ? (
           <span style={{ color: "var(--accent)" }}>✓ {persisted}</span>
         ) : (
@@ -691,7 +691,7 @@ function AgentModal({
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "var(--overlay-backdrop)", display: "grid", placeItems: "center", zIndex: 1000, padding: 16 }}>
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay-backdrop)", display: "grid", placeItems: "center", zIndex: 1000, padding: "var(--space-6)" }}>
       <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: "var(--radius-modal)", boxShadow: "var(--shadow-modal)", width: "min(100%, 540px)", maxHeight: "90vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <header style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
@@ -702,16 +702,16 @@ function AgentModal({
           </button>
         </header>
 
-        <form onSubmit={handleSubmit} style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
-          {error && <div role="alert" style={{ color: "var(--status-error)", fontSize: 12 }}>{error}</div>}
+        <form onSubmit={handleSubmit} style={{ padding: 18, display: "flex", flexDirection: "column", gap: "var(--space-5)", overflowY: "auto" }}>
+          {error && <div role="alert" style={{ color: "var(--status-error)", fontSize: "var(--text-md)" }}>{error}</div>}
 
           {!isEdit && (
-            <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: "var(--text-md)", fontWeight: 600, color: "var(--text-muted)" }}>
               Scope
               <select
                 value={scope}
                 onChange={(e) => setScope(e.target.value as "user" | "project")}
-                style={{ height: 32, padding: "0 8px", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12 }}
+                style={{ height: "var(--control-height)", padding: "0 8px", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: "var(--text-md)" }}
               >
                 <option value="user">User (~/.omp/agent/agents)</option>
                 <option value="project">Project (.omp/agents)</option>
@@ -719,7 +719,7 @@ function AgentModal({
             </label>
           )}
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: "var(--text-md)", fontWeight: 600, color: "var(--text-muted)" }}>
             {t("agentsConfig.nameLabel")}
             <input
               type="text"
@@ -728,11 +728,11 @@ function AgentModal({
               value={name}
               onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
               placeholder={t("agentsConfig.namePlaceholder")}
-              style={{ height: 32, padding: "0 8px", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12 }}
+              style={{ height: "var(--control-height)", padding: "0 8px", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: "var(--text-md)" }}
             />
           </label>
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: "var(--text-md)", fontWeight: 600, color: "var(--text-muted)" }}>
             {t("agentsConfig.descLabel")}
             <input
               type="text"
@@ -740,30 +740,30 @@ function AgentModal({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder={t("agentsConfig.descPlaceholder")}
-              style={{ height: 32, padding: "0 8px", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12 }}
+              style={{ height: "var(--control-height)", padding: "0 8px", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: "var(--text-md)" }}
             />
           </label>
 
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
-            <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: "var(--text-md)", fontWeight: 600, color: "var(--text-muted)" }}>
               {t("agentsConfig.toolsLabel")}
               <input
                 type="text"
                 value={tools}
                 onChange={(e) => setTools(e.target.value)}
                 placeholder="read, write, edit, bash"
-                style={{ height: 32, padding: "0 8px", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12 }}
+                style={{ height: "var(--control-height)", padding: "0 8px", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: "var(--text-md)" }}
               />
             </label>
 
-            <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: "var(--text-md)", fontWeight: 600, color: "var(--text-muted)" }}>
               Model
               <input
                 list="modal-agent-models-list"
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
                 placeholder={t("agentsConfig.modelOverridePlaceholder")}
-                style={{ height: 32, padding: "0 8px", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, fontFamily: "var(--font-mono)" }}
+                style={{ height: "var(--control-height)", padding: "0 8px", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: "var(--text-md)", fontFamily: "var(--font-mono)" }}
               />
               <datalist id="modal-agent-models-list">
                 {models.map((m) => (
@@ -773,7 +773,7 @@ function AgentModal({
             </label>
           </div>
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: "var(--text-md)", fontWeight: 600, color: "var(--text-muted)" }}>
             {t("agentsConfig.promptLabel")}
             <textarea
               required
@@ -781,22 +781,22 @@ function AgentModal({
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
               placeholder={t("agentsConfig.promptPlaceholder")}
-              style={{ padding: 8, borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, fontFamily: "var(--font-mono)", lineHeight: 1.4, resize: "vertical" }}
+              style={{ padding: "var(--space-4)", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: "var(--text-md)", fontFamily: "var(--font-mono)", lineHeight: 1.4, resize: "vertical" }}
             />
           </label>
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--space-4)", marginTop: 8 }}>
             <button
               type="button"
               onClick={onCancel}
-              style={{ padding: "7px 14px", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "transparent", color: "var(--text)", fontSize: 12, cursor: "pointer" }}
+              style={{ padding: "7px 14px", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", background: "transparent", color: "var(--text)", fontSize: "var(--text-md)", cursor: "pointer" }}
             >
               {t("agentsConfig.cancel")}
             </button>
             <button
               type="submit"
               disabled={saving}
-              style={{ padding: "7px 16px", borderRadius: "var(--radius-control)", background: "var(--accent-strong)", color: "var(--on-accent)", border: 0, fontSize: 12, fontWeight: 600, cursor: saving ? "wait" : "pointer" }}
+              style={{ padding: "7px 16px", borderRadius: "var(--radius-control)", background: "var(--accent-strong)", color: "var(--on-accent)", border: 0, fontSize: "var(--text-md)", fontWeight: 600, cursor: saving ? "wait" : "pointer" }}
             >
               {saving ? t("agentsConfig.saving") : t("agentsConfig.save")}
             </button>

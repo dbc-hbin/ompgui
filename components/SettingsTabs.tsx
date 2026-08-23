@@ -116,7 +116,7 @@ export function SettingsTabs({
                 cursor: disabled ? "not-allowed" : "pointer",
                 opacity: disabled ? 0.5 : 1,
                 textAlign: "left",
-                transition: "background var(--dur-fast), color var(--dur-fast)",
+                transition: "background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm)",
                 width: "100%",
               }}
             >
@@ -186,7 +186,7 @@ export function SettingsTabs({
               whiteSpace: "nowrap",
               textAlign: "left",
               flexShrink: 0,
-              transition: "all var(--dur-fast) ease",
+              transition: "all var(--dur-fast) var(--ease-out-warm)",
             }}
           >
             <Icon size={14} aria-hidden="true" style={{ marginTop: 2, flexShrink: 0, color: selected ? "var(--accent)" : "currentColor" }} />

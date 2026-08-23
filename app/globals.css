@@ -223,7 +223,35 @@ html[data-palette="omp"].dark {
   --text-lg: 14px;
   --text-xl: 17px;
   --composer-ring-size: 26px;
+  --composer-control-h: var(--control-height-sm);
+  --composer-attachment-w: var(--control-height-sm);
+  --composer-thinking-max-w: 66px;
+  --composer-send-size: 34px;
+  --sidebar-mobile-width: 280px;
+  --accent-subtle: color-mix(in srgb, var(--accent) 12%, transparent);
+  --status-success-subtle: color-mix(in srgb, var(--status-success) 12%, transparent);
+  --status-warning-subtle: color-mix(in srgb, var(--status-warning) 12%, transparent);
+  --code-bg: color-mix(in srgb, var(--bg) 88%, var(--bg-panel));
+  --code-font-size: 12.5px;
+  --code-line-height: 1.62;
+  --code-padding-block: 11px;
+  --code-padding-inline: 13px;
   --control-padding-inline: 10px;
+  --z-dropdown: 50;
+  --z-extension-dialog: 90;
+  --z-tooltip: 120;
+  --z-sidebar-backdrop: 199;
+  --z-sidebar: 200;
+  --z-resize-handle: 205;
+  --z-file-toggle: 300;
+  --z-branch-popover: 600;
+  --z-dialog-backdrop: 1000;
+  --z-dialog: 1001;
+  --z-directory-picker: 1002;
+  --z-command-palette: 2000;
+  --z-toast: 2100;
+  --dur-spin: 800ms;
+  --shadow-live-indicator: 0 0 4px var(--status-success);
   --focus-ring: 0 0 0 2px color-mix(in srgb, var(--focus-ring-color) 22%, transparent);
   /* Warm diffuse shadows (light); dark theme swaps to ambient glow below. */
   --shadow-card: 0 1px 2px rgba(60,50,35,0.05), 0 2px 8px rgba(60,50,35,0.06);
@@ -706,7 +734,7 @@ pre, code {
   border-radius: 50%;
   border: 2px solid var(--border);
   border-top-color: var(--accent);
-  animation: spin 0.8s linear infinite;
+  animation: spin var(--dur-spin) linear infinite;
 }
 .mermaid-block-error {
   color: var(--text-muted);
@@ -1363,7 +1391,7 @@ span.token.table {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
-.icon-spin { animation: spin 0.8s linear infinite; }
+.icon-spin { animation: spin var(--dur-spin) linear infinite; }
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }
@@ -1742,7 +1770,7 @@ html.dark .dropdown-surface :is(select, option) {
   position: fixed;
   top: calc((var(--shell-topbar-height) - var(--shell-file-toggle-size)) / 2);
   right: calc((var(--shell-topbar-height) - var(--shell-file-toggle-size)) / 2);
-  z-index: 300;
+  z-index: var(--z-file-toggle);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1765,6 +1793,10 @@ html.dark .dropdown-surface :is(select, option) {
   :root {
     --shell-topbar-height: 44px;
     --composer-ring-size: 28px;
+    --composer-control-h: 44px;
+    --composer-attachment-w: 36px;
+    --composer-thinking-max-w: 66px;
+    --composer-send-size: 34px;
   }
   .shell-toolbar-btn {
     width: 40px;
@@ -1960,11 +1992,11 @@ html.dark .dropdown-surface :is(select, option) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: var(--control-height-sm);
-  height: var(--control-height-sm);
+  width: var(--composer-attachment-w, var(--control-height-sm));
+  height: var(--composer-control-h, var(--control-height-sm));
   padding: 0;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: none;
   color: var(--text-muted);
   cursor: pointer;
@@ -1988,11 +2020,11 @@ html.dark .dropdown-surface :is(select, option) {
 .composer-thinking-button {
   display: flex;
   align-items: center;
-  gap: 5px;
-  height: var(--control-height-sm);
+  gap: var(--space-2, 4px);
+  height: var(--composer-control-h, var(--control-height-sm));
   padding: 0 var(--space-4);
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   color: var(--text-muted);
   font-size: var(--text-md);
   transition: background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm);
@@ -2009,11 +2041,11 @@ html.dark .dropdown-surface :is(select, option) {
 .composer-fast-toggle {
   display: flex;
   align-items: center;
-  gap: 5px;
-  height: var(--control-height-sm);
+  gap: var(--space-2, 4px);
+  height: var(--composer-control-h, var(--control-height-sm));
   padding: 0 var(--space-4);
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: none;
   font-size: var(--text-md);
   font-weight: 600;
@@ -2022,8 +2054,9 @@ html.dark .dropdown-surface :is(select, option) {
 .composer-primary-action {
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: var(--control-height-sm);
+  justify-content: center;
+  gap: var(--space-3, 6px);
+  height: var(--composer-control-h, var(--control-height-sm));
   padding: 0 calc(var(--space-5) + var(--space-1));
   border: none;
   border-radius: var(--radius-control);
@@ -2126,13 +2159,13 @@ html.dark .dropdown-surface :is(select, option) {
 .composer-queue-action {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 28px;
-  padding: 0 8px;
+  gap: var(--space-2, 4px);
+  height: var(--composer-control-h, var(--control-height-sm));
+  padding: 0 var(--space-4, 8px);
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: none;
-  font-size: 12px;
+  font-size: var(--text-md, 12px);
   font-weight: 600;
   cursor: pointer;
   flex-shrink: 0;
@@ -2140,11 +2173,11 @@ html.dark .dropdown-surface :is(select, option) {
 }
 .composer-queue-action-steer {
   color: var(--status-warning);
-  background: color-mix(in srgb, var(--status-warning) 12%, transparent);
+  background: var(--status-warning-subtle);
 }
 .composer-queue-action-followup {
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: var(--accent-subtle);
 }
 .composer-queue-action:disabled {
   background: none;
@@ -2164,16 +2197,16 @@ html.dark .dropdown-surface :is(select, option) {
   }
   .composer-toolbar {
     display: grid !important;
-    grid-template-columns: 36px minmax(0, 1fr) auto var(--composer-ring-size) auto;
+    grid-template-columns: var(--composer-attachment-w, 36px) minmax(0, 1fr) minmax(0, var(--composer-thinking-max-w, 66px)) var(--composer-ring-size, 28px) var(--composer-send-size, 34px);
     align-items: center;
-    gap: 6px !important;
+    gap: var(--space-3, 6px) !important;
   }
   .composer-attachment {
     order: 1;
     grid-column: 1;
     grid-row: 1;
-    width: 36px !important;
-    height: 44px !important;
+    width: var(--composer-attachment-w, 36px) !important;
+    height: var(--composer-control-h, 44px) !important;
     border-radius: var(--radius-control) !important;
     touch-action: manipulation;
   }
@@ -2186,10 +2219,10 @@ html.dark .dropdown-surface :is(select, option) {
   .composer-model-button {
     width: 100%;
     max-width: none !important;
-    height: 48px !important;
-    padding-inline: 8px !important;
+    height: var(--composer-control-h, 44px) !important;
+    padding-inline: var(--space-4, 8px) !important;
     border-radius: var(--radius-control) !important;
-    font-size: 13px !important;
+    font-size: var(--text-base, 13px) !important;
     touch-action: manipulation;
   }
   .composer-thinking-control {
@@ -2197,37 +2230,43 @@ html.dark .dropdown-surface :is(select, option) {
     grid-column: 3;
     grid-row: 1;
     min-width: 0;
-    max-width: 66px;
+    max-width: var(--composer-thinking-max-w, 66px);
   }
   /* Keep the effort picker compact: icon + label only, no minimum width —
      every pixel here is taken from the model chip next to it. */
   .composer-thinking-button {
-    height: 44px !important;
+    width: 100%;
+    height: var(--composer-control-h, 44px) !important;
     min-width: 0;
     justify-content: center;
-    gap: 3px !important;
-    padding-inline: 4px !important;
+    gap: var(--space-1, 2px) !important;
+    padding-inline: var(--space-2, 4px) !important;
     border-radius: var(--radius-control) !important;
-    font-size: 12px !important;
+    font-size: var(--text-md, 12px) !important;
+    overflow: hidden;
     touch-action: manipulation;
   }
   .composer-primary-action {
     order: 5;
     grid-column: 5;
     grid-row: 1;
-    height: 48px !important;
-    min-width: 74px;
+    width: var(--composer-send-size, 34px);
+    min-width: var(--composer-send-size, 34px);
+    height: var(--composer-control-h, 44px) !important;
     justify-content: center;
-    padding-inline: 12px !important;
+    padding-inline: 0 !important;
     border-radius: var(--radius-control) !important;
-    font-size: 13px !important;
+    font-size: var(--text-base, 13px) !important;
     touch-action: manipulation;
+  }
+  .composer-primary-label {
+    display: none;
   }
   /* Steer/Follow-up while running: second row, icon-only. */
   .composer-queue-action {
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: var(--control-height, 32px);
+    height: var(--control-height, 32px);
     padding: 0 !important;
     border-radius: 9999px;
     touch-action: manipulation;
@@ -2252,7 +2291,7 @@ html.dark .dropdown-surface :is(select, option) {
     grid-row: 2;
     grid-column: 1 / span 2;
     justify-self: start;
-    height: 36px !important;
+    height: var(--control-height-lg, 36px) !important;
   }
   .composer-toolbar-spacer {
     display: none;
@@ -2268,7 +2307,7 @@ html.dark .dropdown-surface :is(select, option) {
     top: 0;
     left: 0;
     bottom: 0;
-    width: 280px;
+    width: var(--sidebar-mobile-width);
     max-width: 85vw;
     transition: transform var(--dur-slow) var(--ease-out-warm), box-shadow var(--dur-slow) var(--ease-out-warm);
   }
@@ -2312,31 +2351,8 @@ html.dark .dropdown-surface :is(select, option) {
 
 @media (max-width: 420px) {
   .composer-toolbar {
-    grid-template-columns: 36px minmax(0, 1fr) minmax(0, 66px) var(--composer-ring-size) 48px;
-    gap: 2px !important;
-  }
-  .composer-attachment {
-    width: 36px !important;
-  }
-  .composer-thinking-control {
-    width: 66px;
-    max-width: 66px;
-    overflow: hidden;
-  }
-  .composer-thinking-button {
-    width: 100%;
-    overflow: hidden;
-  }
-  .composer-primary-action {
-    width: 48px;
-    min-width: 48px;
-    padding-inline: 0 !important;
-  }
-  .composer-primary-label {
-    display: none;
-  }
-  .composer-thinking-button {
-    padding-inline: 4px !important;
+    grid-template-columns: var(--composer-attachment-w, 36px) minmax(0, 1fr) minmax(0, var(--composer-thinking-max-w, 66px)) var(--composer-ring-size, 28px) var(--composer-send-size, 34px);
+    gap: var(--space-1, 2px) !important;
   }
 }
 
@@ -2396,7 +2412,7 @@ html.dark .dropdown-surface :is(select, option) {
 
 .sidebar-portal-menu {
   position: fixed;
-  z-index: 1000;
+  z-index: var(--z-dialog-backdrop);
   padding: var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-control);

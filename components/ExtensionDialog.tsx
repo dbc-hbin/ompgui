@@ -67,7 +67,7 @@ export function ExtensionDialog({
       style={{
         position: "absolute",
         inset: 0,
-        zIndex: 90,
+        zIndex: "var(--z-dialog)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -92,17 +92,17 @@ export function ExtensionDialog({
           outline: "none",
         }}
       >
-        <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ color: "var(--text)", fontSize: 14, fontWeight: 650 }}>{request.title}</div>
-          <div style={{ marginTop: 3, color: "var(--text-dim)", fontSize: 11, fontFamily: "var(--font-mono)" }}>{t("chatWindow.extensionRequest")}</div>
+        <div style={{ padding: "var(--space-5) 14px", borderBottom: "1px solid var(--border)" }}>
+          <div style={{ color: "var(--text)", fontSize: "var(--text-lg)", fontWeight: 650 }}>{request.title}</div>
+          <div style={{ marginTop: 3, color: "var(--text-dim)", fontSize: "var(--text-sm)", fontFamily: "var(--font-mono)" }}>{t("chatWindow.extensionRequest")}</div>
         </div>
 
         <div style={{ padding: 14 }}>
           {request.method === "confirm" && (
-            <div style={{ color: "var(--text-muted)", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{request.message}</div>
+            <div style={{ color: "var(--text-muted)", fontSize: "var(--text-base)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{request.message}</div>
           )}
           {request.method === "select" && (
-            <div style={{ display: "grid", gap: 8 }}>
+            <div style={{ display: "grid", gap: "var(--space-4)" }}>
               {request.options.map((option) => (
                 <button
                   key={option}
@@ -116,7 +116,7 @@ export function ExtensionDialog({
                     color: "var(--text)",
                     cursor: "pointer",
                     textAlign: "left",
-                    fontSize: 13,
+                    fontSize: "var(--text-base)",
                     transition: "background-color var(--dur-fast) var(--ease-out-warm), border-color var(--dur-fast) var(--ease-out-warm)",
                   }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
@@ -145,7 +145,7 @@ export function ExtensionDialog({
                 background: "var(--bg-panel)",
                 color: "var(--text)",
                 outline: "none",
-                fontSize: 13,
+                fontSize: "var(--text-base)",
               }}
             />
           )}
@@ -168,7 +168,7 @@ export function ExtensionDialog({
                 color: "var(--text)",
                 outline: "none",
                 resize: "vertical",
-                fontSize: 13,
+                fontSize: "var(--text-base)",
                 lineHeight: 1.55,
                 fontFamily: "var(--font-mono)",
               }}
@@ -176,11 +176,11 @@ export function ExtensionDialog({
           )}
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "10px 14px", borderTop: "1px solid var(--border)", background: "var(--bg-panel)" }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--space-4)", padding: "10px 14px", borderTop: "1px solid var(--border)", background: "var(--bg-panel)" }}>
           <button
             onClick={cancel}
             style={{
-              padding: "6px 10px",
+              padding: "var(--space-3) 10px",
               borderRadius: 6,
               border: "1px solid var(--border)",
               background: "var(--bg)",
@@ -197,7 +197,7 @@ export function ExtensionDialog({
             <button
               onClick={submitValue}
               style={{
-                padding: "6px 10px",
+                padding: "var(--space-3) 10px",
                 borderRadius: 6,
                 border: "1px solid var(--accent)",
                 background: "var(--accent)",
@@ -214,7 +214,7 @@ export function ExtensionDialog({
             <button
               onClick={submitValue}
               style={{
-                padding: "6px 10px",
+                padding: "var(--space-3) 10px",
                 borderRadius: 6,
                 border: "1px solid var(--accent)",
                 background: "var(--accent)",

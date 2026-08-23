@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { sendAgentCommand } from "@/lib/agent-client";
 import { useI18n } from "@/lib/i18n";
 import { formatCost, formatDuration, formatTokens } from "@/lib/subagent-format";
@@ -37,8 +37,8 @@ function SubagentTranscriptRow({ message }: { message: AgentMessage }) {
     .slice(0, 400);
   const isError = (message as ToolResultMessage).isError === true;
   return (
-    <div style={{ display: "flex", gap: 8, minWidth: 0 }}>
-      <span style={{ flexShrink: 0, fontSize: 10, fontFamily: "var(--font-mono)", color: labelColor, paddingTop: 2 }}>{label}</span>
+    <div style={{ display: "flex", gap: "var(--space-4)", minWidth: 0 }}>
+      <span style={{ flexShrink: 0, fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", color: labelColor, paddingTop: "var(--space-1)" }}>{label}</span>
       <div
         style={{
           fontSize: message.role === "toolResult" || message.role === "assistant" ? 11.5 : 12.5,
@@ -66,9 +66,11 @@ function SubagentTranscriptRow({ message }: { message: AgentMessage }) {
   );
 }
 
-const BLOCK_LABEL_STYLE: React.CSSProperties = {
+const TRANSCRIPT_BLOCK_PADDING = "calc(var(--space-4) + var(--space-1)) var(--space-5)";
+
+const BLOCK_LABEL_STYLE: CSSProperties = {
   fontFamily: "var(--font-mono)",
-  fontSize: 10,
+  fontSize: "var(--text-xs)",
   fontWeight: 700,
   letterSpacing: 0.4,
   textTransform: "uppercase",
@@ -81,16 +83,16 @@ const BLOCK_LABEL_STYLE: React.CSSProperties = {
 function JsonValue({ value }: { value: unknown }) {
   if (typeof value === "string") {
     return (
-      <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--text-muted)", fontSize: 12, lineHeight: 1.55 }}>
+      <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--text-muted)", fontSize: "var(--text-md)", lineHeight: 1.55 }}>
         {value}
       </div>
     );
   }
   if (Array.isArray(value)) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "calc(var(--space-3) / 2)" }}>
         {value.map((item, i) => (
-          <div key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+          <div key={i} style={{ display: "flex", gap: "var(--space-3)", alignItems: "flex-start" }}>
             <span style={{ color: "var(--text-dim)", flexShrink: 0 }}>•</span>
             <div style={{ minWidth: 0, flex: 1 }}>
               <JsonValue value={item} />
@@ -103,10 +105,10 @@ function JsonValue({ value }: { value: unknown }) {
   if (value !== null && typeof value === "object") {
     const record = value as Record<string, unknown>;
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
         {Object.keys(record).map((key) => (
-          <div key={key} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-            <span style={{ flexShrink: 0, fontFamily: "var(--font-mono)", fontSize: 10.5, color: "var(--text-dim)", minWidth: 110, textAlign: "right", paddingTop: 2 }}>{key}</span>
+          <div key={key} style={{ display: "flex", gap: "var(--space-4)", alignItems: "flex-start" }}>
+            <span style={{ flexShrink: 0, fontFamily: "var(--font-mono)", fontSize: 10.5, color: "var(--text-dim)", minWidth: 110, textAlign: "right", paddingTop: "var(--space-1)" }}>{key}</span>
             <div style={{ minWidth: 0, flex: 1 }}>
               <JsonValue value={record[key]} />
             </div>
@@ -115,7 +117,7 @@ function JsonValue({ value }: { value: unknown }) {
       </div>
     );
   }
-  return <span style={{ color: "var(--text-muted)", fontSize: 12 }}>{String(value)}</span>;
+  return <span style={{ color: "var(--text-muted)", fontSize: "var(--text-md)" }}>{String(value)}</span>;
 }
 
 /** The subagent's assignment, rendered as markdown. Exported for SSR tests. */
@@ -123,9 +125,9 @@ export function TaskBlock({ task }: { task: string }) {
   const { t } = useI18n();
   if (!task) return null;
   return (
-    <section style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-subtle)", padding: "10px 12px" }}>
+    <section style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-subtle)", padding: TRANSCRIPT_BLOCK_PADDING }}>
       <span style={BLOCK_LABEL_STYLE}>{t("subagentTranscript.taskLabel")}</span>
-      <div style={{ marginTop: 6 }}>
+      <div style={{ marginTop: "var(--space-3)" }}>
         <MarkdownBody className="markdown-subagent-text">{task}</MarkdownBody>
       </div>
     </section>
@@ -149,25 +151,25 @@ export function CompletionBlock({ completion, truncated }: { completion: string 
   const keys = parsed ? Object.keys(parsed) : [];
   const singleText = parsed && keys.length === 1 && typeof parsed[keys[0]] === "string" ? parsed[keys[0]] as string : null;
   return (
-    <section style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", padding: "10px 12px" }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+    <section style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", padding: TRANSCRIPT_BLOCK_PADDING }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: "var(--space-4)" }}>
         <span style={BLOCK_LABEL_STYLE}>{t("subagentTranscript.resultLabel")}</span>
         {truncated && <span style={{ fontSize: 10.5, color: "var(--text-dim)" }}>{t("subagentTranscript.completionTruncated")}</span>}
       </div>
       {singleText ? (
-        <div style={{ marginTop: 6, whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--text-muted)", fontSize: 12, lineHeight: 1.55 }}>
+        <div style={{ marginTop: "var(--space-3)", whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--text-muted)", fontSize: "var(--text-md)", lineHeight: 1.55 }}>
           {singleText}
         </div>
       ) : parsed ? (
-        <div style={{ marginTop: 6 }}>
+        <div style={{ marginTop: "var(--space-3)" }}>
           <JsonValue value={parsed} />
         </div>
       ) : completion ? (
-        <div style={{ marginTop: 6 }}>
+        <div style={{ marginTop: "var(--space-3)" }}>
           <MarkdownBody className="markdown-subagent-text">{completion}</MarkdownBody>
         </div>
       ) : (
-        <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-dim)", fontStyle: "italic" }}>
+        <div style={{ marginTop: "var(--space-3)", fontSize: "var(--text-md)", color: "var(--text-dim)", fontStyle: "italic" }}>
           {t("subagentTranscript.noCompletion")}
         </div>
       )}
@@ -370,26 +372,26 @@ export function SubagentTranscriptDialog({ subagent, sessionId, transcriptVersio
           style={{ width: "min(94vw, 920px)", maxWidth: "min(94vw, 920px)" }}
         >
           <>
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: "calc(var(--space-4) + var(--space-1))", marginBottom: "var(--space-5)" }}>
               <div style={{ minWidth: 0, flex: 1 }}>
                 <DialogTitle style={{ marginBottom: 2, fontSize: 16, lineHeight: 1.3 }}>
-                  <span style={{ fontFamily: "var(--font-mono)", color: "var(--accent)", fontSize: 14 }}>{agent}</span>
+                  <span style={{ fontFamily: "var(--font-mono)", color: "var(--accent)", fontSize: "var(--text-lg)" }}>{agent}</span>
                 </DialogTitle>
                 {description && (
-                  <div style={{ fontSize: 12.5, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 4 }}>
+                  <div style={{ fontSize: 12.5, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: "var(--space-2)" }}>
                     {description}
                   </div>
                 )}
-                <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div style={{ fontSize: "var(--text-sm)", color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {detail?.sessionFile ?? subagent.sessionFile ?? subagent.id}
                 </div>
                 {historyMeta && (
-                  <div style={{ fontSize: 10.5, color: "var(--text-dim)", fontFamily: "var(--font-mono)", marginTop: 2 }}>
+                  <div style={{ fontSize: 10.5, color: "var(--text-dim)", fontFamily: "var(--font-mono)", marginTop: "var(--space-1)" }}>
                     {historyMeta}
                   </div>
                 )}
                 {outcomeError && (
-                  <div style={{ fontSize: 11, color: "var(--status-error)", marginTop: 2, wordBreak: "break-word" }}>
+                  <div style={{ fontSize: "var(--text-sm)", color: "var(--status-error)", marginTop: "var(--space-1)", wordBreak: "break-word" }}>
                     {outcomeError}
                   </div>
                 )}
@@ -407,9 +409,9 @@ export function SubagentTranscriptDialog({ subagent, sessionId, transcriptVersio
                 aria-live="polite"
                 style={{
                   display: "grid",
-                  gap: 2,
-                  marginBottom: 8,
-                  padding: "6px 10px",
+                  gap: "var(--space-1)",
+                  marginBottom: "var(--space-4)",
+                  padding: "var(--space-3) var(--control-padding-inline)",
                   border: "1px solid var(--border)",
                   borderRadius: "var(--radius-control)",
                   background: "var(--bg-panel)",
@@ -420,8 +422,8 @@ export function SubagentTranscriptDialog({ subagent, sessionId, transcriptVersio
                     key={i}
                     style={{
                       display: "flex",
-                      gap: 6,
-                      fontSize: 11,
+                      gap: "var(--space-3)",
+                      fontSize: "var(--text-sm)",
                       fontFamily: "var(--font-mono)",
                       color: event.kind === "tool" ? "var(--accent)" : "var(--text-muted)",
                       minWidth: 0,
@@ -437,12 +439,12 @@ export function SubagentTranscriptDialog({ subagent, sessionId, transcriptVersio
             )}
 
             {error ? (
-              <div style={{ fontSize: 12, color: "var(--status-error)", padding: "8px 2px" }}>{error}</div>
+              <div style={{ fontSize: "var(--text-md)", color: "var(--status-error)", padding: "8px 2px" }}>{error}</div>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "calc(var(--space-4) + var(--space-1))" }}>
                 <TaskBlock task={task} />
                 <CompletionBlock completion={completion} truncated={completionTruncated} />
-                {loading && <div style={{ fontSize: 11, color: "var(--text-dim)" }}>{t("subagentTranscript.loading")}</div>}
+                {loading && <div style={{ fontSize: "var(--text-sm)", color: "var(--text-dim)" }}>{t("subagentTranscript.loading")}</div>}
                 <button
                   type="button"
                   aria-expanded={transcriptOpen}
@@ -460,7 +462,7 @@ export function SubagentTranscriptDialog({ subagent, sessionId, transcriptVersio
                     border: "none",
                     color: "var(--accent)",
                     cursor: "pointer",
-                    fontSize: 12,
+                    fontSize: "var(--text-md)",
                     fontFamily: "inherit",
                     padding: 0,
                   }}
@@ -472,8 +474,8 @@ export function SubagentTranscriptDialog({ subagent, sessionId, transcriptVersio
                     id="subagent-transcript-panel"
                     style={{
                       display: "grid",
-                      gap: 8,
-                      padding: "10px 12px",
+                      gap: "var(--space-4)",
+                      padding: TRANSCRIPT_BLOCK_PADDING,
                       border: "1px solid var(--border)",
                       borderRadius: "var(--radius-card)",
                       background: "var(--bg-panel)",
@@ -482,18 +484,18 @@ export function SubagentTranscriptDialog({ subagent, sessionId, transcriptVersio
                     }}
                   >
                     {transcriptError ? (
-                      <div style={{ fontSize: 12, color: "var(--status-error)" }}>{transcriptError}</div>
+                      <div style={{ fontSize: "var(--text-md)", color: "var(--status-error)" }}>{transcriptError}</div>
                     ) : transcriptMessages.length === 0 && !transcriptLoading ? (
-                      <div style={{ fontSize: 12, color: "var(--text-dim)", fontStyle: "italic" }}>{t("subagentTranscript.noMessages")}</div>
+                      <div style={{ fontSize: "var(--text-md)", color: "var(--text-dim)", fontStyle: "italic" }}>{t("subagentTranscript.noMessages")}</div>
                     ) : (
                       transcriptMessages.map((message, i) => <SubagentTranscriptRow key={i} message={message} />)
                     )}
-                    {transcriptLoading && <div style={{ fontSize: 11, color: "var(--text-dim)" }}>{t("subagentTranscript.loading")}</div>}
+                    {transcriptLoading && <div style={{ fontSize: "var(--text-sm)", color: "var(--text-dim)" }}>{t("subagentTranscript.loading")}</div>}
                     {!transcriptExhausted && !transcriptLoading && (
                       <button
                         type="button"
                         onClick={() => void loadTranscriptPage(transcriptNextByte)}
-                        style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: 12, fontFamily: "inherit", padding: 0 }}
+                        style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: "var(--text-md)", fontFamily: "inherit", padding: 0 }}
                       >
                         {t("subagentTranscript.loadMore")}
                       </button>

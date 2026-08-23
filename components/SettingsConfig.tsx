@@ -162,7 +162,7 @@ function SearchResultsList({ results, query, onSelect }: { results: SearchResult
             background: "var(--bg-panel)",
             color: "var(--text)",
             cursor: "pointer",
-            transition: "border-color var(--dur-fast), background var(--dur-fast)",
+            transition: "border-color var(--dur-fast) var(--ease-out-warm), background var(--dur-fast) var(--ease-out-warm)",
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -200,7 +200,7 @@ function ToggleSwitch({ checked, onChange, disabled }: { checked: boolean; onCha
         border: "none",
         background: checked ? "var(--accent)" : "var(--border)",
         cursor: disabled ? "not-allowed" : "pointer",
-        transition: "background var(--dur-fast)",
+        transition: "background var(--dur-fast) var(--ease-out-warm)",
         padding: 2,
         flexShrink: 0,
       }}
@@ -212,7 +212,7 @@ function ToggleSwitch({ checked, onChange, disabled }: { checked: boolean; onCha
           borderRadius: 8,
           background: "var(--on-accent)",
           transform: checked ? "translateX(16px)" : "translateX(0px)",
-          transition: "transform var(--dur-fast)",
+          transition: "transform var(--dur-fast) var(--ease-out-warm)",
           boxShadow: "var(--shadow-card)",
         }}
       />
@@ -244,7 +244,7 @@ function NativeSetting({ label, description, scope, compact = false, hideDescrip
         display: "flex",
         flexDirection: "column",
         gap: compact ? 4 : 8,
-        transition: "box-shadow var(--dur-fast), border-color var(--dur-fast)",
+        transition: "box-shadow var(--dur-fast) var(--ease-out-warm), border-color var(--dur-fast) var(--ease-out-warm)",
         ...(highlighted ? { borderColor: "var(--accent)", boxShadow: "0 0 0 2px var(--accent)" } : {}),
       }}
     >
@@ -568,7 +568,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                               fontWeight: selected ? 600 : 500,
                               fontSize: 11,
                               cursor: "pointer",
-                              transition: "background var(--dur-fast), color var(--dur-fast)",
+                              transition: "background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm)",
                               outline: "none",
                             }}
                           >
@@ -620,7 +620,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                               fontWeight: selected ? 600 : 500,
                               fontSize: 11,
                               cursor: "pointer",
-                              transition: "background var(--dur-fast), color var(--dur-fast)",
+                              transition: "background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm)",
                               outline: "none",
                             }}
                           >

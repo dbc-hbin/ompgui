@@ -170,6 +170,20 @@ test("renders context ring button collapsed without its popup on the server", ()
   assert.doesNotMatch(html, /composer-context-ring-popup/);
 });
 
+test("renders an empty disabled context ring before a session exists", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(ChatInput, {
+      onSend: noop,
+      isStreaming: false,
+    }),
+  );
+
+  assert.match(html, /<button[^>]*class="composer-context-ring"[^>]*disabled/);
+  assert.match(html, /aria-label="Context window usage unavailable"/);
+  assert.match(html, />0%<\/span>/);
+  assert.doesNotMatch(html, /composer-context-ring-popup/);
+});
+
 test("opens the context popup with the resolved percent and window summary", () => {
   withInteractiveHooks((rerender) => {
     const props = {
@@ -239,4 +253,37 @@ test("filters model options by display name, identifier, and provider", () => {
   assert.deepEqual(filterModelOptions(options, "5.2", "en"), [options[0]]);
   assert.deepEqual(filterModelOptions(options, "OPENAI", "en"), [options[0]]);
   assert.equal(filterModelOptions(options, "   ", "en"), options);
+});
+
+test("renders idle send button with disabled state and accessible label", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(ChatInput, {
+      onSend: noop,
+      onAbort: noop,
+      isStreaming: false,
+    }),
+  );
+
+  assert.match(html, /<button[^>]*class="[^"]*composer-primary-action[^"]*"/);
+  assert.match(html, /data-state="send"/);
+  assert.match(html, /<button[^>]*class="[^"]*composer-primary-action[^"]*"[^>]*disabled/);
+  assert.match(html, /aria-label="(Send|chatInput\.send)"/);
+  assert.match(html, /title="(Send|chatInput\.send)"/);
+  assert.match(html, /<span class="composer-primary-label">(Send|chatInput\.send)<\/span>/);
+});
+
+test("renders active stop button when agent is streaming", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(ChatInput, {
+      onSend: noop,
+      onAbort: noop,
+      isStreaming: true,
+    }),
+  );
+
+  assert.match(html, /<button[^>]*class="[^"]*composer-primary-action[^"]*"[^>]*data-state="stop"/);
+  assert.doesNotMatch(html, /<button[^>]*class="[^"]*composer-primary-action[^"]*"[^>]*disabled/);
+  assert.match(html, /aria-label="(Stop agent|chatInput\.stopAgent)"/);
+  assert.match(html, /title="(Stop agent|chatInput\.stopAgent)"/);
+  assert.match(html, /<span class="composer-primary-label">(Stop|chatInput\.stop)<\/span>/);
 });

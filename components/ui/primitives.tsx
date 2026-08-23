@@ -3,7 +3,8 @@
 /**
  * Warm-paper UI primitives on top of @base-ui/react.
  * Theming contract: CSS variables from globals.css (--bg, --accent, --radius-*,
- * --shadow-*, --dur-*, --ease-out-warm). No hardcoded colors here.
+ * --shadow-*, --dur-*, --ease-out-warm, --space-*, --text-*, --z-*). No
+ * hardcoded colors here.
  */
 import { Dialog as BaseDialog } from "@base-ui/react/dialog";
 import { Tooltip as BaseTooltip } from "@base-ui/react/tooltip";
@@ -37,7 +38,7 @@ export function DialogContent({ children, className, style, ariaLabel }: {
           position: "fixed", inset: 0,
           background: "var(--overlay-backdrop)",
           backdropFilter: "blur(2px)",
-          zIndex: 1000,
+          zIndex: "var(--z-dialog-backdrop)",
         }}
       />
       <BaseDialog.Popup
@@ -50,13 +51,13 @@ export function DialogContent({ children, className, style, ariaLabel }: {
           // keyframes: an animation overrides the inline transform for its
           // whole (fill: both) lifetime.
           animation: "dialog-pop-in var(--dur-med) var(--ease-out-warm) both",
-           zIndex: 1001,
+          zIndex: "var(--z-dialog)",
           background: "var(--bg)",
           color: "var(--text)",
           border: "1px solid var(--border)",
           borderRadius: "var(--radius-modal)",
           boxShadow: "var(--shadow-modal)",
-          padding: 20,
+          padding: "calc(var(--space-6) + var(--space-2))",
           maxWidth: "min(92vw, 560px)",
           maxHeight: "85dvh",
           overflow: "auto",
@@ -71,7 +72,14 @@ export function DialogContent({ children, className, style, ariaLabel }: {
 
 export function DialogTitle({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
-    <BaseDialog.Title className="display-serif" style={{ fontSize: 20, margin: "0 0 12px", ...style }}>
+    <BaseDialog.Title
+      className="display-serif"
+      style={{
+        fontSize: "calc(var(--text-xl) + var(--space-3) / 2)",
+        margin: "0 0 var(--space-5)",
+        ...style,
+      }}
+    >
       {children}
     </BaseDialog.Title>
   );
@@ -91,7 +99,7 @@ export function Tooltip({ content, children, side = "top" }: {
       <BaseTooltip.Root>
         <BaseTooltip.Trigger render={children} />
         <BaseTooltip.Portal>
-          <BaseTooltip.Positioner side={side} sideOffset={6} style={{ zIndex: 120 }}>
+          <BaseTooltip.Positioner side={side} sideOffset={6} style={{ zIndex: "var(--z-tooltip)" }}>
             <BaseTooltip.Popup
               style={{
                 background: "var(--bg-panel)",
@@ -99,8 +107,8 @@ export function Tooltip({ content, children, side = "top" }: {
                 border: "1px solid var(--border)",
                 borderRadius: "var(--radius-control)",
                 boxShadow: "var(--shadow-pop)",
-                padding: "4px 9px",
-                fontSize: 12,
+                padding: "var(--space-2) calc(var(--space-4) + var(--space-1) / 2)",
+                fontSize: "var(--text-md)",
                 lineHeight: 1.4,
                 maxWidth: 260,
               }}

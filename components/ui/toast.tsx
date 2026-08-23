@@ -51,17 +51,17 @@ export const toast = {
 };
 
 function KindIcon({ kind }: { kind?: ToastKind }) {
-  const common = { size: 13, strokeWidth: 2, style: { flexShrink: 0, marginTop: 2 } } as const;
+  const common = { size: 13, strokeWidth: 2, style: { flexShrink: 0, marginTop: "var(--space-1)" } } as const;
   if (kind === "success") return <Check {...common} style={{ ...common.style, color: "var(--accent)" }} aria-hidden />;
   if (kind === "error") return <AlertCircle {...common} style={{ ...common.style, color: "var(--accent-strong)" }} aria-hidden />;
   return <Info {...common} style={{ ...common.style, color: "var(--text-muted)" }} aria-hidden />;
 }
 
 const descriptionBaseStyle = {
-  fontSize: 12,
+  fontSize: "var(--text-md)",
   color: "var(--text-muted)",
   lineHeight: 1.5,
-  marginTop: 2,
+  marginTop: "var(--space-1)",
 } as const;
 
 /** Inline styles for a clamped description: 2-line ellipsis when collapsed, full content when expanded. */
@@ -113,11 +113,11 @@ function Toaster() {
         style={{
           position: "fixed",
           top: topOffset,
-          right: 16,
-          zIndex: 2100,
+          right: "var(--space-6)",
+          zIndex: "var(--z-toast)",
           display: "flex",
           flexDirection: "column",
-          gap: 8,
+          gap: "var(--space-4)",
           width: "min(92vw, 360px)",
           pointerEvents: "none",
         }}
@@ -131,18 +131,18 @@ function Toaster() {
               pointerEvents: "auto",
               display: "flex",
               alignItems: "flex-start",
-              gap: 8,
+              gap: "var(--space-4)",
               background: "var(--bg)",
               color: "var(--text)",
               border: "1px solid var(--border)",
               borderRadius: "var(--radius-card)",
               boxShadow: "var(--shadow-pop)",
-              padding: "10px 12px",
+              padding: "calc(var(--space-5) - var(--space-1)) var(--space-5)",
             }}
           >
             <KindIcon kind={t.type as ToastKind | undefined} />
             <Toast.Content style={{ flex: 1, minWidth: 0 }}>
-              <Toast.Title className="display-serif" style={{ fontSize: 13, lineHeight: 1.4 }} />
+              <Toast.Title className="display-serif" style={{ fontSize: "var(--text-base)", lineHeight: 1.4 }} />
               {t.data?.clamp ? (
                 <Toast.Description render={<div />} style={descriptionBaseStyle}>
                   <ClampedDescription>{t.description}</ClampedDescription>
@@ -160,8 +160,8 @@ function Toaster() {
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
-                width: 20,
-                height: 20,
+                width: "calc(var(--control-height-sm) - var(--space-4))",
+                height: "calc(var(--control-height-sm) - var(--space-4))",
                 padding: 0,
                 border: 0,
                 borderRadius: "var(--radius-control)",

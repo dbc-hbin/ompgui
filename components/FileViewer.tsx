@@ -56,7 +56,7 @@ const DISPLAY_MODE_LABEL_KEYS: Record<DisplayMode, string> = {
 
 const FILE_CODE_STYLE: CSSProperties = {
   fontFamily: "var(--font-mono)",
-  fontSize: 13,
+  fontSize: "var(--text-base)",
   lineHeight: 1.6,
 };
 
@@ -69,7 +69,7 @@ const FILE_LINE_NUMBER_STYLE: CSSProperties = {
   background: "var(--bg-panel)",
   borderRight: "1px solid var(--border)",
   fontFamily: "var(--font-mono)",
-  fontSize: 11,
+  fontSize: "var(--text-sm)",
   fontStyle: "normal",
   fontVariantNumeric: "tabular-nums",
   lineHeight: "20.8px",
@@ -280,7 +280,7 @@ function DiffView({ patch }: { patch: string }) {
   const hasChanges = diff.some((l) => l.type !== "unchanged");
   if (!hasChanges) {
     return (
-      <div style={{ padding: "12px 16px", fontSize: 12, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+      <div style={{ padding: "var(--space-5) var(--space-6)", fontSize: "var(--text-md)", color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
         {t("fileViewer.noChanges")}
       </div>
     );
@@ -331,10 +331,10 @@ function DiffView({ patch }: { patch: string }) {
             <div
               key={si}
               style={{
-                padding: "2px 16px",
+                padding: "var(--space-1) var(--space-6)",
                 color: "var(--text-dim)",
                 background: "var(--bg-panel)",
-                fontSize: 11,
+                fontSize: "var(--text-sm)",
                 borderTop: "1px solid var(--border)",
                 borderBottom: "1px solid var(--border)",
               }}
@@ -347,7 +347,7 @@ function DiffView({ patch }: { patch: string }) {
         const lines = seg.lines.map((line, li) => {
           const bg =
             line.type === "added"
-              ? "color-mix(in srgb, var(--status-success) 12%, transparent)"
+              ? "var(--status-success-subtle)"
               : line.type === "removed"
               ? "color-mix(in srgb, var(--status-error) 14%, transparent)"
               : "transparent";
@@ -379,7 +379,7 @@ function DiffView({ patch }: { patch: string }) {
               <span
                 style={{
                   minWidth: 16,
-                  padding: "0 6px",
+                  padding: "0 var(--space-3)",
                   color: prefixColor,
                   userSelect: "none",
                   flexShrink: 0,
@@ -392,7 +392,7 @@ function DiffView({ patch }: { patch: string }) {
                 className="file-diff-line-content"
                 style={{
                   flexShrink: 0,
-                  padding: "0 8px 0 0",
+                  padding: "0 var(--space-4) 0 0",
                   whiteSpace: "pre",
                   color: "var(--text)",
                 }}
@@ -461,10 +461,10 @@ function ImageViewer({ filePath, cwd, sourceSessionId }: Props) {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 12,
-          padding: "4px 16px",
+          gap: "var(--space-5)",
+          padding: "var(--space-2) var(--space-6)",
           borderBottom: "1px solid var(--border)",
-          fontSize: 11,
+          fontSize: "var(--text-sm)",
           color: "var(--text-dim)",
           background: "var(--bg)",
           flexShrink: 0,
@@ -478,7 +478,7 @@ function ImageViewer({ filePath, cwd, sourceSessionId }: Props) {
         {formatSizeStr && <span>{formatSizeStr}</span>}
         <span
           title={watching ? t("fileViewer.liveSyncActive") : t("fileViewer.notWatching")}
-          style={{ display: "flex", alignItems: "center", gap: 4, color: watching ? "var(--status-success)" : "var(--text-dim)" }}
+          style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", color: watching ? "var(--status-success)" : "var(--text-dim)" }}
         >
           <span
             style={{
@@ -487,7 +487,7 @@ function ImageViewer({ filePath, cwd, sourceSessionId }: Props) {
               borderRadius: "50%",
               background: watching ? "var(--status-success)" : "var(--border)",
               display: "inline-block",
-              boxShadow: watching ? "0 0 4px var(--status-success)" : "none",
+              boxShadow: watching ? "var(--shadow-live-indicator)" : "none",
             }}
           />
           {watching ? t("fileViewer.live") : t("fileViewer.static")}
@@ -502,7 +502,7 @@ function ImageViewer({ filePath, cwd, sourceSessionId }: Props) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          padding: 16,
+          padding: "var(--space-6)",
           backgroundImage:
             "linear-gradient(45deg, var(--bg) 25%, transparent 25%), linear-gradient(-45deg, var(--bg) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--bg) 75%), linear-gradient(-45deg, transparent 75%, var(--bg) 75%)",
           backgroundSize: "16px 16px",
@@ -510,7 +510,7 @@ function ImageViewer({ filePath, cwd, sourceSessionId }: Props) {
         }}
       >
         {error ? (
-          <div style={{ color: "var(--status-error)", fontSize: 13 }}>{error}</div>
+          <div style={{ color: "var(--status-error)", fontSize: "var(--text-base)" }}>{error}</div>
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -595,10 +595,10 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 12,
-          padding: "4px 16px",
+          gap: "var(--space-5)",
+          padding: "var(--space-2) var(--space-6)",
           borderBottom: "1px solid var(--border)",
-          fontSize: 11,
+          fontSize: "var(--text-sm)",
           color: "var(--text-dim)",
           background: "var(--bg)",
           flexShrink: 0,
@@ -612,7 +612,7 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
         {size != null && <span>{formatSize(size)}</span>}
         <span
           title={watching ? t("fileViewer.liveSyncActive") : t("fileViewer.notWatching")}
-          style={{ display: "flex", alignItems: "center", gap: 4, color: watching ? "var(--status-success)" : "var(--text-dim)" }}
+          style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", color: watching ? "var(--status-success)" : "var(--text-dim)" }}
         >
           <span
             style={{
@@ -621,7 +621,7 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
               borderRadius: "50%",
               background: watching ? "var(--status-success)" : "var(--border)",
               display: "inline-block",
-              boxShadow: watching ? "0 0 4px var(--status-success)" : "none",
+              boxShadow: watching ? "var(--shadow-live-indicator)" : "none",
             }}
           />
           {watching ? t("fileViewer.live") : t("fileViewer.static")}
@@ -634,13 +634,13 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          padding: 24,
+          padding: "var(--space-8)",
           background: "var(--bg-panel)",
         }}
       >
         <div style={{ width: "min(680px, 100%)" }}>
           {error && (
-            <div style={{ color: "var(--status-error)", fontSize: 13, marginBottom: 12, textAlign: "center" }}>
+            <div style={{ color: "var(--status-error)", fontSize: "var(--text-base)", marginBottom: "var(--space-5)", textAlign: "center" }}>
               {error}
             </div>
           )}
@@ -737,10 +737,10 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 12,
-          padding: "4px 16px",
+          gap: "var(--space-5)",
+          padding: "var(--space-2) var(--space-6)",
           borderBottom: "1px solid var(--border)",
-          fontSize: 11,
+          fontSize: "var(--text-sm)",
           color: "var(--text-dim)",
           background: "var(--bg)",
           flexShrink: 0,
@@ -754,7 +754,7 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
         <DownloadLink filePath={filePath} sourceSessionId={sourceSessionId} />
         <span
           title={watching ? t("fileViewer.liveSyncActive") : t("fileViewer.notWatching")}
-          style={{ display: "flex", alignItems: "center", gap: 4, color: watching ? "var(--status-success)" : "var(--text-dim)", flexShrink: 0 }}
+          style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", color: watching ? "var(--status-success)" : "var(--text-dim)", flexShrink: 0 }}
         >
           <span
             style={{
@@ -763,7 +763,7 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
               borderRadius: "50%",
               background: watching ? "var(--status-success)" : "var(--border)",
               display: "inline-block",
-              boxShadow: watching ? "0 0 4px var(--status-success)" : "none",
+              boxShadow: watching ? "var(--shadow-live-indicator)" : "none",
             }}
           />
           {watching ? t("fileViewer.live") : t("fileViewer.static")}
@@ -771,7 +771,7 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
       </div>
       <div style={{ flex: 1, minHeight: 0, background: "var(--bg-panel)" }}>
         {error ? (
-          <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, color: "var(--status-error)", fontSize: 13, textAlign: "center" }}>
+          <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: "var(--space-8)", color: "var(--status-error)", fontSize: "var(--text-base)", textAlign: "center" }}>
             {error}
           </div>
         ) : (
@@ -1014,7 +1014,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
 
   if (loading) {
     return (
-      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
+      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: "var(--text-base)" }}>
         {t("fileViewer.loading")}
       </div>
     );
@@ -1022,7 +1022,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
 
   if (error) {
     return (
-      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--status-error)", fontSize: 13 }}>
+      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--status-error)", fontSize: "var(--text-base)" }}>
         {error}
       </div>
     );
@@ -1053,10 +1053,10 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 8,
-          padding: "5px 12px",
+          gap: "var(--space-4)",
+          padding: "5px var(--space-5)",
           borderBottom: "1px solid var(--border)",
-          fontSize: 11,
+          fontSize: "var(--text-sm)",
           color: "var(--text-dim)",
           background: "var(--bg)",
           flexShrink: 0,
@@ -1076,7 +1076,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
           className="file-viewer-live-indicator"
           style={{
             background: watching ? "var(--status-success)" : "var(--border)",
-            boxShadow: watching ? "0 0 4px var(--status-success)" : "none",
+            boxShadow: watching ? "var(--shadow-live-indicator)" : "none",
           }}
         />
 
@@ -1173,7 +1173,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
         ) : isMarkdown && displayMode === "preview" ? (
           <div
             className="markdown-body markdown-file-preview"
-            style={{ padding: "24px 32px" }}
+            style={{ padding: "var(--space-8) 32px" }}
           >
             {frontmatter && <FrontmatterCard data={frontmatter} />}
             <ReactMarkdown
@@ -1258,9 +1258,9 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
           <pre
             style={{
               margin: 0,
-              padding: "11px 13px",
-              fontSize: 12.5,
-              lineHeight: 1.62,
+              padding: "var(--code-padding-block) var(--code-padding-inline)",
+              fontSize: "var(--code-font-size)",
+              lineHeight: "var(--code-line-height)",
               whiteSpace: "pre-wrap",
               wordBreak: "break-word",
               color: "var(--text)",

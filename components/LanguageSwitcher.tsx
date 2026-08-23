@@ -112,12 +112,12 @@ export function LanguageSwitcher() {
         className="shell-toolbar-btn ui-focus-ring"
         style={{
           width: "auto",
-          minWidth: isMobile ? 44 : 36,
-          padding: "0 8px",
-          gap: 4,
+          minWidth: isMobile ? "var(--control-touch)" : "var(--control-height-lg)",
+          padding: "0 var(--space-4)",
+          gap: "var(--space-2)",
           background: open ? "var(--bg-selected)" : undefined,
           color: open ? "var(--text)" : undefined,
-          fontSize: 11,
+          fontSize: "var(--text-sm)",
           whiteSpace: "nowrap",
         }}
       >
@@ -141,12 +141,12 @@ export function LanguageSwitcher() {
           className="dropdown-surface animate-slide-down"
           style={{
             position: "absolute",
-            top: "calc(100% + 4px)",
+            top: "calc(100% + var(--space-2))",
             right: 0,
-            zIndex: 50,
+            zIndex: "var(--z-dropdown)",
             minWidth: 120,
             margin: 0,
-            padding: 4,
+            padding: "var(--space-2)",
             listStyle: "none",
             background: "var(--bg-panel)",
             border: "1px solid var(--border)",
@@ -173,14 +173,14 @@ export function LanguageSwitcher() {
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
-                    gap: 8,
+                    gap: "var(--space-4)",
                     padding: "7px 10px",
                     border: 0,
                     borderRadius: 5,
                     background: selected ? "var(--bg-selected)" : "transparent",
                     color: selected ? "var(--text)" : "var(--text-muted)",
                     cursor: "pointer",
-                    fontSize: 12,
+                    fontSize: "var(--text-md)",
                     textAlign: "left",
                     transition: "background-color var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm)",
                   }}

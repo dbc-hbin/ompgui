@@ -14,13 +14,13 @@ function PlainCode({ code }: { code: string }) {
     <pre
       style={{
         margin: 0,
-        padding: "11px 13px",
-        fontSize: 12.5,
-        lineHeight: 1.62,
+        padding: "var(--code-padding-block) var(--code-padding-inline)",
+        fontSize: "var(--code-font-size)",
+        lineHeight: "var(--code-line-height)",
         whiteSpace: "pre-wrap",
         wordBreak: "break-word",
         color: "var(--text)",
-        backgroundColor: "color-mix(in srgb, var(--bg) 88%, var(--bg-panel))",
+        backgroundColor: "var(--code-bg)",
         fontFamily: "var(--font-mono)",
       }}
     >
@@ -55,11 +55,11 @@ export function SyntaxHighlightedCode({ code, lang }: Props) {
       lineNumberStyle={{ color: "var(--text-dim)", fontStyle: "normal" }}
       customStyle={{
         margin: 0,
-        padding: "11px 13px",
-        fontSize: 12.5,
-        lineHeight: 1.62,
+        padding: "var(--code-padding-block) var(--code-padding-inline)",
+        fontSize: "var(--code-font-size)",
+        lineHeight: "var(--code-line-height)",
         borderRadius: 0,
-        backgroundColor: "color-mix(in srgb, var(--bg) 88%, var(--bg-panel))",
+        backgroundColor: "var(--code-bg)",
       }}
       codeTagProps={{ style: { fontFamily: "var(--font-mono)" } }}
     >

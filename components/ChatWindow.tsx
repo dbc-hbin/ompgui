@@ -156,7 +156,7 @@ function OmpRuntimeVersion() {
     };
   }, []);
   return (
-    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+    <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
       omp <span style={{ color: "var(--text)" }}>{version ? `v${version}` : t("chatWindow.versionNotFound")}</span>
     </span>
   );
@@ -169,7 +169,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, children }: { messag
   if (toolCallCount > 0) parts.push(tn("chatWindow.toolCallCount", toolCallCount));
 
   return (
-    <div style={{ marginBottom: 12 }}>
+    <div style={{ marginBottom: "var(--space-5)" }}>
       <button
         type="button"
         aria-expanded={expanded}
@@ -192,7 +192,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, children }: { messag
         </span>
       </button>
       {expanded && (
-        <div style={{ marginTop: 8 }}>
+        <div style={{ marginTop: "var(--space-4)" }}>
           {children}
         </div>
       )}
@@ -771,7 +771,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
 
   if (error) {
     return (
-      <div role="alert" className="flex h-full items-center justify-center" style={{ color: "var(--accent-strong)", padding: "0 16px", textAlign: "center", fontSize: 13 }}>
+      <div role="alert" className="flex h-full items-center justify-center" style={{ color: "var(--accent-strong)", padding: "0 var(--space-6)", textAlign: "center", fontSize: "var(--text-base)" }}>
         {error}
       </div>
     );
@@ -786,7 +786,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
       onDrop={handleDrop}
     >
       {isDragOver && !sessionBusy && (
-        <div className="drop-zone-overlay pointer-events-none absolute inset-0 z-50 flex items-center justify-center backdrop-blur-[1px]">
+        <div className="drop-zone-overlay pointer-events-none absolute inset-0 flex items-center justify-center backdrop-blur-[1px]" style={{ zIndex: "var(--z-dropdown)" }}>
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             {[0, 0.8, 1.6].map((delay) => (
               <div
@@ -849,9 +849,9 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
-                gap: 12,
-                marginLeft: 8,
-                marginRight: 8,
+                gap: "var(--space-5)",
+                marginLeft: "var(--space-4)",
+                marginRight: "var(--space-4)",
                 fontFamily: "var(--font-mono)",
               }}
             >
@@ -859,8 +859,8 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
                 <span style={{ fontSize: 18, fontWeight: 600, letterSpacing: "0.04em", color: "var(--accent)", flexShrink: 0, whiteSpace: "nowrap" }}>⌥</span>
                 <span style={{ fontSize: 18, color: "var(--text)", fontWeight: 600, letterSpacing: "0.02em", flexShrink: 0, whiteSpace: "nowrap" }}>ompgui</span>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
-                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "var(--space-1)", flexShrink: 0 }}>
+                <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
                   gui <span style={{ color: "var(--text)" }}>v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.4.1"}</span>
                 </span>
                 <OmpRuntimeVersion />
@@ -931,20 +931,20 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
                 aria-label={t("chatWindow.runningNamed", { names: tool.name })}
                 style={{
                   display: "flex", alignItems: "center", gap: 7,
-                  marginBottom: 8, padding: "6px 10px",
+                  marginBottom: "var(--space-4)", padding: "var(--space-3) 10px",
                   border: "1px solid color-mix(in srgb, var(--status-success) 25%, transparent)",
                   borderRadius: "var(--radius-control)",
                   background: "color-mix(in srgb, var(--status-success) 4%, transparent)",
-                  color: "var(--text-muted)", fontSize: 12,
+                  color: "var(--text-muted)", fontSize: "var(--text-md)",
                 }}
               >
                 <span aria-hidden className="live-status-dot live-pulse inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
-                <span style={{ color: "var(--status-success)", fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 11 }}>{tool.name}</span>
+                <span style={{ color: "var(--status-success)", fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: "var(--text-sm)" }}>{tool.name}</span>
               </div>
             ))}
 
             {agentRunning && !streamState.streamingMessage && pendingToolHeaders.length === 0 && (
-              <div role="status" aria-live="polite" className="py-2 text-[13px] text-text-muted flex items-center gap-2">
+              <div role="status" aria-live="polite" className="py-2 text-text-muted flex items-center gap-2" style={{ fontSize: "var(--text-base)" }}>
                 <span
                   aria-hidden
                   className="live-status-dot live-pulse inline-block h-2 w-2 shrink-0 rounded-full bg-accent"
@@ -966,7 +966,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
             )}
 
             {bashRunning && !pendingBash && (
-              <div role="status" aria-live="polite" className="py-2 text-[13px] text-text-muted flex items-center gap-2">
+              <div role="status" aria-live="polite" className="py-2 text-text-muted flex items-center gap-2" style={{ fontSize: "var(--text-base)" }}>
                 <span
                   aria-hidden
                   className="live-status-dot live-pulse inline-block h-2 w-2 shrink-0 rounded-full bg-accent"
@@ -1027,7 +1027,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
 function ExtensionStatusBar({ statuses }: { statuses: Array<{ key: string; text: string }> }) {
   if (statuses.length === 0) return null;
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", marginBottom: "var(--space-4)" }}>
       {statuses.map((status) => (
         <div
           key={status.key}
@@ -1035,17 +1035,17 @@ function ExtensionStatusBar({ statuses }: { statuses: Array<{ key: string; text:
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 6,
+            gap: "var(--space-3)",
             maxWidth: "100%",
-            padding: "4px 8px",
+            padding: "var(--space-2) var(--space-4)",
             border: "1px solid color-mix(in srgb, var(--accent) 24%, var(--border))",
             borderRadius: "var(--radius-control)",
             background: "color-mix(in srgb, var(--accent) 7%, var(--bg))",
             color: "var(--text-muted)",
-            fontSize: 12,
+            fontSize: "var(--text-md)",
           }}
         >
-          <span style={{ color: "var(--accent)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{status.key}</span>
+          <span style={{ color: "var(--accent)", fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)" }}>{status.key}</span>
           <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{status.text}</span>
         </div>
       ))}
@@ -1056,7 +1056,7 @@ function ExtensionStatusBar({ statuses }: { statuses: Array<{ key: string; text:
 function ExtensionWidgets({ widgets }: { widgets: Array<{ key: string; lines: string[] }> }) {
   if (widgets.length === 0) return null;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", marginBottom: "var(--space-4)" }}>
       {widgets.map((widget) => (
         <div
           key={widget.key}
@@ -1068,10 +1068,10 @@ function ExtensionWidgets({ widgets }: { widgets: Array<{ key: string; lines: st
             overflow: "hidden",
           }}
         >
-          <div style={{ padding: "5px 9px", borderBottom: "1px solid var(--border)", color: "var(--text-dim)", fontSize: 11, fontFamily: "var(--font-mono)" }}>
+          <div style={{ padding: "5px 9px", borderBottom: "1px solid var(--border)", color: "var(--text-dim)", fontSize: "var(--text-sm)", fontFamily: "var(--font-mono)" }}>
             {widget.key}
           </div>
-          <pre style={{ margin: 0, padding: "8px 9px", color: "var(--text-muted)", fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "var(--font-mono)" }}>
+          <pre style={{ margin: 0, padding: "var(--space-4) 9px", color: "var(--text-muted)", fontSize: "var(--text-md)", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "var(--font-mono)" }}>
             {widget.lines.join("\n")}
           </pre>
         </div>
@@ -1108,11 +1108,11 @@ function NoticeShelf({ notices, floating = false, align = "left" }: { notices: N
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 8,
-              minHeight: 36,
-              height: 36,
+              gap: "var(--space-4)",
+              minHeight: "var(--control-height-lg)",
+              height: "var(--control-height-lg)",
               maxHeight: 48,
-              marginBottom: index === notices.length - 1 ? 0 : 4,
+              marginBottom: index === notices.length - 1 ? 0 : "var(--space-2)",
               overflow: "hidden",
               borderRadius: "var(--radius-control)",
               border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
@@ -1121,7 +1121,7 @@ function NoticeShelf({ notices, floating = false, align = "left" }: { notices: N
               width: "fit-content",
               maxWidth: "min(100%, 620px)",
               boxShadow: floating ? "var(--shadow-pop)" : "var(--shadow-card)",
-              fontSize: 12,
+              fontSize: "var(--text-md)",
               lineHeight: 1.35,
               transformOrigin: "top center",
               animation: notice.exiting
@@ -1180,7 +1180,7 @@ function ExtensionCustomPanel({
       style={{
         position: "absolute",
         inset: 0,
-        zIndex: 95,
+        zIndex: "var(--z-extension-dialog)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -1254,8 +1254,8 @@ function ExtensionCustomPanel({
             pointerEvents: "none",
           }}
         />
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ color: "var(--text)", fontSize: 13, fontWeight: 650 }}>{t("chatWindow.extensionPanel")}</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--space-5)", padding: "10px var(--space-5)", borderBottom: "1px solid var(--border)" }}>
+          <div style={{ color: "var(--text)", fontSize: "var(--text-base)", fontWeight: 650 }}>{t("chatWindow.extensionPanel")}</div>
           <button
             onClick={() => onInput(request, "\x03")}
             style={{
@@ -1265,7 +1265,7 @@ function ExtensionCustomPanel({
               background: "var(--bg-panel)",
               color: "var(--text-muted)",
               cursor: "pointer",
-              fontSize: 12,
+              fontSize: "var(--text-md)",
             }}
           >
             {t("chatWindow.close")}
@@ -1280,7 +1280,7 @@ function ExtensionCustomPanel({
             background: "var(--bg-panel)",
             color: "var(--text)",
             fontFamily: "var(--font-mono)",
-            fontSize: 13,
+            fontSize: "var(--text-base)",
             lineHeight: 1.45,
             whiteSpace: "pre",
           }}

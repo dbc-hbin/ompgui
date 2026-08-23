@@ -204,14 +204,14 @@ const TreeNodeView = memo(function TreeNodeView({ node, activePathIds, depth, is
 
         {/* Skipped indicator */}
         {skipped > 0 && (
-          <span style={{ fontSize: 10, color: "var(--text-dim)", marginRight: 5, flexShrink: 0 }}>
+          <span style={{ fontSize: "var(--text-xs)", color: "var(--text-dim)", marginRight: 5, flexShrink: 0 }}>
             +{skipped}
           </span>
         )}
 
         {/* Label */}
         <span style={{
-          fontSize: 11,
+          fontSize: "var(--text-sm)",
           color: isActive ? "var(--text)" : isOnPath ? "var(--text-muted)" : "var(--text-dim)",
           fontWeight: isActive ? 500 : 400,
           overflow: "hidden",
@@ -377,10 +377,10 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
             width: dropdownPos.width,
             maxHeight: dropdownPos.height,
             overflowY: "auto",
-            zIndex: 600,
+            zIndex: "var(--z-branch-popover)",
           }}>
             {hasContent ? (
-              <div style={{ padding: "4px 12px 8px 12px", maxHeight: 260, overflowY: "auto" }}>
+              <div style={{ padding: "var(--space-2) var(--space-5) var(--space-4) var(--space-5)", maxHeight: 260, overflowY: "auto" }}>
                 {topLevelBranches.map((child, idx) => (
                   <TreeNodeView
                     key={child.entry.id}
@@ -394,7 +394,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
                 ))}
               </div>
             ) : (
-              <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
+              <div style={{ padding: "10px var(--space-6)", fontSize: "var(--text-md)", color: "var(--text-muted)", fontStyle: "italic" }}>
                 {noBranchReason}
               </div>
             )}
@@ -412,14 +412,14 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 6,
+          gap: "var(--space-3)",
           width: "100%",
-          padding: "5px 12px",
+          padding: "5px var(--space-5)",
           background: "none",
           border: "none",
           cursor: "pointer",
           color: "var(--text-muted)",
-          fontSize: 11,
+          fontSize: "var(--text-sm)",
           textAlign: "left",
         }}
       >
@@ -441,7 +441,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
           zIndex: 100,
         }}>
           {hasContent ? (
-            <div style={{ padding: "4px 12px 8px 12px", maxHeight: 260, overflowY: "auto" }}>
+            <div style={{ padding: "var(--space-2) var(--space-5) var(--space-4) var(--space-5)", maxHeight: 260, overflowY: "auto" }}>
               {topLevelBranches.map((child, idx) => (
                 <TreeNodeView
                   key={child.entry.id}
@@ -455,7 +455,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
               ))}
             </div>
           ) : (
-            <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
+            <div style={{ padding: "10px var(--space-6)", fontSize: "var(--text-md)", color: "var(--text-muted)", fontStyle: "italic" }}>
               {noBranchReason ?? t("branchNavigator.noBranches")}
             </div>
           )}
