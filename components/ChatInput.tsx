@@ -30,7 +30,12 @@ import { FolderIcon, getFileIcon } from "./FileIcons";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/lib/i18n";
 import { selectableThinkingLevels } from "@/lib/thinking-levels";
-import { clampContextPercent, formatRingPercent } from "@/lib/context-usage";
+import {
+  clampContextPercent,
+  formatContextWindow,
+  formatPercent,
+  formatRingPercent,
+} from "@/lib/context-usage";
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -56,7 +61,7 @@ interface Props {
   model?: { provider: string; modelId: string } | null;
   isAutoModelSelection?: boolean;
   modelNames?: Record<string, string>;
-  modelList?: { id: string; name: string; provider: string; supportsFastMode?: boolean }[];
+  modelList?: { id: string; name: string; provider: string; supportsFastMode?: boolean; contextWindow?: number }[];
   modelError?: string | null;
   modelsLoading?: boolean;
   onModelChange?: (provider: string, modelId: string) => void;
@@ -414,6 +419,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
+  const [contextDropdownOpen, setContextDropdownOpen] = useState(false);
   const [modelSearchQuery, setModelSearchQuery] = useState("");
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>(() => (
     draftKey ? draftImagesToAttachedImages(getDraft(draftKey)?.images) : []
@@ -441,6 +447,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const modelDropdownPanelRef = useRef<HTMLDivElement>(null);
   const modelSearchInputRef = useRef<HTMLInputElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
+  const contextDropdownRef = useRef<HTMLDivElement>(null);
   const historyMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
@@ -1387,6 +1394,10 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   })();
   const clampedContextPercent = clampContextPercent(contextUsage?.percent);
   const contextPercentLabel = formatRingPercent(clampedContextPercent);
+  const hasContextRing = Boolean(contextUsage && contextUsage.percent != null && contextUsage.contextWindow > 0);
+  const contextSummary = hasContextRing && contextUsage
+    ? `${formatPercent(clampedContextPercent)} / ${formatContextWindow(contextUsage.contextWindow)}`
+    : null;
   const thinkingLevelOptions = React.useMemo(
     () => selectableThinkingLevels(availableThinkingLevels),
     [availableThinkingLevels],
@@ -1397,6 +1408,31 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   useEffect(() => {
     if (isStreaming) setThinkingDropdownOpen(false);
   }, [isStreaming]);
+
+  useEffect(() => {
+    if (!hasContextRing) {
+      setContextDropdownOpen(false);
+      return;
+    }
+    if (!contextDropdownOpen) return;
+    const handlePointerDown = (event: globalThis.PointerEvent) => {
+      const container = contextDropdownRef.current;
+      if (container && !container.contains(event.target as Node)) {
+        setContextDropdownOpen(false);
+      }
+    };
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setContextDropdownOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [contextDropdownOpen, hasContextRing]);
 
   useEffect(() => {
     if (!modelDropdownOpen) {
@@ -2305,26 +2341,38 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
             <div className="composer-toolbar-spacer" style={{ flex: 1 }} />
 
-            {/* Context usage ring — small, percentage only, no label */}
-            {contextUsage?.percent != null && (
-              <span
-                className="composer-context-ring"
-                title={`${formatRingPercent(clampedContextPercent)} · ${formatCompactNumber(contextUsage.tokens ?? 0, locale)} / ${formatCompactNumber(contextUsage.contextWindow, locale)}`}
-              >
-                <svg width="100%" height="100%" viewBox="0 0 26 26" aria-hidden="true" style={{ position: "absolute", inset: 0 }}>
-                  <circle cx="13" cy="13" r="9.5" fill="none" stroke="var(--border)" strokeWidth="2.5" />
-                  <circle
-                    cx="13" cy="13" r="9.5" fill="none"
-                    stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round"
-                    strokeDasharray={RING_CIRCUMFERENCE}
-                    strokeDashoffset={RING_CIRCUMFERENCE * (1 - clampedContextPercent / 100)}
-                    transform="rotate(-90 13 13)"
-                  />
-                </svg>
-                <span className="composer-context-ring-label">
-                  {contextPercentLabel}
-                </span>
-              </span>
+            {/* Context usage ring — a compact button with an anchored summary. */}
+            {hasContextRing && contextSummary && contextUsage && (
+              <div ref={contextDropdownRef} className="composer-context-ring-wrap">
+                <button
+                  type="button"
+                  className="composer-context-ring"
+                  aria-haspopup="dialog"
+                  aria-expanded={contextDropdownOpen}
+                  aria-label="Context window usage"
+                  title={contextSummary}
+                  onClick={() => setContextDropdownOpen((open) => !open)}
+                >
+                  <svg width="100%" height="100%" viewBox="0 0 26 26" aria-hidden="true" style={{ position: "absolute", inset: 0 }}>
+                    <circle cx="13" cy="13" r="9.5" fill="none" stroke="var(--border)" strokeWidth="2.5" />
+                    <circle
+                      cx="13" cy="13" r="9.5" fill="none"
+                      stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round"
+                      strokeDasharray={RING_CIRCUMFERENCE}
+                      strokeDashoffset={RING_CIRCUMFERENCE * (1 - clampedContextPercent / 100)}
+                      transform="rotate(-90 13 13)"
+                    />
+                  </svg>
+                  <span className="composer-context-ring-label">
+                    {contextPercentLabel}
+                  </span>
+                </button>
+                {contextDropdownOpen && (
+                  <div className="dropdown-surface composer-context-ring-popup" role="dialog" aria-label="Context window usage">
+                    <span className="composer-context-ring-popup-summary">{contextSummary}</span>
+                  </div>
+                )}
+              </div>
             )}
 
             {/* Queue-during-run actions: Steer injects into the current turn,

@@ -22,7 +22,7 @@ import { getPreferredToolPreset, setPreferredToolPreset } from "@/lib/tool-prese
 import { toast } from "@/components/ui/toast";
 import { expandWebSlashCommand } from "@/lib/web-slash-commands";
 import { createActiveGoal, parseActiveGoal, type ActiveGoal, type ActivePlan } from "@/lib/web-mode-state";
-import { deriveContextUsage, mergeContextUsage } from "@/lib/context-usage";
+import { deriveContextUsage, mergeContextUsage, resolveContextWindow } from "@/lib/context-usage";
 import type { HostToolDefinition, HostUriSchemeDefinition, RpcAvailableSlashCommand, SessionStatsInfo, TodoPhase } from "@/lib/pi-types";
 import { isRecord } from "@/lib/type-guards";
 import {
@@ -559,7 +559,7 @@ export interface AttachedImage {
 }
 
 type SelectedModel = { provider: string; modelId: string };
-type ModelEntry = { id: string; name: string; provider: string; supportsFastMode?: boolean };
+type ModelEntry = { id: string; name: string; provider: string; supportsFastMode?: boolean; contextWindow?: number };
 type ModelsResponse = {
   models: Record<string, string>;
   modelList?: ModelEntry[];
@@ -643,13 +643,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (next && next.contextWindow > 0) contextWindowRef.current = next.contextWindow;
     setContextUsageRaw((prev) => mergeContextUsage(prev, next));
   }, []);
-  // Client-side fallback: once the RPC wrapper for a session dies the live
-  // polls stop and the ring would freeze on its last live value; derive the
-  // context size from the last plausible assistant usage instead.
-  const contextUsage = useMemo(
-    () => rpcContextUsage ?? deriveContextUsage(messages, contextWindowRef.current),
-    [rpcContextUsage, messages],
-  );
   const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
   const [forkingEntryId, setForkingEntryId] = useState<string | null>(null);
   const [currentModelOverride, setCurrentModelOverride] = useState<{ provider: string; modelId: string } | null>(null);
@@ -748,6 +741,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     : (currentModelOverride ?? (liveModelMeta
         ? { provider: liveModelMeta.provider, modelId: liveModelMeta.modelId }
         : data?.context.model ?? pendingModel));
+
+  // Client-side fallback: once the RPC wrapper for a session dies the live
+  // polls stop and the ring would freeze on its last live value; derive the
+  // context size from the selected model's catalog entry (or last live
+  // window) instead. Keep the live RPC state authoritative when present.
+  const contextWindow = resolveContextWindow(modelList, displayModel, contextWindowRef.current);
+  const contextUsage = useMemo(
+    () => rpcContextUsage ?? deriveContextUsage(messages, contextWindow),
+    [rpcContextUsage, messages, contextWindow],
+  );
 
   const sessionStats = useMemo(() => {
     if (sessionStatsOverride) return sessionStatsOverride;

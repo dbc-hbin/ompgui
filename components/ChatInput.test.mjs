@@ -10,6 +10,94 @@ const jiti = createJiti(import.meta.url, {
 });
 const { ChatInput, ModelErrorBanner, filterModelOptions } = await jiti.import("./ChatInput.tsx");
 
+const noop = () => {};
+
+function resolveElementTree(node) {
+  if (Array.isArray(node)) return node.flatMap(resolveElementTree);
+  if (!React.isValidElement(node)) return node;
+
+  const { type, props } = node;
+  if (type === React.Fragment) return resolveElementTree(props.children);
+  if (typeof type === "function") return resolveElementTree(type(props));
+  if (props.children === undefined) return node;
+
+  return React.cloneElement(node, { children: resolveElementTree(props.children) });
+}
+
+function findHostElements(node, predicate, found = []) {
+  if (Array.isArray(node)) {
+    for (const child of node) findHostElements(child, predicate, found);
+    return found;
+  }
+  if (!React.isValidElement(node)) return found;
+
+  if (predicate(node.type, node.props)) found.push(node);
+  if (node.props.children !== undefined) findHostElements(node.props.children, predicate, found);
+  return found;
+}
+
+function textContent(node) {
+  if (Array.isArray(node)) return node.map(textContent).join("");
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (!React.isValidElement(node)) return "";
+  return textContent(node.props.children);
+}
+
+/** Resolve ChatInput's forwardRef render with a tiny stateful dispatcher so
+ * the popup click contract can be exercised without a browser DOM. */
+function withInteractiveHooks(callback) {
+  const internals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  const previousDispatcher = internals.H;
+  const stateSlots = [];
+  const refSlots = [];
+  let hookCursor = 0;
+  const forwardRefType = ChatInput.type ?? ChatInput;
+  const render = forwardRefType.render ?? forwardRefType.type?.render;
+  assert.equal(typeof render, "function");
+
+  internals.H = {
+    useState(initial) {
+      const slot = hookCursor++;
+      if (!(slot in stateSlots)) stateSlots[slot] = typeof initial === "function" ? initial() : initial;
+      return [stateSlots[slot], (next) => {
+        stateSlots[slot] = typeof next === "function" ? next(stateSlots[slot]) : next;
+      }];
+    },
+    useRef(initial) {
+      const slot = hookCursor++;
+      if (!(slot in refSlots)) refSlots[slot] = { current: initial };
+      return refSlots[slot];
+    },
+    useMemo(factory) {
+      hookCursor++;
+      return factory();
+    },
+    useCallback(callbackValue) {
+      hookCursor++;
+      return callbackValue;
+    },
+    useEffect() {
+      hookCursor++;
+    },
+    useImperativeHandle() {
+      hookCursor++;
+    },
+    useSyncExternalStore(_subscribe, _getSnapshot, getServerSnapshot) {
+      hookCursor++;
+      return getServerSnapshot();
+    },
+  };
+
+  try {
+    return callback((props) => {
+      hookCursor = 0;
+      return resolveElementTree(render(props, null));
+    });
+  } finally {
+    internals.H = previousDispatcher;
+  }
+}
+
 test("renders the upstream model error", () => {
   const html = renderToStaticMarkup(
     React.createElement(ModelErrorBanner, {
@@ -64,6 +152,63 @@ test("renders goal, planning, and advisor indicators at the composer", () => {
   assert.match(html, /Ship the active goal bar/);
   assert.match(html, /(Planning in progress|chatInput\.planningInProgress)/);
   assert.match(html, /(Advisor enabled|chatInput\.advisorEnabled)/);
+});
+
+test("renders context ring button collapsed without its popup on the server", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(ChatInput, {
+      onSend: noop,
+      onAbort: noop,
+      isStreaming: false,
+      contextUsage: { percent: 34.2, contextWindow: 1_000_000, tokens: 342_000 },
+    }),
+  );
+
+  assert.match(html, /<button[^>]*class="composer-context-ring"/);
+  assert.match(html, /aria-expanded="false"/);
+  assert.match(html, /aria-haspopup="dialog"/);
+  assert.doesNotMatch(html, /composer-context-ring-popup/);
+});
+
+test("opens the context popup with the resolved percent and window summary", () => {
+  withInteractiveHooks((rerender) => {
+    const props = {
+      onSend: noop,
+      onAbort: noop,
+      isStreaming: false,
+      contextUsage: { percent: 34.2, contextWindow: 1_000_000, tokens: 342_000 },
+    };
+    const initialTree = rerender(props);
+    const findRingButton = (tree) => findHostElements(
+      tree,
+      (type, buttonProps) => type === "button" && buttonProps.className === "composer-context-ring",
+    )[0];
+    const initialButton = findRingButton(initialTree);
+
+    assert.ok(initialButton);
+    assert.equal(initialButton.props["aria-expanded"], false);
+    assert.equal(findHostElements(initialTree, (type, popupProps) => (
+      type === "div" && String(popupProps.className ?? "").includes("composer-context-ring-popup")
+    )).length, 0);
+
+    initialButton.props.onClick();
+    const openedTree = rerender(props);
+    const openedButton = findRingButton(openedTree);
+    const popup = findHostElements(openedTree, (type, popupProps) => (
+      type === "div" && String(popupProps.className ?? "").includes("composer-context-ring-popup")
+    ));
+
+    assert.equal(openedButton.props["aria-expanded"], true);
+    assert.equal(popup.length, 1);
+    assert.equal(textContent(popup[0]), "34.2% / 1M");
+
+    openedButton.props.onClick();
+    const closedTree = rerender(props);
+    assert.equal(findRingButton(closedTree).props["aria-expanded"], false);
+    assert.equal(findHostElements(closedTree, (type, popupProps) => (
+      type === "div" && String(popupProps.className ?? "").includes("composer-context-ring-popup")
+    )).length, 0);
+  });
 });
 
 test("filters model options by display name, identifier, and provider", () => {

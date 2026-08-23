@@ -7,6 +7,36 @@ export interface ContextUsageState {
   tokens: number | null;
 }
 
+export interface ContextWindowModel {
+  id: string;
+  provider: string;
+  contextWindow?: number;
+}
+
+function isValidContextWindow(value: number | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+/** Resolve a model's context window, preferring an authoritative live value. */
+export function resolveContextWindow(
+  models: ContextWindowModel[],
+  selected: { provider: string; modelId: string } | null,
+  liveWindow?: number,
+): number {
+  if (isValidContextWindow(liveWindow)) return liveWindow;
+  if (!selected) return 0;
+  const model = models.find((entry) => entry.provider === selected.provider && entry.id === selected.modelId);
+  return isValidContextWindow(model?.contextWindow) ? model.contextWindow : 0;
+}
+
+/** Format a positive context window without an unnecessary trailing `.0`. */
+export function formatContextWindow(window: number): string {
+  if (!isValidContextWindow(window)) return "";
+  if (window >= 1_000_000) return `${window / 1_000_000}M`;
+  if (window >= 1_000) return `${window / 1_000}k`;
+  return String(window);
+}
+
 /**
  * Merge a freshly polled `get_state` contextUsage into the displayed one.
  *
@@ -83,15 +113,19 @@ export function clampContextPercent(percent: number | null | undefined): number 
   return Math.min(100, Math.max(0, percent));
 }
 
+/** Popup label: preserve one decimal when it carries useful precision. */
+export function formatPercent(clampedPercent: number): string {
+  const v = Math.round(clampedPercent * 10) / 10;
+  return `${v % 1 === 0 ? v.toFixed(0) : v.toFixed(1)}%`;
+}
+
 /**
- * Ring label: one decimal below 10% so small real usage (a 1M-context model
- * sits at 0–5% for most of a session) stays legible instead of rounding to
- * 0%, whole percentages above that.
+ * Ring label: one decimal below 10% so small real usage (a
+ * 1M-context model sits at 0–5% for most of a session) stays legible instead
+ * of rounding to 0%, whole percentages above that.
  */
 export function formatRingPercent(clampedPercent: number): string {
-  if (clampedPercent > 0 && clampedPercent < 10) {
-    const v = Math.round(clampedPercent * 10) / 10;
-    return `${v % 1 === 0 ? v.toFixed(0) : v.toFixed(1)}%`;
-  }
-  return `${Math.round(clampedPercent)}%`;
+  return clampedPercent > 0 && clampedPercent < 10
+    ? formatPercent(clampedPercent)
+    : `${Math.round(clampedPercent)}%`;
 }
