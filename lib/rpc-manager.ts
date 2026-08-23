@@ -6,6 +6,7 @@ import { RpcCommandError, RpcProcess, type RpcFrame } from "./omp/rpc-process";
 import { readNativeSettings } from "./omp/settings-config";
 import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
 import { PRESET_FULL } from "./tool-presets";
+import { SessionRelayPublisher } from "./session-relay-publisher";
 import type {
   BashResultInfo,
   OmpModel,
@@ -26,6 +27,12 @@ export interface AgentEvent {
 }
 
 type EventListener = (event: AgentEvent) => void;
+
+interface PendingHostRequest {
+  event: AgentEvent;
+  legacyRecipients: Set<EventListener>;
+  compactRecipientIds: Set<number>;
+}
 
 interface CompactionResultLike {
   summary?: string;
@@ -212,11 +219,11 @@ export class AgentSessionWrapper {
   /** Host tools the web UI registered via set_host_tools (agent-callable). */
   private hostToolNames: Set<string> = new Set();
   /** host_tool_call ids awaiting a host_tool_result from the browser. */
-  private pendingHostTools: Map<string, AgentEvent> = new Map();
+  private pendingHostTools: Map<string, PendingHostRequest> = new Map();
   /** URI schemes the web UI registered via set_host_uri_schemes. */
   private hostUriSchemes: Map<string, { writable?: boolean }> = new Map();
   /** host_uri_request ids awaiting a host_uri_result from the browser. */
-  private pendingHostUris: Map<string, AgentEvent> = new Map();
+  private pendingHostUris: Map<string, PendingHostRequest> = new Map();
   /** Resolves once an in-flight destroyAndWait finishes; null when idle. Read
    * by startRpcSession so a replacement spawn awaits the old child's exit. */
   destroyPromise: Promise<void> | null = null;
@@ -224,6 +231,7 @@ export class AgentSessionWrapper {
   private _sessionFile = "";
   private _sessionName: string | undefined;
   private proc: RpcProcess;
+  private relayPublisher: SessionRelayPublisher;
   readonly cwd: string;
   /** The cwd recorded in the session file header; null for brand-new sessions
    * or when the header lacks one. Used to detect a spawn fallback so a notice
@@ -232,10 +240,44 @@ export class AgentSessionWrapper {
 
   // Plain field assignments (not TS parameter properties) keep this module
   // runnable under Node's strip-only TypeScript mode for probes/tests.
-  constructor(proc: RpcProcess, cwd: string, recordedCwd?: string | null) {
+  constructor(proc: RpcProcess, cwd: string, recordedCwd?: string | null, initialSessionId?: string) {
     this.proc = proc;
     this.cwd = cwd;
     this.recordedCwd = recordedCwd ?? null;
+    this.relayPublisher = this.createRelayPublisher(initialSessionId);
+  }
+
+  private createRelayPublisher(sessionId?: string): SessionRelayPublisher {
+    return new SessionRelayPublisher(sessionId || "session", {
+      onSubscriberCountChange: () => this.onCompactSubscriberCountChange(),
+    });
+  }
+
+  private onCompactSubscriberCountChange(): void {
+    this.prunePendingHostRecipients();
+  }
+
+  private hasBrowserSubscribers(): boolean {
+    return this.listeners.length > 0 || this.relayPublisher.hasSubscribers();
+  }
+
+  /** The one compact publisher owned by this wrapper. */
+  getRelayPublisher(): SessionRelayPublisher {
+    return this.relayPublisher;
+  }
+
+  /** Alias used by stream routes and diagnostics. */
+  get compactPublisher(): SessionRelayPublisher {
+    return this.relayPublisher;
+  }
+
+  get compactSubscriberCount(): number {
+    return this.relayPublisher.subscriberCount;
+  }
+
+  private replaceRelayPublisher(reason: "destroyed" | "identity_changed" | "startup_failed", sessionId?: string): void {
+    this.relayPublisher.close(reason);
+    this.relayPublisher = this.createRelayPublisher(sessionId || this._sessionId || "session");
   }
 
   get sessionId(): string {
@@ -291,6 +333,7 @@ export class AgentSessionWrapper {
   }
 
   private applyIdentity(state: RpcSessionState): void {
+    if (state.sessionId) this.relayPublisher.setSessionId(state.sessionId);
     this._sessionId = state.sessionId;
     this._sessionFile = state.sessionFile ?? "";
     this._sessionName = state.sessionName;
@@ -402,8 +445,8 @@ export class AgentSessionWrapper {
         // via host_tool_result); unregistered tools or no attached listener
         // are rejected immediately so the agent never hangs on a tool nobody
         // will answer.
-        if (id && toolName && this.hostToolNames.has(toolName) && this.listeners.length > 0) {
-          this.pendingHostTools.set(id, event);
+        if (id && toolName && this.hostToolNames.has(toolName) && this.hasBrowserSubscribers()) {
+          this.pendingHostTools.set(id, this.captureHostRequestRecipients(event));
           this.emit(event);
           notifyRunningChange();
           return;
@@ -431,8 +474,8 @@ export class AgentSessionWrapper {
         const scheme = url.split(":")[0] ?? "";
         const operation = event.operation === "write" ? "write" : "read";
         const registered = this.hostUriSchemes.get(scheme);
-        if (id && scheme && registered && (operation !== "write" || registered.writable) && this.listeners.length > 0) {
-          this.pendingHostUris.set(id, event);
+        if (id && scheme && registered && (operation !== "write" || registered.writable) && this.hasBrowserSubscribers()) {
+          this.pendingHostUris.set(id, this.captureHostRequestRecipients(event));
           this.emit(event);
           notifyRunningChange();
           return;
@@ -555,33 +598,78 @@ export class AgentSessionWrapper {
     this.emit({ type: "notice", level: "warning", message: `Rejected unavailable host tool: ${toolName}` });
   }
 
+  /** Reject one outstanding host tool call whose actual recipients vanished. */
+  private rejectPendingHostTool(id: string, message: string): void {
+    if (!this.pendingHostTools.delete(id)) return;
+    this.proc.sendFrame({
+      type: "host_tool_result",
+      id,
+      isError: true,
+      result: { content: [{ type: "text", text: message }] },
+    });
+  }
+
   /** Reject every outstanding host tool call (browser disconnected / destroy). */
   private rejectPendingHostTools(message: string): void {
-    for (const id of this.pendingHostTools.keys()) {
-      this.proc.sendFrame({
-        type: "host_tool_result",
-        id,
-        isError: true,
-        result: { content: [{ type: "text", text: message }] },
-      });
-    }
-    this.pendingHostTools.clear();
+    for (const id of [...this.pendingHostTools.keys()]) this.rejectPendingHostTool(id, message);
+  }
+
+  /** Reject one outstanding host URI request whose actual recipients vanished. */
+  private rejectPendingHostUri(id: string, message: string): void {
+    if (!this.pendingHostUris.delete(id)) return;
+    this.proc.sendFrame({
+      type: "host_uri_result",
+      id,
+      isError: true,
+      error: message,
+    });
   }
 
   /** Reject every outstanding host URI request (browser disconnected / destroy). */
   private rejectPendingHostUris(message: string): void {
-    for (const id of this.pendingHostUris.keys()) {
-      this.proc.sendFrame({
-        type: "host_uri_result",
-        id,
-        isError: true,
-        error: message,
-      });
-    }
-    this.pendingHostUris.clear();
+    for (const id of [...this.pendingHostUris.keys()]) this.rejectPendingHostUri(id, message);
+  }
+
+  private captureHostRequestRecipients(event: AgentEvent): PendingHostRequest {
+    return {
+      event,
+      legacyRecipients: new Set(this.listeners),
+      compactRecipientIds: this.relayPublisher.getSubscriberIds(),
+    };
+  }
+
+  private prunePendingHostRecipients(disconnectedLegacy?: EventListener): void {
+    const activeCompactRecipients = this.relayPublisher.getSubscriberIds();
+    const prune = (
+      requests: Map<string, PendingHostRequest>,
+      reject: (id: string, message: string) => void,
+      message: string,
+    ) => {
+      for (const [id, request] of requests) {
+        if (disconnectedLegacy) request.legacyRecipients.delete(disconnectedLegacy);
+        for (const recipientId of request.compactRecipientIds) {
+          if (!activeCompactRecipients.has(recipientId)) request.compactRecipientIds.delete(recipientId);
+        }
+        if (request.legacyRecipients.size === 0 && request.compactRecipientIds.size === 0) reject(id, message);
+      }
+    };
+    prune(
+      this.pendingHostTools,
+      (id, message) => this.rejectPendingHostTool(id, message),
+      "The web UI that received this host tool disconnected before answering",
+    );
+    prune(
+      this.pendingHostUris,
+      (id, message) => this.rejectPendingHostUri(id, message),
+      "The web UI that received this URI request disconnected before answering",
+    );
   }
 
   private emit(event: AgentEvent): void {
+    // Keep compact transport canonical while preserving the legacy direct
+    // listener stream below. The publisher is never added to `listeners`, so
+    // host routing still reflects actual browser subscribers.
+    this.relayPublisher.publish(event);
     for (const l of this.listeners) {
       try {
         l(event);
@@ -644,12 +732,10 @@ export class AgentSessionWrapper {
     return () => {
       const i = this.listeners.indexOf(listener);
       if (i !== -1) this.listeners.splice(i, 1);
-      // No UI attached anymore: reject outstanding host tool calls so the
-      // agent never waits forever on a tool nobody will answer.
-      if (this.listeners.length === 0) {
-        this.rejectPendingHostTools("The web UI disconnected while the agent was waiting for this host tool");
-        this.rejectPendingHostUris("The web UI disconnected while the agent was waiting for this URI request");
-      }
+      // A later-joining tab never received an already-pending actionable
+      // request. Reject when the last actual recipient disconnects rather
+      // than relying on the global subscriber count.
+      this.prunePendingHostRecipients(listener);
     };
   }
 
@@ -794,6 +880,9 @@ export class AgentSessionWrapper {
    * on boot, matching a fresh CLI launch. */
   private async restart(): Promise<void> {
     if (this.restarting) throw new WebRpcError(RESTARTING_MESSAGE, "session_restarting");
+    // A reload replaces the child and therefore the compact epoch. Existing
+    // subscribers must reconnect rather than silently crossing process state.
+    this.replaceRelayPublisher("destroyed");
     const sessionFile = this._sessionFile;
     const resumable = !!sessionFile && existsSync(sessionFile);
     const old = this.proc;
@@ -1103,6 +1192,7 @@ export class AgentSessionWrapper {
     if (this.destroyPromise) return this.destroyPromise;
     if (!this._alive) return;
     this._alive = false;
+    this.relayPublisher.close("destroyed");
     if (this.idleTimer) clearTimeout(this.idleTimer);
     if (this.sessionFileSignalTimer) {
       clearTimeout(this.sessionFileSignalTimer);
@@ -1261,7 +1351,7 @@ export async function startRpcSession(
       extraArgs: buildSessionSpawnArgs(sessionFile, toolNames, advisor),
       onExit: ({ stderrTail }) => holder.wrapper?.handleProcessExit(stderrTail),
     });
-    const created = new AgentSessionWrapper(proc, cwd, recordedCwd);
+    const created = new AgentSessionWrapper(proc, cwd, recordedCwd, sessionId);
     holder.wrapper = created;
     created.start();
     try {
