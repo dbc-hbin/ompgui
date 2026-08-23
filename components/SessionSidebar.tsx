@@ -165,22 +165,10 @@ function projectLabel(projectPath: string): string {
  * to the left edge; the inner plaintext bidi isolation keeps the path itself
  * rendered strictly left-to-right (no punctuation reordering).
  */
-function PathLabel({ text, style }: { text: string; style?: CSSProperties }) {
+function PathLabel({ text }: { text: string }) {
   return (
-    <span
-      style={{
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
-        display: "block",
-        minWidth: 0,
-        lineHeight: 1.35,
-        direction: "rtl",
-        textAlign: "left",
-        ...style,
-      }}
-    >
-      <span style={{ unicodeBidi: "plaintext" }}>{text}</span>
+    <span className="sidebar-path-label">
+      <span className="sidebar-path-label-text">{text}</span>
     </span>
   );
 }
@@ -198,8 +186,6 @@ function formatRelativeTime(value: string, locale: string, now: number): string 
   if (hours < 24) return formatter.format(-hours, "hour");
   return formatter.format(-Math.floor(hours / 24), "day");
 }
-
-const SIDEBAR_BUTTON_TRANSITION = "background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm), border-color var(--dur-fast) var(--ease-out-warm)";
 
 /** Quiet square icon button used across the sidebar chrome (header, section
  *  headers, footer). Stays visually subdued; the accent appears on hover and
@@ -219,7 +205,6 @@ function SidebarIconButton({
   disabled?: boolean;
   children: ReactNode;
 }) {
-  const [hovered, setHovered] = useState(false);
   return (
     <button
       type="button"
@@ -228,19 +213,7 @@ function SidebarIconButton({
       onClick={onClick}
       disabled={disabled}
       aria-pressed={active}
-      style={{
-        display: "flex", alignItems: "center", justifyContent: "center",
-        width: 26, height: 26, padding: 0, flexShrink: 0, lineHeight: 0,
-        background: active || hovered ? "var(--bg-hover)" : "none",
-        border: "none",
-        borderRadius: "var(--radius-control)",
-        color: active ? "var(--accent)" : hovered ? "var(--accent)" : "var(--text-dim)",
-        cursor: disabled ? "default" : "pointer",
-        opacity: disabled ? 0.5 : 1,
-        transition: SIDEBAR_BUTTON_TRANSITION,
-      }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      className="sidebar-icon-button"
     >
       {children}
     </button>
@@ -266,6 +239,7 @@ function SidebarPortalMenu({
   placement = "below",
   align = "end",
   minWidth = 136,
+  className,
   style,
   children,
 }: {
@@ -276,6 +250,7 @@ function SidebarPortalMenu({
   /** "end" right-aligns to the anchor, "start" left-aligns to it. */
   align?: "start" | "end";
   minWidth?: number;
+  className?: string;
   style?: CSSProperties;
   children: ReactNode;
 }) {
@@ -374,18 +349,12 @@ function SidebarPortalMenu({
     <div
       ref={menuRef}
       role="menu"
+      className={`sidebar-portal-menu${className ? ` ${className}` : ""}`}
       style={{
-        position: "fixed",
         top: pos ? pos.top : -9999,
         left: pos ? pos.left : -9999,
         visibility: pos ? "visible" : "hidden",
-        zIndex: 1000,
         minWidth,
-        padding: 4,
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius-control)",
-        background: "var(--bg-panel)",
-        boxShadow: "var(--shadow-pop)",
         ...style,
       }}
     >
@@ -526,22 +495,16 @@ function OmpGuiTitle() {
   return (
     <button
       onClick={handleClick}
-      style={{
-        background: "none", border: "none", padding: 0, cursor: "pointer",
-        fontWeight: 700, fontSize: 14, letterSpacing: "-0.01em",
-        fontFamily: "var(--font-mono)",
-        minWidth: "6ch",
-        lineHeight: 1,
-      }}
+      className="sidebar-brand"
       title={showVersion ? "Show ompgui name" : "Show ompgui version"}
     >
       {!scrambling && !showVersion ? (
         <>
-          <span style={{ color: "var(--accent)" }}>omp</span>
-          <span style={{ color: "var(--text)" }}>gui</span>
+          <span className="sidebar-brand-accent">omp</span>
+          <span className="sidebar-brand-name">gui</span>
         </>
       ) : (
-        <span style={{ color: showVersion ? "var(--accent)" : "var(--text)" }}>{display}</span>
+        <span className="sidebar-brand-dynamic" data-version={showVersion ? "true" : "false"}>{display}</span>
       )}
     </button>
   );
@@ -1410,7 +1373,7 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
   ) : null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+    <div className="sidebar-shell">
       {addProjectOpen && (
         <DirectoryPicker
           busy={addProjectBusy}
@@ -1423,19 +1386,10 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
         />
       )}
       {/* Header: branding + quiet utilities + New Session */}
-      <div
-        style={{
-          padding: "10px 10px 8px",
-          borderBottom: "1px solid var(--border)",
-          flexShrink: 0,
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div className="sidebar-header">
+        <div className="sidebar-header-row">
           <OmpGuiTitle />
-          <div style={{ display: "flex", gap: 2 }}>
+          <div className="sidebar-header-actions">
             <Tooltip content={t("sessionSidebar.importTitle")} side="bottom">
               <SidebarIconButton
                 label={t("sessionSidebar.import")}
@@ -1467,7 +1421,7 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
           ref={importInputRef}
           type="file"
           accept=".jsonl,.json,application/json,application/jsonl"
-          style={{ display: "none" }}
+          className="sidebar-import-input"
           onChange={(e) => {
             const file = e.target.files?.[0] ?? null;
             e.target.value = "";
@@ -1479,52 +1433,15 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
           disabled={!selectedCwd}
           className="sidebar-new-session"
           title={selectedCwd ? t("sessionSidebar.newSessionIn", { cwd: selectedCwd }) : t("sessionSidebar.selectProjectFirst")}
-          style={{
-            width: "100%",
-            height: 38,
-            boxSizing: "border-box",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 7,
-            background: "var(--bg-hover)",
-            border: "1px solid var(--border)",
-            borderRadius: 9,
-            color: selectedCwd ? "var(--text)" : "var(--text-dim)",
-            cursor: selectedCwd ? "pointer" : "not-allowed",
-            fontSize: 12.5,
-            fontWeight: 600,
-            letterSpacing: "-0.01em",
-            opacity: selectedCwd ? 1 : 0.65,
-            transition: SIDEBAR_BUTTON_TRANSITION,
-          }}
-          onMouseEnter={(e) => {
-            if (!selectedCwd) return;
-            e.currentTarget.style.background = "var(--bg-selected)";
-            e.currentTarget.style.borderColor = "color-mix(in srgb, var(--accent) 30%, transparent)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "var(--bg-hover)";
-            e.currentTarget.style.borderColor = "var(--border)";
-          }}
         >
-          <Plus size={15} strokeWidth={2.2} style={{ color: "var(--accent)", flexShrink: 0 }} aria-hidden="true" />
+          <Plus size={15} strokeWidth={2.2} className="sidebar-new-session-icon" aria-hidden="true" />
           <span>{t("sessionSidebar.new")}</span>
         </button>
       </div>
 
       {/* Workspaces section header: label + search / filter / add */}
-      <div style={{ flexShrink: 0, padding: "4px 10px 2px", display: "flex", alignItems: "center", gap: 2 }}>
-        <span
-          style={{
-            flex: 1,
-            color: "var(--text-muted)",
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-          }}
-        >
+      <div className="sidebar-workspaces-header">
+        <span className="sidebar-section-label">
           {t("projects.heading")}
         </span>
         <SidebarIconButton
@@ -1560,7 +1477,7 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
         </SidebarIconButton>
       </div>
       {searchOpen && (
-        <div style={{ padding: "0 10px 6px", flexShrink: 0 }}>
+        <div className="sidebar-search-wrap">
           <input
             ref={searchInputRef}
             value={searchQuery}
@@ -1574,52 +1491,34 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
             }}
             placeholder={t("sessionSidebar.searchPlaceholder")}
             aria-label={t("sessionSidebar.search")}
-            style={{
-              width: "100%",
-              height: 27,
-              boxSizing: "border-box",
-              padding: "0 9px",
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-control)",
-              outline: "none",
-              color: "var(--text)",
-              fontSize: 12,
-            }}
-            onFocus={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; }}
-            onBlur={(e) => { e.currentTarget.style.borderColor = "var(--border)"; }}
+            className="sidebar-search-input"
           />
         </div>
       )}
 
       {/* Workspaces */}
         <div
-          style={{
-            flex: explorerOpen && (selectedCwdProp || selectedCwd) ? "1 1 0" : "1 1 auto",
-            transition: "flex var(--dur-med) var(--ease-out-warm)",
-            overflowY: "auto",
-            padding: "2px 10px 10px",
-            minHeight: 80,
-          }}
+          className="sidebar-workspaces-list"
+          style={{ flex: explorerOpen && (selectedCwdProp || selectedCwd) ? "1 1 0" : "1 1 auto" }}
         >
           {loading && (
-            <div style={{ padding: "10px 4px", color: "var(--text-muted)", fontSize: 12 }}>
+            <div className="sidebar-state-message sidebar-state-message-muted">
               {t("sessionSidebar.loading")}
             </div>
           )}
           {projectsError && (
-            <div style={{ padding: "10px 4px", color: "var(--accent)", fontSize: 12 }}>{projectsError}</div>
+            <div className="sidebar-state-message sidebar-state-message-error">{projectsError}</div>
           )}
           {error && (
-            <div style={{ padding: "10px 4px", color: "var(--accent)", fontSize: 12 }}>{error}</div>
+            <div className="sidebar-state-message sidebar-state-message-error">{error}</div>
           )}
           {!loading && !projectsError && !error && sortedProjects.length === 0 && (
-            <div style={{ padding: "10px 4px", color: "var(--text-muted)", fontSize: 12, lineHeight: 1.5 }}>
+            <div className="sidebar-state-message sidebar-state-message-muted sidebar-state-message-empty">
               {t("projects.noProjects")}
             </div>
           )}
           {!loading && !projectsError && !error && sortedProjects.length > 0 && visibleProjectEntries.length === 0 && (
-            <div style={{ padding: "14px 4px", color: "var(--text-dim)", fontSize: 11.5, lineHeight: 1.5 }}>
+            <div className="sidebar-state-message sidebar-state-message-dim sidebar-state-message-no-matches">
               {t("sessionSidebar.noMatches")}
             </div>
           )}
@@ -1671,57 +1570,28 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
       {/* File Explorer section */}
       {(selectedCwdProp || selectedCwd) && (
         <div
-          style={{
-            borderTop: "1px solid var(--border)",
-            display: "flex",
-            flexDirection: "column",
-            flex: explorerOpen ? "1 1 0" : "0 0 auto",
-            minHeight: 0,
-            overflow: "hidden",
-            transition: "flex var(--dur-med) var(--ease-out-warm)",
-          }}
+          className="sidebar-explorer"
+          style={{ flex: explorerOpen ? "1 1 0" : "0 0 auto" }}
         >
-          <div style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+          <div className="sidebar-explorer-header">
             <button
               onClick={() => setExplorerOpen((v) => !v)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                flex: 1,
-                padding: "6px 10px",
-                background: "none",
-                border: "none",
-                color: "var(--text-muted)",
-                cursor: "pointer",
-                fontSize: 11,
-                fontWeight: 600,
-                letterSpacing: "0.05em",
-                textTransform: "uppercase",
-                textAlign: "left",
-              }}
+              className="sidebar-explorer-toggle"
+              aria-expanded={explorerOpen}
             >
               <ChevronRight
                 size={12}
                 strokeWidth={1.8}
-                style={{
-                  transform: explorerOpen ? "rotate(90deg)" : "none",
-                  transition: "transform var(--dur-med) var(--ease-out-warm)",
-                  flexShrink: 0,
-                }}
+                className="sidebar-explorer-chevron"
+                data-open={explorerOpen ? "true" : "false"}
                 aria-hidden="true"
               />
               {t("sessionSidebar.explorer")}
             </button>
             <div
+              className="sidebar-explorer-actions"
               inert={!explorerOpen ? true : undefined}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                opacity: explorerOpen ? 1 : 0,
-                pointerEvents: explorerOpen ? "auto" : "none",
-                transition: "opacity var(--dur-fast) var(--ease-out-warm)",
-              }}
+              data-open={explorerOpen ? "true" : "false"}
             >
               <Tooltip content={t("sessionSidebar.uploadFilesTitle")} side="top">
                 <button
@@ -1729,20 +1599,7 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
                   disabled={explorerUploadBusy}
                   title={t("sessionSidebar.uploadFilesTitle")}
                   aria-label={t("sessionSidebar.uploadFiles")}
-                  style={{
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    width: 26, height: 26, padding: 0,
-                    background: "none",
-                    border: "none",
-                    color: "var(--text-dim)",
-                    cursor: explorerUploadBusy ? "default" : "pointer",
-                    borderRadius: "var(--radius-control)",
-                    flexShrink: 0,
-                    opacity: explorerUploadBusy ? 0.6 : 1,
-                    transition: "color var(--dur-fast) var(--ease-out-warm), background var(--dur-fast) var(--ease-out-warm)",
-                  }}
-                  onMouseEnter={(e) => { if (explorerUploadBusy) return; e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
-                  onMouseLeave={(e) => { if (explorerUploadBusy) return; e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+                  className="sidebar-explorer-icon-button sidebar-explorer-upload"
                 >
                   <Upload size={13} strokeWidth={2} aria-hidden="true" />
                 </button>
@@ -1756,19 +1613,8 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
                   else setExplorerKey((k) => k + 1);
                 }}
                 title={t("sessionSidebar.refreshExplorer")}
-                style={{
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  width: 26, height: 26, padding: 0, marginRight: 6,
-                  background: "none",
-                  border: "none",
-                  color: explorerRefreshing ? "var(--accent)" : "var(--text-dim)",
-                  cursor: "pointer",
-                  borderRadius: "var(--radius-control)",
-                  flexShrink: 0,
-                  transition: "color var(--dur-fast) var(--ease-out-warm), background var(--dur-fast) var(--ease-out-warm)",
-                }}
-                onMouseEnter={(e) => { if (explorerRefreshing) return; e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
-                onMouseLeave={(e) => { if (explorerRefreshing) return; e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+                className="sidebar-explorer-icon-button sidebar-explorer-refresh"
+                data-refreshing={explorerRefreshing ? "true" : "false"}
               >
                 {explorerRefreshing ? (
                   <RefreshCw size={13} strokeWidth={2} aria-hidden="true" className="icon-spin" />
@@ -1779,14 +1625,11 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
             </Tooltip>
           </div>
           <div
-            className={"accordion-flow " + (explorerOpen ? "is-open" : "")}
+            className={"accordion-flow sidebar-explorer-flow " + (explorerOpen ? "is-open" : "")}
             inert={!explorerOpen ? true : undefined}
-            style={{
-              flex: explorerOpen ? "1 1 auto" : "0 0 0px",
-              minHeight: 0,
-            }}
+            style={{ flex: explorerOpen ? "1 1 auto" : "0 0 0px" }}
           >
-            <div className="accordion-flow-inner" style={{ height: "100%", overflowY: "auto", overflowX: "hidden" }}>
+            <div className="accordion-flow-inner sidebar-explorer-flow-inner">
               <FileExplorer
                 ref={fileExplorerRef}
                 cwd={selectedCwd ?? selectedCwdProp!}
@@ -1803,78 +1646,42 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
       )}
 
       {/* Pinned footer: Settings & Usage */}
-      <div style={{ borderTop: "1px solid var(--border)", flexShrink: 0, display: "flex" }}>
+      <div className="sidebar-footer">
         <button
           className="sidebar-settings-row"
           onClick={onOpenSettings}
           title={t("settingsConfig.title")}
           aria-label={t("settingsConfig.title")}
-          style={{
-            flex: 1,
-            minWidth: 0,
-            height: 36,
-            boxSizing: "border-box",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "0 10px",
-            background: "none",
-            border: "none",
-            color: "var(--text-muted)",
-            cursor: "pointer",
-            textAlign: "left",
-            transition: SIDEBAR_BUTTON_TRANSITION,
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-muted)"; }}
         >
-          <span style={{ position: "relative", display: "inline-flex", flexShrink: 0, color: "var(--accent)" }}>
+          <span className="sidebar-footer-icon">
             <Settings2 size={14} strokeWidth={2} aria-hidden="true" />
             {updateAvailable && (
               <span
                 aria-label="Update available"
                 role="status"
-                style={{ position: "absolute", top: -3, right: -4, width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", border: "1px solid var(--bg-panel)" }}
+                className="sidebar-update-dot"
               />
             )}
           </span>
-          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 500 }}>
+          <span className="sidebar-footer-label">
             {t("settingsConfig.title")}
           </span>
-          <ChevronRight size={13} strokeWidth={2} style={{ flexShrink: 0, color: "var(--text-dim)" }} aria-hidden="true" />
+          <ChevronRight size={13} strokeWidth={2} className="sidebar-footer-chevron" aria-hidden="true" />
         </button>
-        <span style={{ width: 1, background: "var(--border)", alignSelf: "stretch" }} aria-hidden="true" />
+        <span className="sidebar-footer-divider" aria-hidden="true" />
         <button
           className="sidebar-settings-row"
           onClick={onOpenUsage}
           title={t("usageConfig.title")}
           aria-label={t("usageConfig.title")}
-          style={{
-            flex: 1,
-            minWidth: 0,
-            height: 36,
-            boxSizing: "border-box",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "0 10px",
-            background: "none",
-            border: "none",
-            color: "var(--text-muted)",
-            cursor: "pointer",
-            textAlign: "left",
-            transition: SIDEBAR_BUTTON_TRANSITION,
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-muted)"; }}
         >
-          <span style={{ position: "relative", display: "inline-flex", flexShrink: 0, color: "var(--accent)" }}>
+          <span className="sidebar-footer-icon">
             <Gauge size={14} strokeWidth={2} aria-hidden="true" />
           </span>
-          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 500 }}>
+          <span className="sidebar-footer-label">
             {t("usageConfig.title")}
           </span>
-          <ChevronRight size={13} strokeWidth={2} style={{ flexShrink: 0, color: "var(--text-dim)" }} aria-hidden="true" />
+          <ChevronRight size={13} strokeWidth={2} className="sidebar-footer-chevron" aria-hidden="true" />
         </button>
       </div>
     </div>
@@ -1953,7 +1760,7 @@ function ProjectRow({
   const showActions = hovered || focusWithin || actionMenuOpen;
 
   return (
-    <section className="sidebar-project" data-active={isActive ? "true" : "false"} style={{ marginBottom: 12 }}>
+    <section className="sidebar-project" data-active={isActive ? "true" : "false"}>
       <div
         className="sidebar-project-header"
         onMouseEnter={() => setHovered(true)}
@@ -1968,56 +1775,21 @@ function ProjectRow({
             setActionMenuOpen(false);
           }
         }}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 2,
-          height: 30,
-          margin: 0,
-          padding: "0 6px 0 0",
-          borderRadius: "var(--radius-control)",
-          background: hovered ? "var(--bg-hover)" : "transparent",
-          transition: SIDEBAR_BUTTON_TRANSITION,
-        }}
       >
         <button
           className="sidebar-project-identity"
           onClick={() => onActivate(project.path)}
           aria-current={isActive ? "true" : undefined}
           title={project.path}
-          style={{
-            flex: "0 1 auto",
-            minWidth: 0,
-            alignSelf: "stretch",
-            display: "flex",
-            alignItems: "center",
-            gap: 7,
-            padding: "0 4px 0 10px",
-            background: "none", border: "none",
-            color: hovered ? "var(--text)" : "var(--text-muted)",
-            cursor: "pointer",
-            textAlign: "left",
-          }}
+          data-active={isActive ? "true" : "false"}
         >
           <Folder
             size={15}
             strokeWidth={1.8}
-            style={{ flexShrink: 0, color: isActive ? "var(--accent)" : hovered ? "var(--text-muted)" : "var(--text-dim)", transition: "color var(--dur-fast) var(--ease-out-warm)" }}
+            className="sidebar-project-folder-icon"
             aria-hidden="true"
           />
-          <span
-            style={{
-              minWidth: 0,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              fontFamily: "var(--font-mono)",
-              fontSize: 12,
-              fontWeight: 600,
-              letterSpacing: "-0.01em",
-              lineHeight: 1.25,
-            }}
-          >
+          <span className="sidebar-project-label">
             {label}
           </span>
         </button>
@@ -2029,31 +1801,14 @@ function ProjectRow({
             aria-expanded={worktreeOpen}
             aria-haspopup="menu"
             title={t("sessionSidebar.switchWorktreeTo", { path: worktreeBranch })}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 5,
-              flexShrink: 0,
-              minWidth: 0,
-              maxWidth: 104,
-              height: 24,
-              padding: "0 6px",
-              border: "none",
-              borderRadius: "var(--radius-control)",
-              background: worktreeOpen ? "var(--bg-selected)" : "none",
-              color: worktreeOpen ? "var(--accent)" : hovered ? "var(--text-muted)" : "var(--text-dim)",
-              cursor: "pointer",
-              fontFamily: "var(--font-mono)",
-              fontSize: 10.5,
-              lineHeight: 1,
-              transition: "color var(--dur-fast) var(--ease-out-warm), background var(--dur-fast) var(--ease-out-warm)",
-            }}
+            className="sidebar-project-worktree-toggle"
+            data-open={worktreeOpen ? "true" : "false"}
           >
-            <span aria-hidden="true" style={{ flexShrink: 0, opacity: 0.7 }}>·</span>
-            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{worktreeBranch}</span>
+            <span aria-hidden="true" className="sidebar-project-worktree-dot">·</span>
+            <span className="sidebar-project-worktree-label">{worktreeBranch}</span>
           </button>
         )}
-        <div style={{ flex: 1 }} />
+        <div className="sidebar-project-spacer" />
         {hasActivity && (
           <span
             aria-label={t("projects.activity", { running: activity?.running ?? 0, unread: activity?.unread ?? 0 })}
@@ -2061,25 +1816,14 @@ function ProjectRow({
             className="sidebar-project-activity"
             role="status"
             aria-live="polite"
-            style={{ display: "flex", alignItems: "center", margin: "0 2px 0 0", flexShrink: 0, lineHeight: 0 }}
+            data-running={(activity?.running ?? 0) > 0 ? "true" : "false"}
           >
-            <span
-              aria-hidden="true"
-              style={{
-                width: 7,
-                height: 7,
-                borderRadius: "50%",
-                background: "var(--accent)",
-                boxShadow: (activity?.running ?? 0) > 0 ? "0 0 0 3px color-mix(in srgb, var(--accent) 13%, transparent)" : "none",
-              }}
-            />
+            <span aria-hidden="true" className="sidebar-project-activity-dot" />
           </span>
         )}
         <div
-          style={{
-            flexShrink: 0,
-            visibility: showActions ? "visible" : "hidden",
-          }}
+          className="sidebar-project-action-slot"
+          style={{ visibility: showActions ? "visible" : "hidden" }}
         >
           <button
             type="button"
@@ -2091,7 +1835,7 @@ function ProjectRow({
             title={t("commandPalette.actions")}
             aria-expanded={actionMenuOpen}
             aria-haspopup="menu"
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, padding: 0, border: "none", borderRadius: "var(--radius-control)", background: actionMenuOpen ? "var(--bg-selected)" : "transparent", color: "var(--text-dim)", cursor: removeBusy ? "default" : "pointer", opacity: removeBusy ? 0.5 : 1, lineHeight: 0, transition: SIDEBAR_BUTTON_TRANSITION }}
+            data-open={actionMenuOpen ? "true" : "false"}
           >
             <MoreHorizontal size={13} strokeWidth={2} aria-hidden="true" />
           </button>
@@ -2102,7 +1846,7 @@ function ProjectRow({
             placement="below"
             minWidth={136}
           >
-            <button type="button" role="menuitem" className="sidebar-menu-item" disabled={removeBusy} onClick={() => { setActionMenuOpen(false); onRemoveProject(project.path); }} style={{ display: "block", width: "100%", padding: "6px 9px", border: "none", borderRadius: 6, background: "transparent", color: "var(--status-error)", cursor: removeBusy ? "default" : "pointer", textAlign: "left", fontSize: 11 }}>
+            <button type="button" role="menuitem" className="sidebar-menu-item sidebar-menu-item-danger sidebar-project-remove-item" disabled={removeBusy} onClick={() => { setActionMenuOpen(false); onRemoveProject(project.path); }}>
               {t("projects.remove", { name: label })}
             </button>
           </SidebarPortalMenu>
@@ -2113,19 +1857,12 @@ function ProjectRow({
           aria-label={isExpanded ? t("projects.collapseProject", { name: label }) : t("projects.expandProject", { name: label })}
           aria-expanded={isExpanded}
           title={isExpanded ? t("projects.collapseProjectTitle", { path: project.path }) : t("projects.expandProjectTitle", { path: project.path })}
-          style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            width: 22, height: 26, padding: 0, flexShrink: 0,
-            background: "none", border: "none",
-            color: "var(--text-dim)", cursor: "pointer", lineHeight: 0,
-            borderRadius: "var(--radius-control)",
-            transition: "color var(--dur-fast) var(--ease-out-warm)",
-          }}
+          data-expanded={isExpanded ? "true" : "false"}
         >
           <ChevronRight
             size={13}
             strokeWidth={1.8}
-            style={{ transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform var(--dur-fast) var(--ease-out-warm)" }}
+            className="sidebar-project-toggle-icon"
             aria-hidden="true"
           />
         </button>
@@ -2134,9 +1871,9 @@ function ProjectRow({
       {isActive && activeWorktreeSwitcher}
 
       {isExpanded && (
-        <div className="sidebar-project-sessions" style={{ margin: "2px 0 0" }}>
+        <div className="sidebar-project-sessions">
           {visibleRoots.length === 0 ? (
-            <div style={{ padding: "6px 12px 8px 34px", color: "var(--text-dim)", fontSize: 11 }}>
+            <div className="sidebar-project-empty">
               {t("projects.emptyProject")}
             </div>
           ) : (
@@ -2159,27 +1896,15 @@ function ProjectRow({
                 <button
                   onClick={() => setShowAllSessions((v) => !v)}
                   aria-expanded={showAllSessions}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 5,
-                    width: "100%",
-                    margin: "2px 0 0",
-                    padding: "5px 8px 5px 34px",
-                    background: "none",
-                    border: "none",
-                    color: "var(--text-dim)",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    borderRadius: "var(--radius-control)",
-                    transition: SIDEBAR_BUTTON_TRANSITION,
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+                  className="sidebar-show-more"
                 >
-                  <ChevronDown size={11} strokeWidth={1.8} style={{ flexShrink: 0, transform: showAllSessions ? "rotate(180deg)" : "none", transition: "transform var(--dur-fast) var(--ease-out-warm)" }} aria-hidden="true" />
+                  <ChevronDown
+                    size={11}
+                    strokeWidth={1.8}
+                    className="sidebar-show-more-icon"
+                    data-expanded={showAllSessions ? "true" : "false"}
+                    aria-hidden="true"
+                  />
                   {showAllSessions
                     ? t("projects.showLess")
                     : t("projects.showMoreSessions", { count: hiddenCount })}
@@ -2250,27 +1975,27 @@ function ProjectWorktreeSwitcher({
       placement="below"
       align="start"
       minWidth={240}
-      style={{ overflow: "hidden" }}
+      className="sidebar-worktree-menu"
     >
-          <div style={{ maxHeight: "min(40vh, 300px)", overflowY: "auto" }}>
+          <div className="sidebar-worktree-list">
             {worktreeState.worktrees.map((wt) => {
               const isCurrent = wt.path === selectedCwd || (wt.isMain && !worktreeState.worktrees.some((w) => w.path === selectedCwd));
               if (wtConfirmRemove === wt.path) {
                 return (
-                  <div key={wt.path} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 10px", borderBottom: "1px solid var(--border)", background: "color-mix(in srgb, var(--accent) 6%, transparent)" }}>
-                    <span style={{ flex: 1, fontSize: 11, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div key={wt.path} className="sidebar-worktree-confirm-row">
+                    <span className="sidebar-worktree-confirm-text">
                       {t("sessionSidebar.uncommittedForceRemove")}
                     </span>
                     <button
                       onClick={() => onRemoveWorktree(wt.path, true)}
                       disabled={wtBusy}
-                      style={{ padding: "3px 9px", background: "var(--accent-strong)", border: "none", borderRadius: "var(--radius-control)", color: "var(--on-accent)", fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}
+                      className="sidebar-worktree-force-button"
                     >
                       {t("sessionSidebar.force")}
                     </button>
                     <button
                       onClick={() => setWtConfirmRemove(null)}
-                      style={{ padding: "3px 9px", background: "var(--bg-hover)", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", color: "var(--text-muted)", fontSize: 11, cursor: "pointer", flexShrink: 0 }}
+                      className="sidebar-worktree-cancel-button"
                     >
                       {t("sessionSidebar.cancel")}
                     </button>
@@ -2280,52 +2005,28 @@ function ProjectWorktreeSwitcher({
               return (
                 <div
                   key={wt.path}
-                  className="wt-row"
-                  style={{ display: "flex", alignItems: "center", borderBottom: "1px solid var(--border)" }}
+                  className="wt-row sidebar-worktree-row"
                 >
                   <button
                     onClick={() => onSelectWorktree(wt.path)}
                     aria-pressed={isCurrent}
                     title={wt.path}
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 7,
-                      padding: "8px 10px",
-                      background: "var(--bg)",
-                      border: "none",
-                      color: isCurrent ? "var(--text)" : "var(--text-muted)",
-                      cursor: "pointer",
-                      textAlign: "left",
-                      fontSize: 11,
-                      fontFamily: "var(--font-mono)",
-                    }}
+                    className="sidebar-worktree-select"
                   >
                     {isCurrent ? (
-                      <Check size={10} strokeWidth={2} style={{ flexShrink: 0, color: "var(--accent)" }} aria-hidden="true" />
+                      <Check size={10} strokeWidth={2} className="sidebar-worktree-check" aria-hidden="true" />
                     ) : (
-                      <span style={{ width: 10, flexShrink: 0 }} />
+                      <span className="sidebar-worktree-check-spacer" />
                     )}
-                    <PathLabel text={wt.branch ?? displayCwd(wt.path, homeDir)} style={{ flex: 1 }} />
-                    {wt.isMain && <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>{t("sessionSidebar.mainBadge")}</span>}
+                    <PathLabel text={wt.branch ?? displayCwd(wt.path, homeDir)} />
+                    {wt.isMain && <span className="sidebar-worktree-main-badge">{t("sessionSidebar.mainBadge")}</span>}
                   </button>
                   {!wt.isMain && (
                     <button
                       onClick={() => onRemoveWorktree(wt.path, false)}
                       disabled={wtBusy}
                       title={t("sessionSidebar.removeWorktreeTitle", { path: wt.path })}
-                      style={{
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        width: 34, height: 28, padding: 0, marginRight: 4,
-                        background: "none", border: "none",
-                        color: "var(--text-dim)", cursor: "pointer",
-                        borderRadius: "var(--radius-control)", flexShrink: 0,
-                        transition: "color var(--dur-fast) var(--ease-out-warm), background var(--dur-fast) var(--ease-out-warm)",
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 8%, transparent)"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+                      className="sidebar-worktree-remove"
                     >
                       <Trash2 size={12} strokeWidth={2} aria-hidden="true" />
                     </button>
@@ -2344,25 +2045,13 @@ function ProjectWorktreeSwitcher({
                 setTimeout(() => newInputRef.current?.focus(), 0);
               }}
               title={t("sessionSidebar.newWorktreeTitle")}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 7,
-                width: "100%",
-                padding: "8px 10px",
-                background: "none",
-                border: "none",
-                color: "var(--text-muted)",
-                cursor: "pointer",
-                textAlign: "left",
-                fontSize: 11,
-              }}
+              className="sidebar-worktree-new"
             >
-              <Plus size={12} strokeWidth={1.8} style={{ flexShrink: 0 }} aria-hidden="true" />
+              <Plus size={12} strokeWidth={1.8} className="sidebar-worktree-new-icon" aria-hidden="true" />
               <span>{t("sessionSidebar.newWorktree")}</span>
             </button>
           ) : (
-            <div style={{ padding: "6px 8px" }}>
+            <div className="sidebar-worktree-form">
               <input
                 ref={newInputRef}
                 value={wtNewBranch}
@@ -2382,50 +2071,19 @@ function ProjectWorktreeSwitcher({
                   }
                 }}
                 placeholder={t("sessionSidebar.branchNamePlaceholder")}
-                style={{
-                  width: "100%",
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
-                  padding: "5px 8px",
-                  border: "1px solid var(--accent)",
-                  borderRadius: "var(--radius-control)",
-                  outline: "none",
-                  background: "var(--bg)",
-                  color: "var(--text)",
-                  boxSizing: "border-box",
-                }}
+                className="sidebar-worktree-input"
               />
-              <div style={{ display: "flex", gap: 5, marginTop: 5 }}>
+              <div className="sidebar-worktree-form-actions">
                 <button
                   onClick={onCreateWorktree}
                   disabled={wtBusy || !wtNewBranch.trim()}
-                  style={{
-                    flex: 1,
-                    padding: "4px 0",
-                    background: "var(--accent-strong)",
-                    border: "none",
-                    borderRadius: "var(--radius-control)",
-                    color: "var(--on-accent)",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    cursor: wtBusy || !wtNewBranch.trim() ? "not-allowed" : "pointer",
-                    opacity: wtBusy || !wtNewBranch.trim() ? 0.65 : 1,
-                  }}
+                  className="sidebar-worktree-create"
                 >
                   {wtBusy ? t("sessionSidebar.creating") : t("sessionSidebar.create")}
                 </button>
                 <button
                   onClick={() => { setWtNewOpen(false); setWtNewBranch(""); setWtError(null); }}
-                  style={{
-                    flex: 1,
-                    padding: "4px 0",
-                    background: "var(--bg-hover)",
-                    border: "1px solid var(--border)",
-                    borderRadius: "var(--radius-control)",
-                    color: "var(--text-muted)",
-                    fontSize: 11,
-                    cursor: "pointer",
-                  }}
+                  className="sidebar-worktree-form-cancel"
                 >
                   {t("sessionSidebar.cancel")}
                 </button>
@@ -2433,13 +2091,7 @@ function ProjectWorktreeSwitcher({
             </div>
           )}
           {wtError && (
-            <div style={{
-              padding: "5px 10px 8px",
-              color: "var(--accent)",
-              fontSize: 11,
-              lineHeight: 1.35,
-              overflowWrap: "anywhere",
-            }}>
+            <div className="sidebar-worktree-error">
               {wtError}
             </div>
           )}
@@ -2492,17 +2144,13 @@ const SessionTreeItem = memo(function SessionTreeItem({
 
   return (
     <div>
-      <div style={{ position: "relative" }}>
+      <div className="sidebar-session-tree-row">
         {/* Indent line for child sessions */}
         {depth > 0 && (
-          <div style={{
-            position: "absolute",
-            left: depth * 14 + 22,
-            top: 0, bottom: 0,
-            width: 1,
-            background: "var(--border)",
-            pointerEvents: "none",
-          }} />
+          <div
+            className="sidebar-session-indent-line"
+            style={{ left: depth * 14 + 22 }}
+          />
         )}
         <SessionItem
           session={node.session}
@@ -2569,17 +2217,10 @@ function RunningSessionIndicator({ size = 14 }: { size?: number }) {
     <span
       title={t("sessionSidebar.agentRunning")}
       aria-label={t("sessionSidebar.agentRunningAria")}
-      style={{
-        width: size,
-        height: size,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-        color: "var(--accent)",
-      }}
+      className="sidebar-session-indicator"
+      style={{ width: size, height: size }}
     >
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{ display: "block" }}>
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" className="sidebar-session-indicator-svg">
         <g>
           <path
             d="M21 12a9 9 0 1 1-3.8-7.4"
@@ -2610,17 +2251,10 @@ function UnreadSessionIndicator({ size = 14 }: { size?: number }) {
     <span
       title={t("sessionSidebar.newActivity")}
       aria-label={t("sessionSidebar.newSessionActivity")}
-      style={{
-        width: size,
-        height: size,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-        color: "var(--accent)",
-      }}
+      className="sidebar-session-indicator"
+      style={{ width: size, height: size }}
     >
-      <svg width={size} height={size} viewBox="0 0 14 14" fill="none" aria-hidden="true" style={{ display: "block" }}>
+      <svg width={size} height={size} viewBox="0 0 14 14" fill="none" aria-hidden="true" className="sidebar-session-indicator-svg">
         <circle cx="7" cy="7" r="2.5" fill="currentColor" />
         {!reducedMotion && (
           <circle cx="7" cy="7" r="3" stroke="currentColor" strokeWidth="1.4" opacity="0.32">
@@ -2676,14 +2310,6 @@ const SessionItem = memo(function SessionItem({
   const title = session.name || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
   const relativeTime = formatRelativeTime(session.modified, locale, relativeTimeNow);
   const confirming = confirmArchive || confirmDelete;
-  // Active session: an extremely subtle warm-gray wash — the selection is
-  // carried by the orange indicator and timestamp, not a card-like fill.
-  const rowBackground = confirming
-    ? "color-mix(in srgb, var(--accent) 6%, transparent)"
-    : isSelected
-      ? "color-mix(in srgb, var(--bg-selected) 70%, transparent)"
-      : hovered ? "var(--bg-hover)" : "transparent";
-
   const startRename = useCallback((event: React.MouseEvent) => {
     event.stopPropagation();
     setRenameValue(session.name ?? "");
@@ -2756,20 +2382,14 @@ const SessionItem = memo(function SessionItem({
           closeConfirmation();
         }
       }}
+      className="sidebar-session-row"
+      data-selected={isSelected ? "true" : "false"}
+      data-confirming={confirming ? "true" : "false"}
+      data-deleting={deleting ? "true" : "false"}
+      data-interactive={!confirming && !renaming ? "true" : "false"}
       style={{
         height: confirming ? 34 : 30,
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        width: "100%",
-        margin: "1px 0",
-        padding: `0 8px 0 ${30 + depth * 14}px`,
-        position: "relative",
-        overflow: "hidden",
-        background: rowBackground,
-        opacity: deleting ? 0.5 : 1,
-        cursor: confirming || renaming ? "default" : "pointer",
-        transition: "background var(--dur-fast) var(--ease-out-warm), opacity var(--dur-fast) var(--ease-out-warm)",
+        paddingLeft: 30 + depth * 14,
       }}
     >
       {/* Thin orange indicator at the session's indent column — not a border
@@ -2777,67 +2397,57 @@ const SessionItem = memo(function SessionItem({
       {(isSelected || confirming) && (
         <span
           aria-hidden="true"
-          style={{
-            position: "absolute",
-            left: 20 + depth * 14,
-            top: 0,
-            bottom: 0,
-            width: 2,
-            borderRadius: 1,
-            background: "var(--accent)",
-            pointerEvents: "none",
-          }}
+          className="sidebar-session-selection-indicator"
+          style={{ left: 20 + depth * 14 }}
         />
       )}
       {confirming ? (
         <>
-          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, color: "var(--text)" }}>
+          <span className="sidebar-session-confirm-text">
             {confirmArchive
               ? t("sessionSidebar.archiveConfirm", { title: title.length > 22 ? `${title.slice(0, 22)}…` : title })
               : t("sessionSidebar.deleteConfirm", { title: title.length > 22 ? `${title.slice(0, 22)}…` : title })}
           </span>
-          <button onClick={(event) => { event.stopPropagation(); if (confirmArchive) handleArchive(); else handleDelete(); }} style={{ height: 28, padding: "0 10px", border: "none", borderRadius: "var(--radius-control)", background: "var(--accent-strong)", color: "var(--on-accent)", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+          <button className="sidebar-session-confirm-button" onClick={(event) => { event.stopPropagation(); if (confirmArchive) handleArchive(); else handleDelete(); }}>
             {confirmArchive ? t("sessionSidebar.archive") : t("sessionSidebar.delete")}
           </button>
-          <button onClick={(event) => { event.stopPropagation(); closeConfirmation(); }} autoFocus style={{ height: 28, padding: "0 10px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg)", color: "var(--text-muted)", cursor: "pointer", fontSize: 11 }}>
+          <button className="sidebar-session-cancel-button" onClick={(event) => { event.stopPropagation(); closeConfirmation(); }} autoFocus>
             {t("sessionSidebar.cancel")}
           </button>
         </>
       ) : renaming ? (
-        <input ref={inputRef} autoFocus aria-label={t("sessionSidebar.rename")} value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onBlur={commitRename} onKeyDown={(event) => { if (event.key === "Enter") void commitRename(); if (event.key === "Escape") { event.preventDefault(); renameCancelRef.current = true; setRenaming(false); } }} style={{ flex: 1, height: 25, padding: "3px 7px", border: "1px solid var(--accent)", borderRadius: "var(--radius-control)", outline: "none", background: "var(--bg)", color: "var(--text)", fontSize: 12 }} />
+        <input ref={inputRef} autoFocus aria-label={t("sessionSidebar.rename")} value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onBlur={commitRename} onKeyDown={(event) => { if (event.key === "Enter") void commitRename(); if (event.key === "Escape") { event.preventDefault(); renameCancelRef.current = true; setRenaming(false); } }} className="sidebar-session-rename-input" />
       ) : (
         <>
-          {depth > 0 && <GitBranch size={11} strokeWidth={2} style={{ flexShrink: 0, color: "var(--text-dim)" }} aria-hidden="true" />}
+          {depth > 0 && <GitBranch size={11} strokeWidth={2} className="sidebar-session-branch-icon" aria-hidden="true" />}
           {/* Flexible title — always ellipsized; the fixed-width right rail
               (timestamp + menu) can never be pushed off-screen. */}
-          <button ref={contentButtonRef} type="button" className="session-item-button" aria-current={isSelected ? "true" : undefined} onKeyDown={(event) => { if (event.key === "Delete") { event.preventDefault(); setConfirmDelete(true); } }} style={{ display: "flex", alignItems: "center", flex: 1, minWidth: 0 }}>
-            <span title={title} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)", fontSize: 12.5, fontWeight: isSelected ? 600 : 500, lineHeight: 1.35, letterSpacing: "-0.005em" }}>
+          <button ref={contentButtonRef} type="button" className="session-item-button sidebar-session-content" aria-current={isSelected ? "true" : undefined} onKeyDown={(event) => { if (event.key === "Delete") { event.preventDefault(); setConfirmDelete(true); } }}>
+            <span title={title} className="sidebar-session-title">
               {title}
             </span>
           </button>
-          {session.worktreeBranch && <span title={t("sessionSidebar.worktreeTitle", { path: session.cwd })} style={{ display: "flex", alignItems: "center", gap: 3, maxWidth: 56, minWidth: 0, overflow: "hidden", color: "var(--text-dim)", fontSize: 10, flexShrink: 1 }}><GitBranch size={10} strokeWidth={2.4} aria-hidden="true" /><span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.worktreeBranch}</span></span>}
+          {session.worktreeBranch && <span title={t("sessionSidebar.worktreeTitle", { path: session.cwd })} className="sidebar-session-worktree"><GitBranch size={10} strokeWidth={2.4} aria-hidden="true" /><span className="sidebar-session-worktree-label">{session.worktreeBranch}</span></span>}
           {isRunning && <RunningSessionIndicator size={12} />}
           {!isRunning && isUnread && <UnreadSessionIndicator size={11} />}
-          {relativeTime && <span title={new Date(session.modified).toLocaleString(locale)} style={{ flexShrink: 0, minWidth: 30, textAlign: "right", color: isSelected ? "var(--accent)" : "var(--text-dim)", fontSize: 10, fontVariantNumeric: "tabular-nums" }}>{relativeTime}</span>}
-          {hasChildren && <button className="session-item-icon-button" onClick={(event) => { event.stopPropagation(); onToggleCollapse?.(); }} title={collapsed ? t("sessionSidebar.expandForks") : t("sessionSidebar.collapseForks")} aria-label={collapsed ? t("sessionSidebar.expandForks") : t("sessionSidebar.collapseForks")} aria-expanded={!collapsed} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, padding: 0, flexShrink: 0, border: "none", background: "none", color: "var(--text-dim)", cursor: "pointer", transform: collapsed ? "rotate(-90deg)" : "none", transition: "transform var(--dur-fast) var(--ease-out-warm)" }}><ChevronDown size={12} strokeWidth={1.8} aria-hidden="true" /></button>}
+          {relativeTime && <span title={new Date(session.modified).toLocaleString(locale)} className="sidebar-session-time" data-selected={isSelected ? "true" : "false"}>{relativeTime}</span>}
+          {hasChildren && <button className="session-item-icon-button sidebar-session-collapse" onClick={(event) => { event.stopPropagation(); onToggleCollapse?.(); }} title={collapsed ? t("sessionSidebar.expandForks") : t("sessionSidebar.collapseForks")} aria-label={collapsed ? t("sessionSidebar.expandForks") : t("sessionSidebar.collapseForks")} aria-expanded={!collapsed} data-collapsed={collapsed ? "true" : "false"}><ChevronDown size={12} strokeWidth={1.8} aria-hidden="true" /></button>}
           {/* Reserved overflow-menu slot: invisible (but space-preserving) until
               hover/focus, so rows never reflow and titles never shift. */}
           <div
-            style={{
-              position: "relative",
-              flexShrink: 0,
-              visibility: hovered || focusWithin || actionMenuOpen ? "visible" : "hidden",
-            }}
+            className="sidebar-session-action-slot"
+            style={{ visibility: hovered || focusWithin || actionMenuOpen ? "visible" : "hidden" }}
           >
             <button
               type="button"
               ref={menuButtonRef}
-              className="session-item-icon-button"
+              className="session-item-icon-button sidebar-session-action"
               onClick={(event) => { event.stopPropagation(); setActionMenuOpen((open) => !open); }}
               title="Session actions"
               aria-label="Session actions"
               aria-expanded={actionMenuOpen}
-              style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, padding: 0, lineHeight: 0, border: "none", borderRadius: "var(--radius-control)", background: actionMenuOpen ? "var(--bg-selected)" : "transparent", color: actionMenuOpen ? "var(--text)" : "var(--text-dim)", cursor: "pointer" }}
+              aria-haspopup="menu"
+              data-open={actionMenuOpen ? "true" : "false"}
             >
               <MoreHorizontal size={14} strokeWidth={2} aria-hidden="true" />
             </button>
@@ -2848,9 +2458,9 @@ const SessionItem = memo(function SessionItem({
               placement="above"
               minWidth={128}
             >
-              <button type="button" role="menuitem" className="sidebar-menu-item" onClick={(event) => { event.stopPropagation(); setActionMenuOpen(false); setConfirmArchive(true); }} disabled={hasChildren} title={hasChildren ? t("sessionSidebar.archiveLeafOnly") : t("sessionSidebar.archive")} style={{ display: "block", width: "100%", padding: "6px 9px", border: "none", borderRadius: 6, background: "transparent", color: hasChildren ? "var(--text-dim)" : "var(--text-muted)", cursor: hasChildren ? "not-allowed" : "pointer", textAlign: "left", fontSize: 11, opacity: hasChildren ? 0.55 : 1 }}>{t("sessionSidebar.archive")}</button>
-              <button type="button" role="menuitem" className="sidebar-menu-item" onClick={(event) => { startRename(event); setActionMenuOpen(false); }} style={{ display: "block", width: "100%", padding: "6px 9px", border: "none", borderRadius: 6, background: "transparent", color: "var(--text-muted)", cursor: "pointer", textAlign: "left", fontSize: 11 }}>{t("sessionSidebar.rename")}</button>
-              <button type="button" role="menuitem" className="sidebar-menu-item" onClick={(event) => { event.stopPropagation(); setActionMenuOpen(false); setConfirmDelete(true); }} style={{ display: "block", width: "100%", padding: "6px 9px", border: "none", borderRadius: 6, background: "transparent", color: "var(--status-error)", cursor: "pointer", textAlign: "left", fontSize: 11 }}>{t("sessionSidebar.delete")}</button>
+              <button type="button" role="menuitem" className="sidebar-menu-item" onClick={(event) => { event.stopPropagation(); setActionMenuOpen(false); setConfirmArchive(true); }} disabled={hasChildren} title={hasChildren ? t("sessionSidebar.archiveLeafOnly") : t("sessionSidebar.archive")}>{t("sessionSidebar.archive")}</button>
+              <button type="button" role="menuitem" className="sidebar-menu-item" onClick={(event) => { startRename(event); setActionMenuOpen(false); }}>{t("sessionSidebar.rename")}</button>
+              <button type="button" role="menuitem" className="sidebar-menu-item sidebar-menu-item-danger" onClick={(event) => { event.stopPropagation(); setActionMenuOpen(false); setConfirmDelete(true); }}>{t("sessionSidebar.delete")}</button>
             </SidebarPortalMenu>
           </div>
         </>
