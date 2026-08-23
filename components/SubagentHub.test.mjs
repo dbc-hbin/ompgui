@@ -9,6 +9,7 @@ const jiti = createJiti(import.meta.url, {
   tsconfigPaths: true,
 });
 const { SubagentHub, buildSubagentHubTree } = await jiti.import("./SubagentHub.tsx");
+const { SUBAGENT_STALE_AFTER_MS } = await jiti.import("../lib/subagent-hub-state.ts");
 const { translate } = await jiti.import("../lib/i18n/index.tsx");
 
 const noop = () => {};
@@ -55,6 +56,40 @@ function withResolvedHooks(locale, callback) {
   };
   try {
     return callback();
+  } finally {
+    internals.H = previousDispatcher;
+  }
+}
+
+function withInteractiveHooks(locale, callback) {
+  const internals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  const previousDispatcher = internals.H;
+  const stateSlots = [];
+  let stateCursor = 0;
+  internals.H = {
+    useState(initial) {
+      const slot = stateCursor++;
+      if (!(slot in stateSlots)) stateSlots[slot] = typeof initial === "function" ? initial() : initial;
+      return [stateSlots[slot], (next) => {
+        stateSlots[slot] = typeof next === "function" ? next(stateSlots[slot]) : next;
+      }];
+    },
+    useMemo(factory) {
+      return factory();
+    },
+    useCallback(callbackValue) {
+      return callbackValue;
+    },
+    useEffect() {},
+    useSyncExternalStore() {
+      return locale;
+    },
+  };
+  try {
+    return callback((element) => {
+      stateCursor = 0;
+      return resolveElementTree(element);
+    });
   } finally {
     internals.H = previousDispatcher;
   }
@@ -208,4 +243,103 @@ test("Korean hub copy resolves through the component i18n hook", () => {
     new RegExp(escapeRegExp(translate("chatWindow.subagentHub.empty", undefined, "ko"))),
   );
   assert.doesNotMatch(text, /chatWindow\./);
+});
+
+test("filter pills switch the visible rows and expose per-filter counts", () => {
+  const filterRoster = [
+    ...mixedRoster,
+    { id: "history-started", agent: "archived", status: "started", source: "history", index: 4, task: "Archived running" },
+  ];
+  const element = React.createElement(SubagentHub, {
+    subagents: filterRoster,
+    onSelectSubagent: noop,
+    defaultExpanded: true,
+  });
+
+  withInteractiveHooks("en", (rerender) => {
+    const initialTree = rerender(element);
+    const initialText = textContent(initialTree);
+    assert.match(initialText, /Inspect the tree/);
+    assert.match(initialText, /Write the patch/);
+
+    const activePills = findHostElements(
+      initialTree,
+      (type, props) => type === "button" && props["data-subagent-filter"] === "active",
+    );
+    assert.equal(activePills.length, 1);
+    assert.match(textContent(activePills[0]), /Active1/);
+    activePills[0].props.onClick();
+
+    const filteredTree = rerender(element);
+    const filteredText = textContent(filteredTree);
+    assert.match(filteredText, /Inspect the tree/);
+    assert.doesNotMatch(filteredText, /Write the patch/);
+    assert.doesNotMatch(filteredText, /Check the tests/);
+    assert.doesNotMatch(filteredText, /Archived running/);
+    const selectedPills = findHostElements(
+      filteredTree,
+      (type, props) => type === "button" && props["data-subagent-filter"] === "active" && props["aria-pressed"] === true,
+    );
+    assert.equal(selectedPills.length, 1);
+  });
+});
+
+test("freshness badges distinguish live, stale updates, and history rows", () => {
+  const now = Date.now();
+  const staleLastUpdate = now - SUBAGENT_STALE_AFTER_MS * 4;
+  const roster = [
+    { id: "live", agent: "scout", status: "started", index: 0, task: "Live task", lastUpdate: now },
+    { id: "stale", agent: "worker", status: "started", index: 1, task: "Stale task", lastUpdate: staleLastUpdate },
+    { id: "history", agent: "reviewer", status: "completed", source: "history", index: 2, task: "History task" },
+    { id: "history-started", agent: "archived", status: "started", source: "history", index: 3, task: "Archived running" },
+  ];
+  const html = renderHub({
+    subagents: roster,
+    onSelectSubagent: noop,
+    defaultExpanded: true,
+    now,
+  });
+
+  assert.match(html, /data-subagent-freshness="live"/);
+  assert.match(html, /data-subagent-freshness="stale"/);
+  assert.match(html, /data-subagent-freshness="history"/);
+  assert.match(html, /60s ago/);
+
+  const tree = withResolvedHooks("en", () => resolveElementTree(React.createElement(SubagentHub, {
+    subagents: roster,
+    onSelectSubagent: noop,
+    defaultExpanded: true,
+    now,
+  })));
+  const historyStartedRows = findHostElements(
+    tree,
+    (type, props) => type === "button" && props["aria-label"]?.startsWith("archived ·"),
+  );
+  assert.equal(historyStartedRows.length, 1);
+  assert.doesNotMatch(
+    textContent(historyStartedRows[0]),
+    new RegExp(escapeRegExp(translate("chatWindow.subagentState.started", undefined, "en"))),
+  );
+  assert.equal(
+    textContent(historyStartedRows[0]).split(translate("chatWindow.subagentHub.fresh.history", undefined, "en")).length - 1,
+    1,
+  );
+});
+
+test("expanded hub includes the observation-only capability notice", () => {
+  const html = renderHub({
+    subagents: [],
+    onSelectSubagent: noop,
+    defaultExpanded: true,
+  });
+
+  assert.match(html, /data-subagent-observe-only/);
+  assert.match(
+    html,
+    new RegExp(escapeRegExp(translate("chatWindow.subagentHub.observeOnly", undefined, "en"))),
+  );
+  assert.match(
+    html,
+    new RegExp(escapeRegExp(translate("chatWindow.subagentHub.observeOnlyHint", undefined, "en"))),
+  );
 });

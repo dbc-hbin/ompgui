@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Activity,
   Bot,
@@ -10,6 +10,7 @@ import {
   Cpu,
   Gauge,
   GitBranch,
+  Info,
   Network,
   RefreshCw,
   UserRound,
@@ -18,6 +19,13 @@ import {
 } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import type { SubagentActivityEvent, SubagentInfo } from "@/lib/subagent-types";
+import {
+  filterSubagentHubRows,
+  getSubagentFreshness,
+  SUBAGENT_STALE_AFTER_MS,
+  type SubagentFreshness,
+  type SubagentHubFilter,
+} from "@/lib/subagent-hub-state";
 import {
   countNestedSubagents,
   formatCost,
@@ -34,12 +42,21 @@ const SUBAGENT_STATE_KEYS: Record<SubagentInfo["status"], string> = {
   aborted: "chatWindow.subagentState.aborted",
 };
 
+const SUBAGENT_HUB_FILTERS: Array<{ value: SubagentHubFilter; key: string }> = [
+  { value: "all", key: "chatWindow.subagentHub.filter.all" },
+  { value: "active", key: "chatWindow.subagentHub.filter.active" },
+  { value: "completed", key: "chatWindow.subagentHub.filter.completed" },
+  { value: "failed", key: "chatWindow.subagentHub.filter.failed" },
+];
+
 type SubagentHubProps = {
   subagents: SubagentInfo[];
   subagentEvents?: Record<string, SubagentActivityEvent[]>;
   onSelectSubagent: (subagent: SubagentInfo) => void;
   /** Initial expansion (default: collapsed so the composer remains compact). */
   defaultExpanded?: boolean;
+  /** Optional fixed clock for deterministic rendering and tests. */
+  now?: number;
 };
 
 function Metric({ icon: Icon, label, children }: {
@@ -208,18 +225,39 @@ function GroupLabel({ children, depth = 0 }: { children: ReactNode; depth?: numb
 function SubagentRow({
   subagent,
   events,
+  freshnessNow,
   onSelectSubagent,
 }: {
   subagent: SubagentInfo;
   events: SubagentActivityEvent[] | undefined;
+  freshnessNow: number | undefined;
   onSelectSubagent: (subagent: SubagentInfo) => void;
 }) {
   const { t } = useI18n();
   const live = subagent.source !== "history";
   const stateLabel = t(SUBAGENT_STATE_KEYS[subagent.status]);
+  const showStateLabel = !(subagent.source === "history" && subagent.status === "started");
   const task = subagent.task ?? subagent.description ?? subagent.assignment ?? t("chatWindow.subagentHub.noTask");
-  const historyLabel = subagent.source === "history" ? t("chatWindow.subagentHub.history") : null;
-  const rowLabel = [subagent.agent, task, stateLabel, historyLabel].filter(Boolean).join(" · ");
+  const freshness: SubagentFreshness = freshnessNow === undefined
+    ? subagent.source === "history" ? "history" : "live"
+    : getSubagentFreshness(subagent, freshnessNow);
+  const freshnessLabel = t(`chatWindow.subagentHub.fresh.${freshness}`);
+  const staleSeconds = freshness === "stale" && freshnessNow !== undefined && typeof subagent.lastUpdate === "number"
+    ? Math.max(
+        Math.ceil(SUBAGENT_STALE_AFTER_MS / 1_000),
+        Math.floor(Math.max(0, freshnessNow - subagent.lastUpdate) / 1_000),
+      )
+    : null;
+  const freshnessAge = staleSeconds === null
+    ? null
+    : t("chatWindow.subagentHub.lastUpdated", { value: `${staleSeconds}s` });
+  const freshnessLabelWithAge = freshnessAge ? `${freshnessLabel} · ${freshnessAge}` : freshnessLabel;
+  const freshnessColor = freshness === "live"
+    ? "var(--status-success)"
+    : freshness === "stale"
+      ? "var(--status-warning)"
+      : "var(--text-dim)";
+  const rowLabel = [subagent.agent, task, showStateLabel ? stateLabel : null, freshnessLabelWithAge].filter(Boolean).join(" · ");
 
   return (
     <button
@@ -270,14 +308,39 @@ function SubagentRow({
         >
           {task}
         </span>
-        <span style={{ flexShrink: 0, color: live ? "var(--text-muted)" : "var(--text-dim)", fontSize: "var(--text-xs)" }}>
-          {stateLabel}
-        </span>
-        {historyLabel && (
-          <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: "var(--text-xs)" }}>
-            {historyLabel}
+        {showStateLabel && (
+          <span style={{ flexShrink: 0, color: live ? "var(--text-muted)" : "var(--text-dim)", fontSize: "var(--text-xs)" }}>
+            {stateLabel}
           </span>
         )}
+        <span
+          data-subagent-freshness={freshness}
+          aria-label={freshnessLabelWithAge}
+          title={freshnessLabelWithAge}
+          style={{
+            display: "inline-flex",
+            flexShrink: 0,
+            alignItems: "center",
+            gap: "var(--space-2)",
+            color: freshnessColor,
+            fontSize: "var(--text-xs)",
+            fontVariantNumeric: "tabular-nums",
+            opacity: freshness === "history" ? 0.8 : 0.9,
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              width: "var(--space-2)",
+              height: "var(--space-2)",
+              flexShrink: 0,
+              borderRadius: "var(--radius-control)",
+              background: freshnessColor,
+            }}
+          />
+          <span>{freshnessLabel}</span>
+          {freshnessAge && <span>{freshnessAge}</span>}
+        </span>
         {subagent.detached && (
           <span
             aria-hidden
@@ -369,11 +432,36 @@ export function SubagentHub({
   subagentEvents = {},
   onSelectSubagent,
   defaultExpanded = false,
+  now,
 }: SubagentHubProps) {
   const { t } = useI18n();
   const [collapsed, setCollapsed] = useState(!defaultExpanded);
+  const [filter, setFilter] = useState<SubagentHubFilter>("all");
+  const [clockNow, setClockNow] = useState<number | null>(null);
   const runningCount = subagents.filter((subagent) => subagent.source !== "history" && subagent.status === "started").length;
-  const treeItems = useMemo(() => buildSubagentHubTree(subagents), [subagents]);
+  const hasLiveStartedSubagent = subagents.some(
+    (subagent) => subagent.source !== "history" && subagent.status === "started",
+  );
+  useEffect(() => {
+    if (now !== undefined || collapsed || !hasLiveStartedSubagent) return;
+    const updateClock = () => setClockNow(Date.now());
+    updateClock();
+    const interval = window.setInterval(updateClock, 5_000);
+    return () => window.clearInterval(interval);
+  }, [collapsed, hasLiveStartedSubagent, now]);
+  const freshnessNow = now ?? clockNow ?? 0;
+  const freshnessReady = now !== undefined || clockNow !== null;
+  const filterCounts = useMemo<Record<SubagentHubFilter, number>>(() => ({
+    all: subagents.length,
+    active: filterSubagentHubRows(subagents, "active").length,
+    completed: filterSubagentHubRows(subagents, "completed").length,
+    failed: filterSubagentHubRows(subagents, "failed").length,
+  }), [subagents]);
+  const visibleSubagents = useMemo(
+    () => filterSubagentHubRows(subagents, filter),
+    [subagents, filter],
+  );
+  const treeItems = useMemo(() => buildSubagentHubTree(visibleSubagents), [visibleSubagents]);
 
   return (
     <section
@@ -444,7 +532,78 @@ export function SubagentHub({
             padding: "var(--space-4) var(--space-5) var(--space-5)",
           }}
         >
-          {subagents.length === 0 ? (
+          <div
+            data-subagent-filter-row
+            role="group"
+            style={{
+              display: "flex",
+              minWidth: 0,
+              flexWrap: "wrap",
+              gap: "var(--space-1)",
+              alignItems: "center",
+              padding: "var(--space-1)",
+              border: "thin solid var(--border)",
+              borderRadius: "var(--radius-control)",
+              background: "var(--bg-subtle)",
+            }}
+          >
+            {SUBAGENT_HUB_FILTERS.map(({ value, key }) => {
+              const selected = filter === value;
+              const label = t(key);
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  className="ui-focus-ring"
+                  data-subagent-filter={value}
+                  aria-pressed={selected}
+                  title={`${label} (${filterCounts[value]})`}
+                  onClick={() => setFilter(value)}
+                  style={{
+                    display: "inline-flex",
+                    minHeight: "var(--control-touch, 44px)",
+                    alignItems: "center",
+                    gap: "var(--space-2)",
+                    padding: "var(--space-2) var(--space-3)",
+                    border: "none",
+                    borderRadius: "var(--radius-control)",
+                    background: selected
+                      ? "color-mix(in srgb, var(--accent) 16%, var(--bg))"
+                      : "transparent",
+                    color: selected ? "var(--accent)" : "var(--text-muted)",
+                    fontFamily: "inherit",
+                    fontSize: "var(--text-xs)",
+                    fontWeight: selected ? 650 : 550,
+                    cursor: "pointer",
+                    wordBreak: "keep-all",
+                    transition: "background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm)",
+                  }}
+                >
+                  <span>{label}</span>
+                  <span
+                    aria-hidden
+                    style={{
+                      display: "inline-flex",
+                      minWidth: "var(--space-8)",
+                      height: "var(--space-6)",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: "0 var(--space-2)",
+                      borderRadius: "var(--radius-control)",
+                      background: selected ? "color-mix(in srgb, var(--accent) 20%, transparent)" : "var(--bg-subtle)",
+                      color: selected ? "var(--accent)" : "var(--text-dim)",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: "var(--text-xs)",
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {filterCounts[value]}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {visibleSubagents.length === 0 ? (
             <div style={{ padding: "var(--space-5)", color: "var(--text-dim)", fontSize: "var(--text-sm)", textAlign: "center", wordBreak: "keep-all" }}>
               {t("chatWindow.subagentHub.empty")}
             </div>
@@ -474,12 +633,39 @@ export function SubagentHub({
                   <SubagentRow
                     subagent={item.subagent}
                     events={subagentEvents[item.subagent.id]}
+                    freshnessNow={freshnessReady ? freshnessNow : undefined}
                     onSelectSubagent={onSelectSubagent}
                   />
                 </div>
               );
             })
           )}
+          <div
+            data-subagent-observe-only
+            role="note"
+            style={{
+              display: "flex",
+              minWidth: 0,
+              alignItems: "flex-start",
+              gap: "var(--space-3)",
+              padding: "var(--space-3) var(--space-4)",
+              border: "thin solid var(--border)",
+              borderRadius: "var(--radius-control)",
+              background: "var(--bg-subtle)",
+              color: "var(--text-dim)",
+              wordBreak: "keep-all",
+            }}
+          >
+            <Info aria-hidden style={{ width: "var(--text-md)", height: "var(--text-md)", flexShrink: 0, marginTop: "var(--space-1)" }} />
+            <span style={{ display: "grid", minWidth: 0, gap: "var(--space-1)", fontSize: "var(--text-xs)", lineHeight: 1.4 }}>
+              <strong style={{ color: "var(--text-muted)", fontWeight: 650 }}>
+                {t("chatWindow.subagentHub.observeOnly")}
+              </strong>
+              <span title={t("chatWindow.subagentHub.observeOnlyHint")}>
+                {t("chatWindow.subagentHub.observeOnlyHint")}
+              </span>
+            </span>
+          </div>
         </div>
       )}
     </section>

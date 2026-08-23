@@ -36,6 +36,11 @@ import {
   type SubagentProgress,
   type SubagentSnapshotLike,
 } from "@/lib/subagent-types";
+import {
+  createSubagentFromProgress,
+  mergeSubagentRoster,
+  pruneSubagentRosterSnapshot,
+} from "@/lib/subagent-hub-state";
 
 // SubagentInfo lives in lib/subagent-types (shared with the server-side
 // history module); keep the export path stable for components.
@@ -705,6 +710,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // revision bumps to one per animation frame so an open dialog only re-pages
   // once per frame instead of per event.
   const subagentVersionFlushRef = useRef<Set<string> | null>(null);
+  const subagentActivityFlushRef = useRef<Map<string, SubagentActivityEvent[]> | null>(null);
   const subagentVersionFlushFrameRef = useRef<number | null>(null);
   // Delayed live-roster hydration after mount/reconnect; cancelled on unmount
   // so a stale get_subagents cannot target a session that was switched away.
@@ -821,31 +827,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     return null;
   }, [todoPhases]);
 
-  // Merge a batch of roster entries, keeping live frames over history.
-  // `skipNewerThan` lets callers refuse to overwrite entries updated by live
-  // frames after a point-in-time snapshot was requested (a snapshot taken
-  // while a child ran must not regress its later terminal lifecycle status).
+  // Merge a batch of roster entries through the shared precedence/fence
+  // implementation. `skipNewerThan` protects live frames observed after a
+  // point-in-time get_subagents request.
   const mergeSubagents = useCallback((incoming: SubagentInfo[], options?: { skipNewerThan?: number }) => {
-    if (!incoming.length) return;
-    const skipNewerThan = options?.skipNewerThan;
-    setSubagents((prev) => {
-      const byId = new Map(prev.map((subagent) => [subagent.id, subagent]));
-      for (const entry of incoming) {
-        const existing = byId.get(entry.id);
-        if (existing && skipNewerThan !== undefined && (existing.lastUpdate ?? 0) >= skipNewerThan) continue;
-        if (!existing) {
-          byId.set(entry.id, entry);
-          continue;
-        }
-        if (entry.source === "history" && existing.source !== "history") continue;
-        if (entry.source !== "history" && existing.source === "history") {
-          byId.set(entry.id, entry);
-          continue;
-        }
-        byId.set(entry.id, { ...existing, ...entry });
-      }
-      return [...byId.values()].sort((a, b) => a.index - b.index || a.id.localeCompare(b.id));
-    });
+    setSubagents((prev) => mergeSubagentRoster(prev, incoming, options));
   }, []);
 
   // Recover the ON-DISK roster from the parent session's task toolResults.
@@ -893,10 +879,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // updated AFTER the snapshot was requested are newer than the registry
       // state we got and must survive the prune.
       const liveIds = new Set(snapshots.map((s) => s.id));
-      setSubagents((prev) => {
-        const next = prev.filter((s) => s.source !== "live" || liveIds.has(s.id) || (s.lastUpdate ?? 0) >= requestedAt);
-        return next.length === prev.length ? prev : next;
-      });
+      setSubagents((prev) => pruneSubagentRosterSnapshot(prev, liveIds, requestedAt));
       // Mid-run disk history can gain completed task calls that live frames
       // missed (a child finishing before the subscription attached is deleted
       // from the registry) — re-check so such children appear before agent_end.
@@ -915,6 +898,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       subagentVersionFlushFrameRef.current = null;
     }
     subagentVersionFlushRef.current = null;
+    subagentActivityFlushRef.current = null;
     setSubagentEvents({});
     setSubagentTranscriptVersions({});
   }, []);
@@ -2073,22 +2057,52 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         // Progress frames carry the full AgentProgress snapshot (throttled to
         // one per 150ms and flushed at terminal). The reliable key is
         // progress.id; parentToolCallId/index are fallbacks.
-        const payload = event.payload as { index?: unknown; agent?: unknown; agentSource?: unknown; task?: unknown; parentToolCallId?: unknown; sessionFile?: unknown; assignment?: unknown; detached?: unknown; progress?: unknown } | undefined;
+        const payload = event.payload as {
+          index?: unknown;
+          agent?: unknown;
+          agentSource?: unknown;
+          task?: unknown;
+          assignment?: unknown;
+          description?: unknown;
+          parentToolCallId?: unknown;
+          sessionFile?: unknown;
+          detached?: unknown;
+          progress?: unknown;
+        } | undefined;
         const progress = parseSubagentProgress(payload?.progress);
         const progressId = progress?.id;
-        const index = typeof payload?.index === "number" ? payload.index : (progress?.index ?? -1);
+        const index = typeof payload?.index === "number" && Number.isFinite(payload.index)
+          ? payload.index
+          : (progress?.index ?? -1);
         const parentToolCallId = typeof payload?.parentToolCallId === "string" ? payload.parentToolCallId : null;
         const task = typeof payload?.task === "string" && payload.task.trim() ? payload.task : (progress?.task ?? null);
         const assignment = typeof payload?.assignment === "string" ? payload.assignment : progress?.assignment;
         if (!progressId && !task && !parentToolCallId && index < 0) break;
         setSubagents((prev) => {
-          if (prev.length === 0) return prev;
           let target = -1;
           if (progressId) {
-            // A valid progress frame names its subagent; if that id is gone the
-            // frame is stale (terminal frame was missed, then cleared) — falling
-            // back to parentToolCallId/index could overwrite a DIFFERENT child.
+            // A valid progress frame names its subagent; if that id is gone,
+            // recover it directly rather than falling back to a different
+            // child that happens to share a parent or index.
             target = prev.findIndex((subagent) => subagent.id === progressId);
+            if (target === -1 && progress) {
+              const recovered = createSubagentFromProgress({
+                index: typeof payload?.index === "number" && Number.isFinite(payload.index) ? payload.index : undefined,
+                agent: typeof payload?.agent === "string" ? payload.agent : undefined,
+                agentSource:
+                  typeof payload?.agentSource === "string"
+                    && (payload.agentSource === "bundled" || payload.agentSource === "user" || payload.agentSource === "project")
+                    ? payload.agentSource
+                    : undefined,
+                task: typeof payload?.task === "string" ? payload.task : undefined,
+                assignment,
+                description: typeof payload?.description === "string" ? payload.description : undefined,
+                parentToolCallId: parentToolCallId ?? undefined,
+                sessionFile: typeof payload?.sessionFile === "string" ? payload.sessionFile : undefined,
+                detached: typeof payload?.detached === "boolean" ? payload.detached : undefined,
+              }, progress);
+              return recovered ? mergeSubagentRoster(prev, [recovered]) : prev;
+            }
           } else {
             // ID-less fallback frames: prefer the exact (parent, index) pair
             // (batch children share parentToolCallId), then each key alone.
@@ -2143,35 +2157,61 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const payload = event.payload as { id?: unknown; event?: unknown } | undefined;
         const subagentId = typeof payload?.id === "string" ? payload.id : null;
         if (subagentId) {
-          const pending = subagentVersionFlushRef.current ?? (subagentVersionFlushRef.current = new Set());
-          pending.add(subagentId);
+          const pendingVersions = subagentVersionFlushRef.current ?? (subagentVersionFlushRef.current = new Set());
+          pendingVersions.add(subagentId);
+
+          const activity = parseSubagentActivityEvent(payload);
+          if (activity) {
+            const pendingActivities = subagentActivityFlushRef.current ?? (subagentActivityFlushRef.current = new Map());
+            const queuedEvents = pendingActivities.get(subagentId);
+            if (queuedEvents) {
+              if (queuedEvents.length >= SUBAGENT_ACTIVITY_BUFFER_MAX) queuedEvents.shift();
+              queuedEvents.push(activity);
+              // Re-key so the pending map preserves updated-id recency for the
+              // outer 64-id prune when the frame is eventually flushed.
+              pendingActivities.delete(subagentId);
+              pendingActivities.set(subagentId, queuedEvents);
+            } else {
+              pendingActivities.set(subagentId, [activity]);
+            }
+          }
+
           if (subagentVersionFlushFrameRef.current === null) {
             subagentVersionFlushFrameRef.current = requestAnimationFrame(() => {
               subagentVersionFlushFrameRef.current = null;
-              const queued = subagentVersionFlushRef.current;
+              const queuedVersions = subagentVersionFlushRef.current;
               subagentVersionFlushRef.current = null;
-              if (!queued || queued.size === 0) return;
-              setSubagentTranscriptVersions((prev) => {
-                let next = prev;
-                for (const id of queued) next = { ...next, [id]: (next[id] ?? 0) + 1 };
-                return pruneSubagentIdMap(next);
-              });
-            });
-          }
-          const activity = parseSubagentActivityEvent(payload);
-          if (activity) {
-            setSubagentEvents((prev) => {
-              const existing = prev[subagentId] ?? [];
-              const nextEvents = existing.length >= SUBAGENT_ACTIVITY_BUFFER_MAX
-                ? [...existing.slice(existing.length - SUBAGENT_ACTIVITY_BUFFER_MAX + 1), activity]
-                : [...existing, activity];
-              // Re-key first so pruning evicts the LEAST recently UPDATED ids
-              // (a plain spread keeps an existing key at its original position
-              // and can evict an actively-updated early id).
-              const next = { ...prev };
-              delete next[subagentId];
-              next[subagentId] = nextEvents;
-              return pruneSubagentIdMap(next);
+              const queuedActivities = subagentActivityFlushRef.current;
+              subagentActivityFlushRef.current = null;
+              const hasVersions = queuedVersions !== null && queuedVersions.size > 0;
+              const hasActivities = queuedActivities !== null && queuedActivities.size > 0;
+              if (!hasVersions && !hasActivities) return;
+
+              if (queuedVersions && queuedVersions.size > 0) {
+                setSubagentTranscriptVersions((prev) => {
+                  let next = prev;
+                  for (const id of queuedVersions) next = { ...next, [id]: (next[id] ?? 0) + 1 };
+                  return pruneSubagentIdMap(next);
+                });
+              }
+              if (queuedActivities && queuedActivities.size > 0) {
+                setSubagentEvents((prev) => {
+                  let next = prev;
+                  for (const [id, activities] of queuedActivities) {
+                    const existing = prev[id] ?? [];
+                    const combined = existing.length === 0
+                      ? (activities.length <= SUBAGENT_ACTIVITY_BUFFER_MAX ? activities : activities.slice(-SUBAGENT_ACTIVITY_BUFFER_MAX))
+                      : [...existing, ...activities].slice(-SUBAGENT_ACTIVITY_BUFFER_MAX);
+                    if (next === prev) next = { ...prev };
+                    // Re-key first so pruning evicts the LEAST recently UPDATED
+                    // ids (a plain spread keeps an existing key at its original
+                    // position and can evict an actively-updated early id).
+                    delete next[id];
+                    next[id] = combined;
+                  }
+                  return pruneSubagentIdMap(next);
+                });
+              }
             });
           }
         }
@@ -2993,6 +3033,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         subagentVersionFlushFrameRef.current = null;
       }
       subagentVersionFlushRef.current = null;
+      subagentActivityFlushRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshSubagentRoster, registerHostTools, registerHostUriSchemes]);
