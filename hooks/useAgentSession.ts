@@ -17,6 +17,12 @@ import { sendAgentCommand } from "@/lib/agent-client";
 import { translate } from "@/lib/i18n";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { createMessageUpdateCoalescer, type MessageUpdateCoalescer } from "@/lib/message-update-coalescer";
+import {
+  createEventStreamConnectionManager,
+  type EventStreamConnectionManager,
+  type EventStreamConnectionResult,
+  type EventStreamConnectionStatus,
+} from "@/lib/event-stream-connection";
 import { getToolNamesForPreset, type ToolPreset } from "@/lib/tool-presets";
 import { getPreferredToolPreset, setPreferredToolPreset } from "@/lib/tool-preset-preference";
 import { toast } from "@/components/ui/toast";
@@ -371,13 +377,6 @@ const NOTICE_VISIBLE_MS = 5000;
 const NOTICE_EXIT_ANIMATION_MS = 180;
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " ", "Space", "Spacebar"]);
 
-type EventStreamConnectionStatus = "connected" | "timeout" | "closed";
-
-type EventStreamConnectionResult = {
-  status: EventStreamConnectionStatus;
-  source: EventSource;
-};
-
 class EventStreamConnectionError extends Error {
   constructor(public readonly status: Exclude<EventStreamConnectionStatus, "connected">) {
     super(status === "timeout"
@@ -669,6 +668,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const activeSubagentCount = subagents.filter((subagent) => subagent.source !== "history" && subagent.status === "started").length;
 
   const eventSourceRef = useRef<EventSource | null>(null);
+  const eventConnectionManagerRef = useRef<EventStreamConnectionManager<EventSource> | null>(null);
+  const connectEventsRef = useRef<((sid: string) => Promise<EventStreamConnectionResult<EventSource>>) | null>(null);
+  // Reconnect actions are captured after their definitions, but the manager's
+  // fatal-close callback is installed during render and reads this ref later.
+  const reconnectActionsRef = useRef<((sid: string) => void) | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
   // Guards stale branch/leaf context responses: two rapid navigate clicks must
@@ -725,6 +729,43 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     });
   }
   const eventCoalescer = eventCoalescerRef.current;
+  if (eventConnectionManagerRef.current === null) {
+    eventConnectionManagerRef.current = createEventStreamConnectionManager<EventSource>({
+      timeoutMs: EVENT_STREAM_CONNECT_TIMEOUT_MS,
+      createSource: (sid, handlers) => {
+        // A pending coalesced update belongs to the stream being replaced;
+        // healthy source reuse deliberately skips this reset.
+        eventCoalescer.reset();
+        const source = new EventSource(`/api/agent/${encodeURIComponent(sid)}/events`);
+        source.onopen = handlers.onOpen;
+        source.onerror = handlers.onError;
+        eventSourceRef.current = source;
+        return source;
+      },
+      onFatalClose: (sid, source) => {
+        // The manager has already invalidated this source. Do not let a stale
+        // fatal callback clear or reconnect a newer session's source.
+        if (eventSourceRef.current !== source) return;
+        eventSourceRef.current = null;
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = null;
+        }
+        if (!agentRunningRef.current) return;
+        reconnectTimerRef.current = setTimeout(() => {
+          reconnectTimerRef.current = null;
+          if (agentRunningRef.current && sessionIdRef.current === sid) {
+            void connectEventsRef.current?.(sid);
+            // The reconnect restores the event stream, but host tools, URI
+            // schemes, and the subagent roster were registered on the old
+            // connection — re-register them so the agent keeps working.
+            reconnectActionsRef.current?.(sid);
+          }
+        }, 1000);
+      },
+    });
+  }
+  const eventConnectionManager = eventConnectionManagerRef.current!;
 
   const setToolPresetState = opts.setToolPreset ?? setToolPreset;
 
@@ -1179,36 +1220,28 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // registrations are per-wrapper and are not persisted by omp, and the
   // roster needs a fresh get_subagents snapshot) so the fatal-error reconnect
   // below can restore everything the mount flow sets up — not just the stream.
-  const reconnectActionsRef = useRef<((sid: string) => void) | null>(null);
 
-  const connectEvents = useCallback((sid: string): Promise<EventStreamConnectionResult> => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
-    // A pending coalesced update belongs to the stream being replaced.
-    eventCoalescer.reset();
-    const es = new EventSource(`/api/agent/${encodeURIComponent(sid)}/events`);
-    eventSourceRef.current = es;
-
-    return new Promise((resolve) => {
-      let settled = false;
-      const settle = (status: EventStreamConnectionStatus) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        resolve({ status, source: es });
-      };
-      const timeout = setTimeout(() => settle("timeout"), EVENT_STREAM_CONNECT_TIMEOUT_MS);
-
-      // The stream is live as soon as the response headers land, whether or not
-      // the server also sends an explicit `connected` frame.
-      es.onopen = () => settle("connected");
-
-      es.onmessage = (e) => {
+  const connectEvents = useCallback((sid: string): Promise<EventStreamConnectionResult<EventSource>> => {
+    const readiness = eventConnectionManager.ensure(sid);
+    const source = eventConnectionManager.currentSource(sid);
+    if (source) {
+      source.onmessage = (eventMessage) => {
+        // An old source can still deliver a queued browser callback after a
+        // session switch or fatal close. It must not reach React/coalescing.
+        if (!eventConnectionManager.isCurrent(sid, source)) return;
         try {
-          const event = JSON.parse(e.data) as AgentEvent;
-          if (event.type === "connected") settle("connected");
+          const event = JSON.parse(eventMessage.data) as AgentEvent;
+          if (event.type === "connected") eventConnectionManager.markConnected(sid, source);
+          if (event.type === "session_closed") {
+            // The server-side RPC wrapper was intentionally disposed (idle
+            // timeout, update restart, or teardown). Flush any preceding
+            // coalesced update, then retire this source without the fatal
+            // reconnect loop; the next prompt creates and binds a fresh one.
+            eventCoalescer.push(event);
+            eventConnectionManager.invalidate(sid, source);
+            if (eventSourceRef.current === source) eventSourceRef.current = null;
+            return;
+          }
           // message_update frames arrive at network rate (often 30-100+/s);
           // the coalescer buffers the latest one and dispatches at display
           // rate, flushing synchronously before any other event type.
@@ -1217,35 +1250,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           // ignore
         }
       };
-      es.onerror = () => {
-        if (es.readyState === EventSource.CLOSED) {
-          // Fatal error (404/500/content-type mismatch): browser won't
-          // auto-reconnect. Settle the Promise and manually reconnect for
-          // already-running sessions. Keep the timer in a ref so unmount or a
-          // session switch cancels it — otherwise an orphaned stream respawns
-          // (and can 404-loop) after the hook is torn down.
-          settle("closed");
-          if (eventSourceRef.current === es && agentRunningRef.current) {
-            eventSourceRef.current = null;
-            if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-            reconnectTimerRef.current = setTimeout(() => {
-              reconnectTimerRef.current = null;
-              if (agentRunningRef.current && sessionIdRef.current === sid) {
-                void connectEvents(sid);
-                // The reconnect restores the event stream, but host tools, URI
-                // schemes, and the subagent roster were registered on the old
-                // connection — re-register them so the agent keeps working.
-                reconnectActionsRef.current?.(sid);
-              }
-            }, 1000);
-          }
-        }
-        // Recoverable errors (CONNECTING): let EventSource auto-reconnect.
-        // The timeout above resolves only to let callers decide whether this
-        // connection must be ready before they continue.
-      };
-    });
-  }, [eventCoalescer]);
+    }
+    return readiness;
+  }, [eventCoalescer, eventConnectionManager]);
+  connectEventsRef.current = connectEvents;
 
   const respondToExtensionUi = useCallback(async (
     request: ExtensionUiDialogRequest,
@@ -1487,17 +1495,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const slowNotice = setTimeout(() => {
       addNotice({ type: "info", message: translate("agentSession.startingAgent") });
     }, EVENT_STREAM_SLOW_CONNECT_MS);
-    let result: EventStreamConnectionResult;
+    let result: EventStreamConnectionResult<EventSource>;
     try {
       result = await connectEvents(sid);
     } finally {
       clearTimeout(slowNotice);
     }
     if (result.status === "connected" || result.source.readyState === EventSource.OPEN) return;
+    const sourceIsCurrent = eventConnectionManager.isCurrent(sid, result.source);
     if (eventSourceRef.current === result.source) eventSourceRef.current = null;
-    result.source.close();
+    if (sourceIsCurrent) eventConnectionManager.invalidate(sid, result.source);
+    else result.source.close();
     throw new EventStreamConnectionError(result.status);
-  }, [addNotice, connectEvents]);
+  }, [addNotice, connectEvents, eventConnectionManager]);
 
   const handleExtensionUiRequest = useCallback((request: IncomingExtensionUiRequest) => {
     switch (request.method) {
@@ -3021,7 +3031,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     return () => {
       bashRecoveryIdRef.current += 1;
       eventCoalescerRef.current?.reset();
-      eventSourceRef.current?.close();
+      const source = eventSourceRef.current;
+      eventConnectionManager.invalidate();
+      if (source && source.readyState !== EventSource.CLOSED) source.close();
       eventSourceRef.current = null;
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);

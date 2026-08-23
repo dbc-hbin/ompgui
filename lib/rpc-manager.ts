@@ -202,7 +202,7 @@ export class AgentSessionWrapper {
   private compacting = false;
   private fastModeEnabled = false;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
-  private onDestroyCallback: (() => void) | null = null;
+  private destroyListeners: Array<() => void> = [];
   private onIdentityChangeCallback: ((oldId: string, newId: string) => void) | null = null;
   private unsubscribeFrames: (() => void) | null = null;
   private initPromise: Promise<void> | null = null;
@@ -653,8 +653,16 @@ export class AgentSessionWrapper {
     };
   }
 
-  onDestroy(cb: () => void): void {
-    this.onDestroyCallback = cb;
+  onDestroy(cb: () => void): () => void {
+    if (!this._alive) {
+      cb();
+      return () => {};
+    }
+    this.destroyListeners.push(cb);
+    return () => {
+      const index = this.destroyListeners.indexOf(cb);
+      if (index !== -1) this.destroyListeners.splice(index, 1);
+    };
   }
 
   /** Called when a session-changing command re-keyed this wrapper (branch/new_session/switch_session). */
@@ -1113,7 +1121,14 @@ export class AgentSessionWrapper {
     this.hostToolNames.clear();
     this.pendingHostUris.clear();
     this.hostUriSchemes.clear();
-    this.onDestroyCallback?.();
+    const destroyListeners = this.destroyListeners.splice(0);
+    for (const listener of destroyListeners) {
+      try {
+        listener();
+      } catch {
+        // Destruction must continue even if one observer fails.
+      }
+    }
     notifyRunningChange();
     await disposed;
   }
