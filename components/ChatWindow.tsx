@@ -1010,6 +1010,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
             <ComposerPanels
               todoPhases={todoPhases}
               subagents={subagents}
+              subagentEvents={subagentEvents}
               onSelectSubagent={setSelectedSubagent}
             />
             <ExtensionWidgets widgets={belowEditorWidgets} />
