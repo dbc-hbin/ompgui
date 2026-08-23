@@ -64,7 +64,7 @@ jobs:
               printf '%s\n\n' "$CHANGES"
               printf '%s\n\n' '## Upgrade'
               printf '%s\n' '```bash'
-              printf 'npm install -g ompgui@$VERSION\n'
+              printf 'npm install -g ompgui@%s\n' "$VERSION"
               printf '%s\n\n' '```'
               printf '**Full changelog:** %s\n' "$CHANGELOG_URL"
             } > release-notes.md
