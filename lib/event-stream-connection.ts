@@ -35,13 +35,6 @@ export interface EventStreamConnectionManager<Source extends EventStreamSource> 
 export interface CreateEventStreamConnectionManagerOptions<Source extends EventStreamSource> {
   createSource: (sessionId: string, handlers: EventStreamConnectionHandlers) => Source;
   timeoutMs: number;
-  /**
-   * Resolve readiness from EventSource.onopen (the historical behavior).
-   * Compact-v1 callers can disable this and call markConnected after the
-   * first validated relay_sync, so an HTTP 200 legacy stream is not treated
-   * as a usable compact connection.
-   */
-  readyOnOpen?: boolean;
   onFatalClose?: (sessionId: string, source: Source) => void;
 }
 
@@ -51,7 +44,6 @@ interface ConnectionRecord<Source extends EventStreamSource> {
   promise: Promise<EventStreamConnectionResult<Source>>;
   resolve: (result: EventStreamConnectionResult<Source>) => void;
   settled: boolean;
-  status: EventStreamConnectionStatus | null;
   invalidated: boolean;
   timeout: ReturnType<typeof setTimeout> | null;
 }
@@ -66,7 +58,6 @@ interface ConnectionRecord<Source extends EventStreamSource> {
 export function createEventStreamConnectionManager<Source extends EventStreamSource>({
   createSource,
   timeoutMs,
-  readyOnOpen = true,
   onFatalClose,
 }: CreateEventStreamConnectionManagerOptions<Source>): EventStreamConnectionManager<Source> {
   let current: ConnectionRecord<Source> | null = null;
@@ -90,14 +81,12 @@ export function createEventStreamConnectionManager<Source extends EventStreamSou
       record.resolve = resolve;
     });
     record.settled = false;
-    record.status = null;
     scheduleTimeout(record);
   };
 
   const settle = (record: ConnectionRecord<Source>, status: EventStreamConnectionStatus): void => {
     if (record.settled) return;
     record.settled = true;
-    record.status = status;
     if (record.timeout !== null) {
       clearTimeout(record.timeout);
       record.timeout = null;
@@ -118,7 +107,7 @@ export function createEventStreamConnectionManager<Source extends EventStreamSou
   const handleOpen = (record: ConnectionRecord<Source>): void => {
     if (!isCurrentRecord(record)) return;
     if (record.source.readyState === EVENT_STREAM_CLOSED) return;
-    if (readyOnOpen) settle(record, "connected");
+    settle(record, "connected");
   };
 
   const handleError = (record: ConnectionRecord<Source>): void => {
@@ -160,7 +149,6 @@ export function createEventStreamConnectionManager<Source extends EventStreamSou
       promise,
       resolve,
       settled: false,
-      status: null,
       invalidated: false,
       timeout: null,
     };
@@ -171,7 +159,7 @@ export function createEventStreamConnectionManager<Source extends EventStreamSou
     // state after creation also handles deterministic fakes and an already
     // open source without relying on a callback race.
     if (source.readyState === EVENT_STREAM_OPEN) {
-      if (readyOnOpen) settle(record, "connected");
+      settle(record, "connected");
     } else if (source.readyState === EVENT_STREAM_CLOSED) {
       handleError(record);
     }
@@ -184,21 +172,9 @@ export function createEventStreamConnectionManager<Source extends EventStreamSou
       if (existing && existing.sessionId === sessionId) {
         if (existing.source.readyState === EVENT_STREAM_OPEN) {
           // A source that reopened after a prior timeout is healthy again even
-          // though its original readiness promise has already settled. In
-          // frame-gated mode, however, onopen is only transport readiness;
-          // callers must wait for markConnected after protocol validation.
-          if (readyOnOpen) {
-            if (!existing.settled) settle(existing, "connected");
-            return Promise.resolve({ status: "connected", source: existing.source });
-          }
-          if (existing.settled) {
-            if (existing.status === "connected") {
-              return Promise.resolve({ status: "connected", source: existing.source });
-            }
-            invalidateRecord(existing, true);
-            return start(sessionId);
-          }
-          return existing.promise;
+          // though its original readiness promise has already settled.
+          if (!existing.settled) settle(existing, "connected");
+          return Promise.resolve({ status: "connected", source: existing.source });
         }
         if (existing.source.readyState === EVENT_STREAM_CONNECTING) {
           if (existing.settled) armReadiness(existing);
@@ -226,7 +202,7 @@ export function createEventStreamConnectionManager<Source extends EventStreamSou
     markConnected(sessionId, source) {
       const existing = current;
       if (!existing || existing.sessionId !== sessionId || existing.source !== source) return;
-      if (existing.source.readyState !== EVENT_STREAM_CLOSED) settle(existing, "connected");
+      handleOpen(existing);
     },
 
     invalidate(sessionId, source) {

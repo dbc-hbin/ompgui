@@ -16,12 +16,7 @@ import type { ThinkingModelMeta } from "@/lib/thinking-levels";
 import { sendAgentCommand } from "@/lib/agent-client";
 import { translate } from "@/lib/i18n";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
-import {
-  createInitialRelayClientState,
-  reduceRelayFrame,
-  type RelayStreamState,
-} from "@/lib/relay-client-reducer";
-import { safeParseRelayFrame } from "@/lib/relay-wire";
+import { createMessageUpdateCoalescer, type MessageUpdateCoalescer } from "@/lib/message-update-coalescer";
 import {
   createEventStreamConnectionManager,
   type EventStreamConnectionManager,
@@ -506,14 +501,6 @@ function imageSignature(block: unknown): string {
   ].join(":");
 }
 
-function messageSnapshotKey(message: unknown): string {
-  try {
-    return JSON.stringify(message);
-  } catch {
-    return "";
-  }
-}
-
 function userMessageKey(message: Partial<AgentMessage>): string {
   const content = (message as { content?: unknown }).content;
   if (typeof content === "string") return JSON.stringify({ text: content, images: [] });
@@ -706,15 +693,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const bashRunningRef = useRef(false);
   const bashRecoveryIdRef = useRef(0);
   const handleAgentEventRef = useRef<((event: AgentEvent) => void) | null>(null);
-  // Compact-v1 is authoritative raw state. Keep it outside React so every
-  // frame in a burst is reduced synchronously before any UI snapshot renders.
-  const relayStateRef = useRef<RelayStreamState>(createInitialRelayClientState(session?.id ?? null));
-  const relayCommitSeqRef = useRef(-1);
-  const relayEpochRef = useRef<number | null>(null);
-  const relayReconnectPendingRef = useRef(false);
-  const relaySourceGenerationRef = useRef(0);
-  const relayCommittedMessageIdsRef = useRef<Set<string>>(new Set());
-  const relayCompactFrameHandlerRef = useRef<((sid: string, source: EventSource, generation: number, data: unknown) => void) | null>(null);
   const initialScrollDoneRef = useRef(false);
   const pendingScrollToUserRef = useRef(false);
   const completionScrollAllowedRef = useRef(true);
@@ -744,41 +722,23 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // True once this mount has persisted a non-empty queue: gates removal so a
   // just-mounted empty state cannot wipe a stored queue before restore runs.
   const queuePersistDirtyRef = useRef(false);
+  const eventCoalescerRef = useRef<MessageUpdateCoalescer | null>(null);
+  if (eventCoalescerRef.current === null) {
+    eventCoalescerRef.current = createMessageUpdateCoalescer((event) => {
+      handleAgentEventRef.current?.(event as AgentEvent);
+    });
+  }
+  const eventCoalescer = eventCoalescerRef.current;
   if (eventConnectionManagerRef.current === null) {
     eventConnectionManagerRef.current = createEventStreamConnectionManager<EventSource>({
       timeoutMs: EVENT_STREAM_CONNECT_TIMEOUT_MS,
-      // Transport open is not enough for compact-v1: the first valid
-      // relay_sync is the protocol handshake. This prevents an old raw SSE
-      // stream from being mistaken for a usable compact connection.
-      readyOnOpen: false,
       createSource: (sid, handlers) => {
-        // A new source starts from a clean reducer checkpoint. The committed
-        // cursor is intentionally retained so reconnect asks the server for a
-        // healing checkpoint rather than replaying an unbounded history.
-        relaySourceGenerationRef.current += 1;
-        relayStateRef.current = createInitialRelayClientState(sid);
-        const params = new URLSearchParams({ wire: "compact-v1" });
-        if (relayCommitSeqRef.current >= 0) params.set("commit", String(relayCommitSeqRef.current));
-        const source = new EventSource(`/api/agent/${encodeURIComponent(sid)}/events?${params.toString()}`);
-        const generation = relaySourceGenerationRef.current;
+        // A pending coalesced update belongs to the stream being replaced;
+        // healthy source reuse deliberately skips this reset.
+        eventCoalescer.reset();
+        const source = new EventSource(`/api/agent/${encodeURIComponent(sid)}/events`);
         source.onopen = handlers.onOpen;
         source.onerror = handlers.onError;
-        // Install the protocol handler before returning the source to the
-        // manager. Funnel/localhost can deliver relay_sync immediately after
-        // HTTP open; attaching later in connectEvents can miss the only
-        // readiness frame and leave the prompt waiting until timeout.
-        source.onmessage = (eventMessage) => {
-          if (!eventConnectionManagerRef.current?.isCurrent(sid, source)) return;
-          if (relaySourceGenerationRef.current !== generation) return;
-          let payload: unknown;
-          try {
-            payload = JSON.parse(eventMessage.data);
-          } catch {
-            relayCompactFrameHandlerRef.current?.(sid, source, generation, undefined);
-            return;
-          }
-          relayCompactFrameHandlerRef.current?.(sid, source, generation, payload);
-        };
         eventSourceRef.current = source;
         return source;
       },
@@ -881,21 +841,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     setContextUsageRaw(null);
     contextWindowRef.current = 0;
   }, [session?.id]);
-
-  useEffect(() => {
-    const sid = session?.id ?? null;
-    const previousSource = eventSourceRef.current;
-    sessionIdRef.current = sid;
-    relaySourceGenerationRef.current += 1;
-    relayStateRef.current = createInitialRelayClientState(sid);
-    relayCommitSeqRef.current = -1;
-    relayEpochRef.current = null;
-    relayReconnectPendingRef.current = false;
-    relayCommittedMessageIdsRef.current.clear();
-    eventConnectionManager.invalidate();
-    if (previousSource && previousSource.readyState !== EventSource.CLOSED) previousSource.close();
-    eventSourceRef.current = null;
-  }, [eventConnectionManager, session?.id]);
 
   useEffect(() => {
     const sid = session?.id;
@@ -1277,8 +1222,37 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // below can restore everything the mount flow sets up — not just the stream.
 
   const connectEvents = useCallback((sid: string): Promise<EventStreamConnectionResult<EventSource>> => {
-    return eventConnectionManager.ensure(sid);
-  }, [eventConnectionManager]);
+    const readiness = eventConnectionManager.ensure(sid);
+    const source = eventConnectionManager.currentSource(sid);
+    if (source) {
+      source.onmessage = (eventMessage) => {
+        // An old source can still deliver a queued browser callback after a
+        // session switch or fatal close. It must not reach React/coalescing.
+        if (!eventConnectionManager.isCurrent(sid, source)) return;
+        try {
+          const event = JSON.parse(eventMessage.data) as AgentEvent;
+          if (event.type === "connected") eventConnectionManager.markConnected(sid, source);
+          if (event.type === "session_closed") {
+            // The server-side RPC wrapper was intentionally disposed (idle
+            // timeout, update restart, or teardown). Flush any preceding
+            // coalesced update, then retire this source without the fatal
+            // reconnect loop; the next prompt creates and binds a fresh one.
+            eventCoalescer.push(event);
+            eventConnectionManager.invalidate(sid, source);
+            if (eventSourceRef.current === source) eventSourceRef.current = null;
+            return;
+          }
+          // message_update frames arrive at network rate (often 30-100+/s);
+          // the coalescer buffers the latest one and dispatches at display
+          // rate, flushing synchronously before any other event type.
+          eventCoalescer.push(event);
+        } catch {
+          // ignore
+        }
+      };
+    }
+    return readiness;
+  }, [eventCoalescer, eventConnectionManager]);
   connectEventsRef.current = connectEvents;
 
   const respondToExtensionUi = useCallback(async (
@@ -1524,18 +1498,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     let result: EventStreamConnectionResult<EventSource>;
     try {
       result = await connectEvents(sid);
-      // A requiresStateRefresh sync intentionally closes the first source
-      // after updating the commit cursor. Give its healing reconnect one turn
-      // to become the source this prompt uses; malformed/legacy frames do not
-      // set this flag and still fail clearly.
-      if (result.status === "closed" && relayReconnectPendingRef.current && sessionIdRef.current === sid) {
-        await delay(0);
-        result = await connectEvents(sid);
-      }
     } finally {
       clearTimeout(slowNotice);
     }
-    if (result.status === "connected") return;
+    if (result.status === "connected" || result.source.readyState === EventSource.OPEN) return;
     const sourceIsCurrent = eventConnectionManager.isCurrent(sid, result.source);
     if (eventSourceRef.current === result.source) eventSourceRef.current = null;
     if (sourceIsCurrent) eventConnectionManager.invalidate(sid, result.source);
@@ -1991,18 +1957,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         break;
       }
       case "message_end": {
-        const authoritative = event.__relayAuthoritative === true;
-        const relayMessageId = typeof event.__relayMessageId === "string" ? event.__relayMessageId : null;
         // Same late-event guard: after reconcile finished this run,
         // loadSession already loaded this message from the session file —
-        // appending it again would duplicate it. An authoritative compact
-        // commit is allowed through this path even after reconciliation;
-        // its message id and final-message identity fence duplicate appends.
-        if (!agentRunningRef.current && !authoritative) break;
-        if (authoritative && relayMessageId) {
-          if (relayCommittedMessageIdsRef.current.has(relayMessageId)) break;
-          relayCommittedMessageIdsRef.current.add(relayMessageId);
-        }
+        // appending it again would duplicate it.
+        if (!agentRunningRef.current) break;
         const completed = event.message as AgentMessage | undefined;
         if (completed && completed.role === "user") {
           // Delivered steering/follow-up messages surface here as user
@@ -2027,23 +1985,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         } else if (completed?.role === "custom" && (completed as CustomMessage).customType === "xdev-mount-notice") {
           toast.info("MCP tools updated", describeMcpMountNotice(completed as CustomMessage), { clamp: true });
         } else if (completed) {
-          const normalizedCompleted = normalizeToolCalls(completed);
-          if (authoritative) {
-            const completedKey = messageSnapshotKey(normalizedCompleted);
-            // A requiresStateRefresh reconciliation can hydrate the committed
-            // message before its authoritative relay_commit arrives. The
-            // committed assistant is terminal and therefore adjacent to the
-            // stream boundary; only suppress an equal trailing message so
-            // separate identical assistant turns remain representable.
-            setMessages((prev) => {
-              const last = prev[prev.length - 1];
-              return last?.role === "assistant" && messageSnapshotKey(last) === completedKey
-                ? prev
-                : [...prev, normalizedCompleted];
-            });
-          } else {
-            setMessages((prev) => [...prev, normalizedCompleted]);
-          }
+          setMessages((prev) => [...prev, normalizeToolCalls(completed)]);
         }
         dispatch({ type: "reset" });
         setAgentPhase({ kind: "waiting_model" });
@@ -2294,168 +2236,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [addNotice, consumeQueuedMessage, finishPromptWithoutStream, handleExtensionUiRequest, handleHostToolCall, handleHostUriRequest, loadSession, mergeSubagents, onAgentEnd, reconcileAgentState, resetSubagentActivityState, applyAuthoritativeModel, beginAuthoritativeModelSync, setContextUsage]);
   handleAgentEventRef.current = handleAgentEvent;
-
-  const handleCompactFrame = useCallback((sid: string, source: EventSource, generation: number, input: unknown) => {
-    // Source/session/run fencing happens before parsing and before any state or
-    // React mutation. A queued callback from a replaced EventSource is dead.
-    if (!hookAliveRef.current || sessionIdRef.current !== sid) return;
-    if (!eventConnectionManager.isCurrent(sid, source)) return;
-    if (relaySourceGenerationRef.current !== generation) return;
-
-    const parsed = safeParseRelayFrame(input);
-    if (!parsed.ok) {
-      // No reducer transition is allowed for malformed input. Fence the source
-      // and heal from an authoritative checkpoint instead of guessing whether
-      // this was a legacy raw frame or a truncated compact frame.
-      if (sessionIdRef.current !== sid || !eventConnectionManager.isCurrent(sid, source)) return;
-      const runId = promptRunIdRef.current;
-      eventConnectionManager.invalidate(sid, source);
-      if (eventSourceRef.current === source) eventSourceRef.current = null;
-      relayStateRef.current = createInitialRelayClientState(sid);
-      addNotice({ type: "error", message: translate("agentSession.eventStreamFailed") });
-      void loadSession(sid, false, true, runId);
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = setTimeout(() => {
-        reconnectTimerRef.current = null;
-        if (!hookAliveRef.current || sessionIdRef.current !== sid) return;
-        const connect = connectEventsRef.current;
-        if (!connect) return;
-        void connect(sid).then((result) => {
-          if (result.status === "connected") reconnectActionsRef.current?.(sid);
-        }).catch(() => {});
-      }, 1000);
-      return;
-    }
-
-    const reduced = reduceRelayFrame(relayStateRef.current, parsed.frame);
-    relayStateRef.current = reduced.state;
-    const effect = reduced.effect;
-
-    if (effect.type === "sync") {
-      // The server's commit cursor is authoritative for the next reconnect.
-      // Keep it separately from the reducer because a healing reconnect resets
-      // the reducer to accept a checkpoint at the same total sequence. A new
-      // wrapper epoch has its own sequence space and commit cursor; retaining
-      // the old epoch's cursor would force refresh forever.
-      if (relayEpochRef.current !== null && relayEpochRef.current !== effect.frame.epoch) {
-        relayCommitSeqRef.current = effect.frame.commitSeq;
-        relayCommittedMessageIdsRef.current.clear();
-      } else {
-        relayCommitSeqRef.current = Math.max(relayCommitSeqRef.current, effect.frame.commitSeq);
-      }
-      relayEpochRef.current = effect.frame.epoch;
-      if (effect.requiresStateRefresh) {
-        // A cursor mismatch means this checkpoint is a healing signal, not a
-        // UI snapshot to partially apply. Refresh history/state and reconnect;
-        // the next sync (with the server's commit cursor) is the first one that
-        // may restore an active streaming bubble.
-        const runId = promptRunIdRef.current;
-        relayReconnectPendingRef.current = true;
-        eventConnectionManager.invalidate(sid, source);
-        if (eventSourceRef.current === source) eventSourceRef.current = null;
-        relayStateRef.current = createInitialRelayClientState(sid);
-        void loadSession(sid, false, true, runId);
-        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = setTimeout(() => {
-          reconnectTimerRef.current = null;
-          relayReconnectPendingRef.current = false;
-          if (!hookAliveRef.current || sessionIdRef.current !== sid) return;
-          const connect = connectEventsRef.current;
-          if (!connect) return;
-          void connect(sid).then((result) => {
-            if (result.status === "connected") reconnectActionsRef.current?.(sid);
-          }).catch(() => {});
-        }, 0);
-        return;
-      }
-
-      eventConnectionManager.markConnected(sid, source);
-      if (effect.active) {
-        if (!agentRunningRef.current) {
-          agentRunningRef.current = true;
-          setAgentRunning(true);
-        }
-        dispatch({ type: "start" });
-        handleAgentEventRef.current?.({
-          type: "message_start",
-          message: normalizeToolCalls(effect.active.message as unknown as AgentMessage),
-        });
-      }
-      return;
-    }
-
-    if (effect.type === "duplicate" || effect.type === "none") return;
-
-    if (effect.type === "desync") {
-      // The reducer has not emitted a semantic effect for this frame. Do not
-      // apply a partial patch; reset only after fencing the source so stale
-      // callbacks cannot mutate the replacement stream.
-      if (sessionIdRef.current !== sid || !eventConnectionManager.isCurrent(sid, source)) return;
-      const runId = promptRunIdRef.current;
-      eventConnectionManager.invalidate(sid, source);
-      if (eventSourceRef.current === source) eventSourceRef.current = null;
-      relayStateRef.current = createInitialRelayClientState(sid);
-      void loadSession(sid, false, true, runId);
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = setTimeout(() => {
-        reconnectTimerRef.current = null;
-        if (!hookAliveRef.current || sessionIdRef.current !== sid) return;
-        const connect = connectEventsRef.current;
-        if (!connect) return;
-        void connect(sid).then((result) => {
-          if (result.status === "connected") reconnectActionsRef.current?.(sid);
-        }).catch(() => {});
-      }, 0);
-      return;
-    }
-
-    switch (effect.type) {
-      case "event":
-        // The nested raw OMP event is authoritative; compact only changes its
-        // transport envelope. Never pass relay patch snapshots through the
-        // old latest-wins coalescer.
-        handleAgentEventRef.current?.(effect.event as AgentEvent);
-        break;
-      case "message_begin":
-        if (!agentRunningRef.current) {
-          agentRunningRef.current = true;
-          setAgentRunning(true);
-          dispatch({ type: "start" });
-        }
-        handleAgentEventRef.current?.({
-          type: "message_start",
-          message: normalizeToolCalls(effect.message as unknown as AgentMessage),
-        });
-        break;
-      case "message_patch":
-        handleAgentEventRef.current?.({
-          type: "message_update",
-          message: normalizeToolCalls(effect.message as unknown as AgentMessage),
-        });
-        break;
-      case "commit":
-        relayCommitSeqRef.current = Math.max(relayCommitSeqRef.current, effect.frame.seq);
-        if (effect.recoveredFromDesync) {
-          // A commit is allowed through a desynchronized reducer so the next
-          // authoritative message can converge the stream. Refresh history and
-          // live state as well, fencing the request to the current prompt run;
-          // this prevents a recovered commit from duplicating a history append.
-          void loadSession(sid, false, true, promptRunIdRef.current);
-        }
-        handleAgentEventRef.current?.({
-          type: "message_end",
-          message: effect.message as unknown as AgentMessage,
-          __relayAuthoritative: true,
-          __relayMessageId: effect.messageId,
-        });
-        break;
-      case "session_closed":
-        eventConnectionManager.invalidate(sid, source);
-        if (eventSourceRef.current === source) eventSourceRef.current = null;
-        break;
-    }
-  }, [addNotice, eventConnectionManager, loadSession]);
-  relayCompactFrameHandlerRef.current = handleCompactFrame;
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]): Promise<boolean> => {
     const trimmedMessage = message.trim();
@@ -3250,6 +3030,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
     return () => {
       bashRecoveryIdRef.current += 1;
+      eventCoalescerRef.current?.reset();
       const source = eventSourceRef.current;
       eventConnectionManager.invalidate();
       if (source && source.readyState !== EventSource.CLOSED) source.close();
@@ -3258,7 +3039,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
       }
-      relayReconnectPendingRef.current = false;
       if (rosterRefreshTimerRef.current) {
         clearTimeout(rosterRefreshTimerRef.current);
         rosterRefreshTimerRef.current = null;
@@ -3361,15 +3141,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [messages, streamState, agentRunning, agentPhase, extensionWidgets, isCompacting, retryInfo, activeSubagentCount, todoPhases, scrollToBottom, loading]);
 
-  useEffect(() => {
-    // React Strict Mode runs an effect cleanup/setup cycle in development.
-    // Restore the live flag on setup so protocol handshakes are not discarded
-    // after that diagnostic cycle.
-    hookAliveRef.current = true;
-    return () => {
-      hookAliveRef.current = false;
-      if (followScrollFrameRef.current !== null) cancelAnimationFrame(followScrollFrameRef.current);
-    };
+  useEffect(() => () => {
+    hookAliveRef.current = false;
+    if (followScrollFrameRef.current !== null) cancelAnimationFrame(followScrollFrameRef.current);
   }, []);
 
   // Load model list

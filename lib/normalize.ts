@@ -7,10 +7,6 @@ function isObject(val: unknown): val is Record<string, unknown> {
 function normalizeToolCallBlock(block: unknown): ToolCallContent | null {
   if (!isObject(block) || block.type !== "toolCall") return null;
   return {
-    // Keep opaque OMP/provider metadata on the derived UI copy. The canonical
-    // aliases below normalize legacy field names without making the UI copy a
-    // lossy representation of the raw assistant message.
-    ...block,
     type: "toolCall",
     toolCallId: typeof block.toolCallId === "string" ? block.toolCallId : (typeof block.id === "string" ? block.id : ""),
     toolName: typeof block.toolName === "string" ? block.toolName : (typeof block.name === "string" ? block.name : ""),
