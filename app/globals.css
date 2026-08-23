@@ -201,6 +201,12 @@ html[data-palette="omp"].dark {
   --control-height-sm: 28px;
   --control-height: 32px;
   --control-height-lg: 36px;
+  /* Shell chrome metrics: the top bar and its floating file-panel toggle
+     share one height token so they never drift apart. Mobile (≤640px)
+     bumps both via the media query next to .shell-toolbar-btn. */
+  --shell-topbar-height: 36px;
+  --shell-file-toggle-size: calc(var(--shell-topbar-height) - 6px);
+  --composer-ring-size: 26px;
   --control-padding-inline: 10px;
   --focus-ring: 0 0 0 2px color-mix(in srgb, var(--focus-ring-color) 22%, transparent);
   /* Warm diffuse shadows (light); dark theme swaps to ambient glow below. */
@@ -1672,13 +1678,88 @@ html.dark .dropdown-surface :is(select, option) {
   background: var(--border);
   flex-shrink: 0;
 }
+/* Top bar: single height token, with the right end reserved for the
+   floating file-panel toggle so stats never slide underneath it. */
+.shell-topbar {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: var(--shell-topbar-height);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  padding-right: var(--shell-topbar-height);
+}
+/* Session info / stats button: desktop shows the token + cost chips, mobile
+   shows a single info icon. Same 40px touch target as other toolbar
+   buttons, same pressed hover semantics, no per-button sizing hacks. */
+.shell-stats-btn {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 var(--control-padding-inline);
+  height: 100%;
+  overflow: hidden;
+  border: none;
+  background: none;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  transition: color var(--dur-fast) var(--ease-out-warm), background var(--dur-fast) var(--ease-out-warm);
+}
+.shell-stats-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.shell-stats-btn[aria-pressed="true"] {
+  background: var(--bg-selected);
+  color: var(--text);
+}
+/* File panel toggle: floats over the top bar's right corner. It must stay
+   reachable on mobile, where an open panel takes the full width and the top
+   bar itself scrolls out of layout; transparent chrome instead of the old
+   boxed L-frame. */
+.shell-file-toggle {
+  position: fixed;
+  top: calc((var(--shell-topbar-height) - var(--shell-file-toggle-size)) / 2);
+  right: calc((var(--shell-topbar-height) - var(--shell-file-toggle-size)) / 2);
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--shell-file-toggle-size);
+  height: var(--shell-file-toggle-size);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm);
+}
+.shell-file-toggle:hover,
+.shell-file-toggle[aria-pressed="true"] {
+  background: var(--bg-hover);
+  color: var(--text);
+}
 @media (max-width: 640px) {
+  :root {
+    --shell-topbar-height: 44px;
+    --composer-ring-size: 28px;
+  }
   .shell-toolbar-btn {
     width: 40px;
     height: 40px;
   }
   .shell-toolbar-divider {
     margin: 0 4px;
+  }
+  .shell-stats-btn {
+    padding: 0 10px;
+    min-width: 40px;
   }
 }
 
@@ -1856,11 +1937,80 @@ html.dark .dropdown-surface :is(select, option) {
     transition: none;
   }
 }
+/* Context-usage ring in the composer: token-driven size, one-decimal label
+   below 10% so small real usage stays visible (1M-window models spend most
+   of a session under 5%). */
+.composer-context-ring {
+  position: relative;
+  width: var(--composer-ring-size);
+  height: var(--composer-ring-size);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.composer-context-ring-label {
+  font-size: 8px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+/* Model name in the composer chip and in the picker: the distinguishing
+   part of a model name is its suffix ("…5.6-Sol"), so truncation keeps the
+   tail — rtl direction moves the ellipsis to the leading edge. */
+.composer-model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  unicode-bidi: plaintext;
+}
+.model-option-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Queue-during-run actions (Steer / Follow-up) beside Stop: tinted ghost
+   pills on desktop, compact icon-only circles on mobile. */
+.composer-queue-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm);
+}
+.composer-queue-action-steer {
+  color: var(--status-warning);
+  background: color-mix(in srgb, var(--status-warning) 12%, transparent);
+}
+.composer-queue-action-followup {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.composer-queue-action:disabled {
+  background: none;
+  color: var(--text-dim);
+  cursor: not-allowed;
+}
 
 /* Mobile sidebar: slide in/out as overlay */
 @media (max-width: 640px) {
   .chat-stats-center {
     display: none !important;
+  }
+  .model-option-name {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.35;
   }
   .composer-toolbar {
     display: grid !important;
@@ -1883,21 +2033,25 @@ html.dark .dropdown-surface :is(select, option) {
     width: 100%;
     max-width: none !important;
     height: 48px !important;
-    padding-inline: 10px !important;
+    padding-inline: 8px !important;
     border-radius: var(--radius-control) !important;
     font-size: 13px !important;
     touch-action: manipulation;
   }
   .composer-thinking-control {
     order: 3;
+    min-width: 0;
   }
+  /* Keep the effort picker compact: icon + label only, no minimum width —
+     every pixel here is taken from the model chip next to it. */
   .composer-thinking-button {
     height: 48px !important;
-    min-width: 68px;
+    min-width: 0;
     justify-content: center;
-    padding-inline: 10px !important;
+    gap: 4px !important;
+    padding-inline: 7px !important;
     border-radius: var(--radius-control) !important;
-    font-size: 13px !important;
+    font-size: 12px !important;
     touch-action: manipulation;
   }
   .composer-primary-action {
@@ -1910,8 +2064,30 @@ html.dark .dropdown-surface :is(select, option) {
     font-size: 13px !important;
     touch-action: manipulation;
   }
-  .composer-fast-toggle {
+  /* Steer/Follow-up while running: second row, icon-only. */
+  .composer-queue-action {
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0 !important;
+    border-radius: 9999px;
+    touch-action: manipulation;
+  }
+  .composer-queue-action-label {
+    display: none;
+  }
+  .composer-queue-action-steer {
     order: 5;
+    grid-column: 1;
+    justify-self: start;
+  }
+  .composer-queue-action-followup {
+    order: 6;
+    grid-column: 2;
+    justify-self: start;
+  }
+  .composer-fast-toggle {
+    order: 7;
     grid-column: 1 / span 2;
     justify-self: start;
     height: 36px !important;
@@ -1920,7 +2096,7 @@ html.dark .dropdown-surface :is(select, option) {
     display: none;
   }
   .composer-context-ring {
-    order: 6;
+    order: 8;
     grid-column: 3;
     justify-self: end;
   }
@@ -1981,7 +2157,14 @@ html.dark .dropdown-surface :is(select, option) {
     display: none;
   }
   .composer-thinking-button {
-    min-width: 60px;
-    padding-inline: 8px !important;
+    padding-inline: 6px !important;
+  }
+  .composer-toolbar {
+    gap: 4px !important;
+  }
+  /* Space is genuinely scarce below 420px: the context ring is redundant
+     with the top-bar stats button, drop it for name/button room. */
+  .composer-context-ring {
+    display: none;
   }
 }

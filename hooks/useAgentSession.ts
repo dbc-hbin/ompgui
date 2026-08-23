@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo, useReducer } from "react";
 import type {
   AgentMessage,
+  AssistantMessage,
   CustomMessage,
   ExtensionStatusItem,
   ExtensionUiRequest,
@@ -21,6 +22,7 @@ import { getPreferredToolPreset, setPreferredToolPreset } from "@/lib/tool-prese
 import { toast } from "@/components/ui/toast";
 import { expandWebSlashCommand } from "@/lib/web-slash-commands";
 import { createActiveGoal, parseActiveGoal, type ActiveGoal, type ActivePlan } from "@/lib/web-mode-state";
+import { deriveContextUsage, mergeContextUsage } from "@/lib/context-usage";
 import type { HostToolDefinition, HostUriSchemeDefinition, RpcAvailableSlashCommand, SessionStatsInfo, TodoPhase } from "@/lib/pi-types";
 import { isRecord } from "@/lib/type-guards";
 import {
@@ -624,7 +626,25 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [steeringMode, setSteeringMode] = useState<"all" | "one-at-a-time">("all");
   const [followUpMode, setFollowUpMode] = useState<"all" | "one-at-a-time">("all");
   const [retryInfo, setRetryInfo] = useState<{ attempt: number; maxAttempts: number; errorMessage?: string } | null>(null);
-  const [contextUsage, setContextUsage] = useState<{ percent: number | null; contextWindow: number; tokens: number | null } | null>(null);
+  const [rpcContextUsage, setContextUsageRaw] = useState<{ percent: number | null; contextWindow: number; tokens: number | null } | null>(null);
+  // Guard wrapper: omp's cached context breakdown resets while a turn is in
+  // flight, so a mid-run get_state can report tokens 0 for a session that
+  // already holds usage. mergeContextUsage discards those degenerate
+  // snapshots; snapshots from a different session than the active one are
+  // adopted as-is (a fresh session legitimately reports 0). A null snapshot
+  // (dead/idle wrapper) clears so the derived fallback below takes over.
+  const contextWindowRef = useRef(0);
+  const setContextUsage = useCallback((next: { percent: number | null; contextWindow: number; tokens: number | null } | null) => {
+    if (next && next.contextWindow > 0) contextWindowRef.current = next.contextWindow;
+    setContextUsageRaw((prev) => mergeContextUsage(prev, next));
+  }, []);
+  // Client-side fallback: once the RPC wrapper for a session dies the live
+  // polls stop and the ring would freeze on its last live value; derive the
+  // context size from the last plausible assistant usage instead.
+  const contextUsage = useMemo(
+    () => rpcContextUsage ?? deriveContextUsage(messages, contextWindowRef.current),
+    [rpcContextUsage, messages],
+  );
   const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
   const [forkingEntryId, setForkingEntryId] = useState<string | null>(null);
   const [currentModelOverride, setCurrentModelOverride] = useState<{ provider: string; modelId: string } | null>(null);
@@ -736,8 +756,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (msg.role === "toolResult") toolResults += 1;
       if (msg.role !== "assistant") continue;
       assistantMessages += 1;
-      const u = (msg as import("@/lib/types").AssistantMessage).usage;
-      toolCalls += (msg as import("@/lib/types").AssistantMessage).content.filter((c) => c.type === "toolCall").length;
+      const u = (msg as AssistantMessage).usage;
+      toolCalls += (msg as AssistantMessage).content.filter((c) => c.type === "toolCall").length;
       if (!u) continue;
       tokens.input += u.input ?? 0;
       tokens.output += u.output ?? 0;
@@ -764,6 +784,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   // Goal mode is web-hosted because omp's native /goal is TUI-only. Keep it
   // scoped to its session so switching conversations never leaks objectives.
+  // Session switch: drop the previous conversation's ring state. The
+  // degenerate-snapshot guard above keys on previous nonzero tokens, so a
+  // fresh session's legitimate 0% would otherwise be suppressed forever.
+  useEffect(() => {
+    setContextUsageRaw(null);
+    contextWindowRef.current = 0;
+  }, [session?.id]);
+
   useEffect(() => {
     const sid = session?.id;
     setActivePlan(null);
@@ -1029,8 +1057,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           if (liveState.extensionWidgets !== undefined) setExtensionWidgets(liveState.extensionWidgets ?? []);
           if (liveState.todoPhases !== undefined) setTodoPhases(liveState.todoPhases ?? []);
           if (liveState.queuedMessageCount === 0 && Date.now() - queueMutatedAtRef.current >= 5000) setQueuedMessages(EMPTY_QUEUE);
-        } else if (!agentState.running && Date.now() - queueMutatedAtRef.current >= 5000) {
-          setQueuedMessages(EMPTY_QUEUE);
+        } else {
+          // No live wrapper: the ring state the polls carried is stale from
+          // here on — clear so the message-derived fallback renders instead
+          // of a frozen last-live value.
+          setContextUsage(null);
+          if (!agentState.running && Date.now() - queueMutatedAtRef.current >= 5000) {
+            setQueuedMessages(EMPTY_QUEUE);
+          }
         }
         if (showLoading) setLoading(false);
         return agentState;
@@ -1045,7 +1079,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       if (showLoading && !messagesLoaded) setLoading(false);
     }
-  }, [refreshSubagentHistory, applyAuthoritativeModel, beginAuthoritativeModelSync]);
+  }, [refreshSubagentHistory, applyAuthoritativeModel, beginAuthoritativeModelSync, setContextUsage]);
 
   const loadContext = useCallback(async (sid: string, leafId: string | null) => {
     const seq = ++contextRequestSeqRef.current;
@@ -1674,12 +1708,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (state.systemPrompt !== undefined) setSystemPrompt(state.systemPrompt ?? null);
         if (state.extensionStatuses !== undefined) setExtensionStatuses(state.extensionStatuses ?? []);
         if (state.extensionWidgets !== undefined) setExtensionWidgets(state.extensionWidgets ?? []);
+      } else {
+        // Wrapper destroyed mid-view: drop the last live snapshot so the
+        // derived (message-usage) fallback shows instead of a frozen value.
+        setContextUsage(null);
       }
       await finishPromptWithoutStream(sid, runId);
     } catch {
       // Network still down — the next poll / visibility / online tick retries.
     }
-  }, [finishPromptWithoutStream, refreshSubagentRoster]);
+  }, [finishPromptWithoutStream, refreshSubagentRoster, setContextUsage]);
 
   // Recovery net for missed SSE events: while the agent is running, verify
   // against the server periodically and whenever the tab returns to the
@@ -2143,7 +2181,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         handleExtensionUiRequest(event as unknown as IncomingExtensionUiRequest);
         break;
     }
-  }, [addNotice, consumeQueuedMessage, finishPromptWithoutStream, handleExtensionUiRequest, handleHostToolCall, handleHostUriRequest, loadSession, mergeSubagents, onAgentEnd, reconcileAgentState, resetSubagentActivityState, applyAuthoritativeModel, beginAuthoritativeModelSync]);
+  }, [addNotice, consumeQueuedMessage, finishPromptWithoutStream, handleExtensionUiRequest, handleHostToolCall, handleHostUriRequest, loadSession, mergeSubagents, onAgentEnd, reconcileAgentState, resetSubagentActivityState, applyAuthoritativeModel, beginAuthoritativeModelSync, setContextUsage]);
   handleAgentEventRef.current = handleAgentEvent;
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]): Promise<boolean> => {
@@ -2732,8 +2770,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const piImages = toPiImages(images);
     try {
       await sendAgentCommand(sid, {
-        type: "steer",
+        // Use prompt's streaming path so omp applies magic-keyword notices
+        // before queueing the user message (direct steer bypasses that hook).
+        type: "prompt",
         message,
+        streamingBehavior: "steer",
         ...(piImages?.length ? { images: piImages } : {}),
       });
       // omp emits no queue snapshots; track the queued text locally until it
@@ -2779,8 +2820,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const piImages = toPiImages(images);
     try {
       await sendAgentCommand(sid, {
-        type: "follow_up",
+        // Keep queued follow-ups on omp's prompt path so magic-keyword
+        // notices are added before the user message enters the queue.
+        type: "prompt",
         message,
+        streamingBehavior: "followUp",
         ...(piImages?.length ? { images: piImages } : {}),
       });
       queueMutatedAtRef.current = Date.now();
@@ -2925,6 +2969,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               setQueuedMessages((prev) => (isEmptyQueue(prev) ? persisted : prev));
             }
           }
+        } else {
+          // No live wrapper on mount: derived fallback, not a frozen value.
+          setContextUsage(null);
         }
       });
     }

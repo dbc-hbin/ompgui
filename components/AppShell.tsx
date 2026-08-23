@@ -11,7 +11,7 @@ import { ChatWindow } from "./ChatWindow";
 import { TabBar, type Tab } from "./TabBar";
 import { BranchNavigator } from "./BranchNavigator";
 import { LanguageSwitcher } from "./LanguageSwitcher";
-import { Check, History, Menu, Moon, PanelLeft, Sun, Terminal, Wand2 } from "lucide-react";
+import { Check, History, Info, Menu, Moon, PanelLeft, PanelRight, Sun, Terminal, Wand2 } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
 import { formatCompactNumber, formatPercent } from "@/lib/format";
 import { translate, useI18n } from "@/lib/i18n";
@@ -1043,7 +1043,7 @@ export function AppShell() {
       {/* Center: chat */}
       <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         {/* Top bar: compact icon-led control bar */}
-        <div ref={topBarRef} className="shell-topbar" style={{ display: "flex", alignItems: "center", flexShrink: 0, borderBottom: "1px solid var(--border)", height: isMobile ? 44 : 36, background: "var(--bg-panel)" }}>
+        <div ref={topBarRef} className="shell-topbar">
         {/* Utility group: sidebar, theme, language */}
         <div style={{ display: "flex", alignItems: "center", gap: 4, height: "100%", paddingLeft: isMobile ? 4 : 8 }}>
           <button
@@ -1193,35 +1193,10 @@ export function AppShell() {
                 title={tooltip || t("appShell.sessionInfo")}
                 aria-label={t("appShell.sessionInfo")}
                 aria-pressed={activeTopPanel === "session"}
-                style={{
-                  marginLeft: "auto",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-                  paddingLeft: isMobile ? 0 : 12,
-                  // The toggle overlays this corner in the pre-merge layout.
-                  paddingRight: isMobile ? (rightPanelOpen ? 0 : 44) : rightPanelOpen ? 12 : 48,
-                  height: "100%",
-                  minWidth: isMobile ? 44 : 0,
-                  overflow: "hidden",
-                  background: activeTopPanel === "session" ? "var(--bg-selected)" : "none",
-                  border: "none",
-                  fontSize: 11, color: "var(--text-muted)",
-                  whiteSpace: "nowrap", cursor: "pointer",
-                  fontVariantNumeric: "tabular-nums",
-                  transition: "color var(--dur-fast) var(--ease-out-warm), background var(--dur-fast) var(--ease-out-warm)",
-                }}
-                onMouseEnter={(e) => {
-                  if (activeTopPanel !== "session") e.currentTarget.style.background = "var(--bg-hover)";
-                  e.currentTarget.style.color = "var(--text)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = activeTopPanel === "session" ? "var(--bg-selected)" : "none";
-                  e.currentTarget.style.color = activeTopPanel === "session" ? "var(--text)" : "var(--text-muted)";
-                }}
+                className="shell-stats-btn ui-focus-ring"
               >
                 {isMobile && (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
-                  </svg>
+                  <Info size={16} strokeWidth={1.8} aria-hidden="true" />
                 )}
                 {!isMobile && tok && tok.input > 0 && (
                   <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -1627,26 +1602,16 @@ export function AppShell() {
         </div>
       </div>
     </div>
-    {/* File panel toggle — pre-merge overlay placement avoids a layout column. */}
+    {/* File panel toggle — fixed so it stays reachable on mobile while the
+        panel occupies the full width and the top bar is off-layout. */}
     <button
       onClick={() => setRightPanelOpen((open) => !open)}
       title={rightPanelOpen ? t("appShell.hideFilePanel") : t("appShell.showFilePanel")}
       aria-label={rightPanelOpen ? t("appShell.hideFilePanel") : t("appShell.showFilePanel")}
-      style={{
-        position: "fixed", top: 0, right: 0, zIndex: 300,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        width: isMobile ? 44 : 36, height: isMobile ? 44 : 36, padding: 0,
-        background: "var(--bg-panel)", border: "none", borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
-        color: rightPanelOpen ? "var(--text)" : "var(--text-muted)",
-        cursor: "pointer",
-        transition: "color var(--dur-fast) var(--ease-out-warm)",
-      }}
-      onMouseEnter={(event) => { event.currentTarget.style.color = "var(--text)"; }}
-      onMouseLeave={(event) => { event.currentTarget.style.color = rightPanelOpen ? "var(--text)" : "var(--text-muted)"; }}
+      aria-pressed={rightPanelOpen}
+      className="shell-file-toggle ui-focus-ring"
     >
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
-      </svg>
+      <PanelRight size={16} strokeWidth={1.8} aria-hidden="true" />
     </button>
     {settingsTab && <SettingsConfig activeTab={settingsTab} advisorEnabled={advisorEnabled} onAdvisorChange={handleAdvisorChange} toolCallsDefaultCollapsed={toolCallsDefaultCollapsed} onToolCallsDefaultCollapsedChange={handleToolCallsDefaultCollapsedChange} cwd={activeCwd ?? selectedSession?.cwd ?? newSessionCwd} sessionId={selectedSession?.id ?? null} onModelsSaved={() => setModelsRefreshKey((k) => k + 1)} onPluginsReloaded={() => setSessionKey((k) => k + 1)} onOmpUpdateAvailabilityChange={setOmpUpdateAvailable} onSelectTab={setSettingsTab} onClose={() => setSettingsTab(null)} />}
     {usageOpen && <UsageConfig onClose={() => setUsageOpen(false)} />}

@@ -30,6 +30,7 @@ import { FolderIcon, getFileIcon } from "./FileIcons";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/lib/i18n";
 import { selectableThinkingLevels } from "@/lib/thinking-levels";
+import { clampContextPercent, formatRingPercent } from "@/lib/context-usage";
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -1384,7 +1385,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     if (lvl === "auto" || !thinkingLevelMap) return lvl;
     return thinkingLevelMap[lvl] ?? lvl;
   })();
-  const clampedContextPercent = Math.max(0, Math.min(100, contextUsage?.percent ?? 0));
+  const clampedContextPercent = clampContextPercent(contextUsage?.percent);
+  const contextPercentLabel = formatRingPercent(clampedContextPercent);
   const thinkingLevelOptions = React.useMemo(
     () => selectableThinkingLevels(availableThinkingLevels),
     [availableThinkingLevels],
@@ -2113,7 +2115,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                       <Sparkles size={13} strokeWidth={2} aria-hidden="true" />
                     </span>
                   )}
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                  <span className="composer-model-name" title={currentName ?? undefined}>
                     {currentName ?? (modelOptions.length > 0
                       ? t("chatInput.selectModel")
                       : showModelsLoading ? t("chatInput.loadingModels") : t("chatInput.noModels"))}
@@ -2207,7 +2209,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                               {isActive
                                 ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
                                 : <span style={{ width: 10, flexShrink: 0 }} />}
-                              {opt.name}
+                              <span className="model-option-name" title={opt.name} style={{ flex: 1, minWidth: 0 }}>{opt.name}</span>
                             </button>
                           );
                         })}
@@ -2351,10 +2353,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             {contextUsage?.percent != null && (
               <span
                 className="composer-context-ring"
-                title={`${Math.round(clampedContextPercent)}% · ${formatCompactNumber(contextUsage.tokens ?? 0, locale)} / ${formatCompactNumber(contextUsage.contextWindow, locale)}`}
-                style={{ position: "relative", width: 26, height: 26, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                title={`${formatRingPercent(clampedContextPercent)} · ${formatCompactNumber(contextUsage.tokens ?? 0, locale)} / ${formatCompactNumber(contextUsage.contextWindow, locale)}`}
               >
-                <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true" style={{ position: "absolute", inset: 0 }}>
+                <svg width="100%" height="100%" viewBox="0 0 26 26" aria-hidden="true" style={{ position: "absolute", inset: 0 }}>
                   <circle cx="13" cy="13" r="9.5" fill="none" stroke="var(--border)" strokeWidth="2.5" />
                   <circle
                     cx="13" cy="13" r="9.5" fill="none"
@@ -2364,10 +2365,46 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                     transform="rotate(-90 13 13)"
                   />
                 </svg>
-                <span style={{ fontSize: 8, fontWeight: 600, color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" }}>
-                  {Math.round(clampedContextPercent)}%
+                <span className="composer-context-ring-label">
+                  {contextPercentLabel}
                 </span>
               </span>
+            )}
+
+            {/* Queue-during-run actions: Steer injects into the current turn,
+                Follow-up schedules after it. These visible buttons were
+                dropped by the composer redesign (8a24697) leaving the
+                keyboard-only path — restored here, icon-only on mobile. */}
+            {isStreaming && onSteer && (
+              <button
+                type="button"
+                className="composer-queue-action composer-queue-action-steer ui-focus-ring"
+                onClick={() => sendQueued("steer")}
+                disabled={!value.trim() || !!attachedImages.length || !!attachedTextFiles.length}
+                title={(attachedImages.length || attachedTextFiles.length) ? t("chatInput.imagesCannotQueue") : t("chatInput.steerNowTitle")}
+                aria-label={t("chatInput.steer")}
+              >
+                <svg width="11" height="11" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+                  <path d="M5 1 L9 5 L5 9" /><line x1="1" y1="5" x2="9" y2="5" />
+                </svg>
+                <span className="composer-queue-action-label">{t("chatInput.steer")}</span>
+              </button>
+            )}
+            {isStreaming && onFollowUp && (
+              <button
+                type="button"
+                className="composer-queue-action composer-queue-action-followup ui-focus-ring"
+                onClick={() => sendQueued("followup")}
+                disabled={!value.trim() || !!attachedImages.length || !!attachedTextFiles.length}
+                title={(attachedImages.length || attachedTextFiles.length) ? t("chatInput.imagesCannotQueue") : t("chatInput.followUpTitle")}
+                aria-label={t("chatInput.followUp")}
+              >
+                <svg width="11" height="11" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+                  <line x1="5" y1="1" x2="5" y2="6" /><polyline points="2.5 3.5 5 1 7.5 3.5" />
+                  <line x1="2" y1="9" x2="8" y2="9" />
+                </svg>
+                <span className="composer-queue-action-label">{t("chatInput.followUp")}</span>
+              </button>
             )}
 
             {/* Primary action: Send (idle) / Stop (running) */}

@@ -11,8 +11,11 @@ export function isToolPreset(value: unknown): value is ToolPreset {
 }
 
 export const PRESET_NONE: string[] = [];
-export const PRESET_DEFAULT: string[] = ["read", "bash", "edit", "write"];
-export const PRESET_FULL: string[] = ["bash", "read", "edit", "write", "grep", "find", "ls"];
+// "task" is TUI-default-on and gates omp's orchestrate magic keyword (the
+// hidden orchestration notice is only appended when the task tool is
+// enabled); omitting it silently broke the keyword for every ompgui preset.
+export const PRESET_DEFAULT: string[] = ["read", "bash", "edit", "write", "task"];
+export const PRESET_FULL: string[] = ["bash", "read", "edit", "write", "grep", "find", "ls", "task"];
 
 const BUILTIN_TOOL_NAMES = new Set(PRESET_FULL);
 
