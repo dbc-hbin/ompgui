@@ -7,7 +7,6 @@ import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
 import { ToastProvider } from "./ui/toast";
 import { toast } from "./ui/toast";
-import { ChatWindow } from "./ChatWindow";
 import { TabBar, type Tab } from "./TabBar";
 import { BranchNavigator } from "./BranchNavigator";
 import { LanguageSwitcher } from "./LanguageSwitcher";
@@ -27,6 +26,14 @@ import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { SettingsTab } from "./SettingsTabs";
+
+function loadChatWindow() {
+  return import("./ChatWindow").then((module) => module.ChatWindow);
+}
+
+function preloadChatWindow() {
+  void loadChatWindow().catch(() => {});
+}
 
 // Loaded on demand: the config modals open on click and the file viewer only
 // renders once a file tab exists, so none of them belong in the first-load chunk.
@@ -102,6 +109,43 @@ function PanelLoadingFallback() {
   );
 }
 
+const ChatWindow = dynamic(loadChatWindow, {
+  loading: () => <PanelLoadingFallback />,
+});
+
+function scheduleAfterPaint(callback: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+
+  let cancelled = false;
+  const run = () => {
+    if (!cancelled) callback();
+  };
+
+  if (typeof window.requestIdleCallback === "function") {
+    const idleId = window.requestIdleCallback(run, { timeout: 2000 });
+    return () => {
+      cancelled = true;
+      if (typeof window.cancelIdleCallback === "function") window.cancelIdleCallback(idleId);
+    };
+  }
+
+  if (typeof window.requestAnimationFrame === "function") {
+    let frameId = window.requestAnimationFrame(() => {
+      frameId = window.requestAnimationFrame(run);
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frameId);
+    };
+  }
+
+  const timeoutId = window.setTimeout(run, 0);
+  return () => {
+    cancelled = true;
+    window.clearTimeout(timeoutId);
+  };
+}
+
 // Mirrors the config modals' backdrop so the click feels instant while the chunk loads.
 function ModalLoadingFallback() {
   const { t } = useI18n();
@@ -123,6 +167,13 @@ export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [initialNavigation] = useState(() => getInitialNavigation(searchParams));
+  const handleSessionIntent = useCallback(() => {
+    preloadChatWindow();
+  }, []);
+  useEffect(() => {
+    if (!initialNavigation.sessionId && !initialNavigation.requestedCwd) return;
+    preloadChatWindow();
+  }, [initialNavigation]);
   const { isDark, preference, toggleTheme } = useTheme();
   const { t, locale } = useI18n();
   const isMobile = useIsMobile();
@@ -202,14 +253,15 @@ export function AppShell() {
   }, []);
   useEffect(() => {
     const controller = new AbortController();
-    void fetch("/api/omp-update", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "check" }),
-      signal: controller.signal,
-    })
-      .then((response) => response.ok ? response.json() : null)
-      .then((data: { currentVersion?: string | null; availableVersion?: string | null; updateAvailable?: boolean; updateCommand?: string } | null) => {
+    const cancelSchedule = scheduleAfterPaint(() => {
+      void fetch("/api/omp-update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "check" }),
+        signal: controller.signal,
+      })
+        .then((response) => response.ok ? response.json() : null)
+        .then((data: { currentVersion?: string | null; availableVersion?: string | null; updateAvailable?: boolean; updateCommand?: string } | null) => {
         setOmpUpdateAvailable(Boolean(data?.updateAvailable));
         if (!data?.updateAvailable || !data.availableVersion) return;
         const cmd = data.updateCommand || "omp update";
@@ -236,14 +288,19 @@ export function AppShell() {
           </div>
         );
       })
-      .catch(() => {});
-    return () => controller.abort();
+        .catch(() => {});
+    });
+    return () => {
+      cancelSchedule();
+      controller.abort();
+    };
   }, []);
   useEffect(() => {
     const controller = new AbortController();
-    void fetch("/api/app-update", { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : null)
-      .then((data: { currentVersion?: string; availableVersion?: string | null; updateAvailable?: boolean; updateCommand?: string } | null) => {
+    const cancelSchedule = scheduleAfterPaint(() => {
+      void fetch("/api/app-update", { signal: controller.signal })
+        .then((response) => response.ok ? response.json() : null)
+        .then((data: { currentVersion?: string; availableVersion?: string | null; updateAvailable?: boolean; updateCommand?: string } | null) => {
         setAppUpdateAvailable(Boolean(data?.updateAvailable));
         if (!data?.updateAvailable || !data.availableVersion) return;
         const cmd = data.updateCommand || "npm install -g ompgui";
@@ -270,8 +327,12 @@ export function AppShell() {
           </div>
         );
       })
-      .catch(() => {});
-    return () => controller.abort();
+        .catch(() => {});
+    });
+    return () => {
+      cancelSchedule();
+      controller.abort();
+    };
   }, []);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
@@ -624,6 +685,7 @@ export function AppShell() {
   }, [initialNavigation]);
 
   const handleCwdChange = useCallback((cwd: string | null, projectRoot?: string | null) => {
+    if (cwd) handleSessionIntent();
     setActiveCwd(cwd);
     // Skip if cwd is null (initial mount) or during the initial URL restore.
     if (!cwd) return;
@@ -656,9 +718,10 @@ export function AppShell() {
     setSystemPromptLoading(false);
     setActiveTopPanel(null);
     router.replace("/", { scroll: false });
-  }, [router, selectedSession]);
+  }, [handleSessionIntent, router, selectedSession]);
 
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
+    handleSessionIntent();
     setNewSessionCwd(null);
     setSelectedSession(session);
     setSessionKey((k) => k + 1);
@@ -677,9 +740,10 @@ export function AppShell() {
     if (!isRestore) {
       router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
     }
-  }, [router, isMobile]);
+  }, [handleSessionIntent, router, isMobile]);
 
   const handleNewSession = useCallback((_sessionId: string, cwd: string) => {
+    handleSessionIntent();
     setSelectedSession(null);
     setNewSessionCwd(cwd);
     setSessionKey((k) => k + 1);
@@ -690,7 +754,7 @@ export function AppShell() {
     setActiveTopPanel(null);
     if (isMobile) setSidebarOpen(false);
     router.replace("/", { scroll: false });
-  }, [router, isMobile]);
+  }, [handleSessionIntent, router, isMobile]);
 
   // Global keyboard shortcuts (handles Esc, Ctrl+Alt+N etc.)
   useGlobalKeyboardShortcuts({
@@ -893,12 +957,14 @@ export function AppShell() {
         optimisticSession={selectedSession?.path === "" ? selectedSession : null}
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
+        onSessionIntent={handleSessionIntent}
         initialSessionId={initialSessionId}
         skipInitialProjectSelection={initialNavigation.requestedCwd !== null}
         onInitialRestoreDone={handleInitialRestoreDone}
         refreshKey={refreshKey}
         onSessionDeleted={handleSessionDeleted}
         selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
+        sidebarVisible={sidebarOpen && mobileSidebarReady}
         onCwdChange={handleCwdChange}
         onOpenFile={handleOpenFile}
         explorerRefreshKey={explorerRefreshKey}

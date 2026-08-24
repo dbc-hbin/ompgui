@@ -25,9 +25,12 @@ declare global {
 
 interface Props {
   selectedSessionId: string | null;
+  /** True when the sidebar is visible enough for hidden explorer work to be useful. */
+  sidebarVisible?: boolean;
   /** The active session can exist in memory before its JSONL file is flushed. */
   optimisticSession?: SessionInfo | null;
   onSelectSession: (session: SessionInfo, isRestore?: boolean) => void;
+  onSessionIntent?: () => void;
   onNewSession?: (sessionId: string, cwd: string) => void;
   initialSessionId?: string | null;
   skipInitialProjectSelection?: boolean;
@@ -509,7 +512,7 @@ function OmpGuiTitle() {
     </button>
   );
 }
-export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, explorerRefreshing, onExplorerRefreshDone, onAtMention, onAtMentions, onOpenSettings, onOpenUsage, updateAvailable }: Props) {
+export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectSession, onSessionIntent, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, sidebarVisible = true, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, explorerRefreshing, onExplorerRefreshDone, onAtMention, onAtMentions, onOpenSettings, onOpenUsage, updateAvailable }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -542,6 +545,13 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
   const wtToggleRef = useRef<HTMLButtonElement>(null);
   const wtNewInputRef = useRef<HTMLInputElement>(null);
   const [explorerOpen, setExplorerOpen] = useState(true);
+  // Keep the explorer mounted after its first visible opening so
+  // closing/reopening it preserves the tree, expanded paths, and upload state.
+  // The default-open UI remains intact once the sidebar itself is visible.
+  const explorerHasOpenedRef = useRef(false);
+  useEffect(() => {
+    if (sidebarVisible && explorerOpen) explorerHasOpenedRef.current = true;
+  }, [sidebarVisible, explorerOpen]);
   const [explorerKey, setExplorerKey] = useState(0);
   const [explorerUploadBusy, setExplorerUploadBusy] = useState(false);
   const [sessionRefreshDone, setSessionRefreshDone] = useState(false);
@@ -563,9 +573,58 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
   const sessionRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileExplorerRef = useRef<FileExplorerHandle>(null);
 
+  // Running SSE is established independently of the initial session-list
+  // request. Buffer refresh hints from that first snapshot (and the derived
+  // running-set effect) until the request settles instead of aborting it.
+  const initialSessionsLoadPendingRef = useRef(false);
+  const bufferedSessionRefreshRef = useRef(false);
+  const pendingRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const sessionsEtagRef = useRef<string | null>(null);
   const sessionsAbortRef = useRef<AbortController | null>(null);
+  // A monotonically increasing lifecycle token fences async work from an
+  // earlier Strict Mode setup as well as work that settles after unmount.
+  const sessionsLifecycleRef = useRef(0);
+  const sessionsDisposedRef = useRef(true);
+  const initialLoadDone = useRef(false);
+
+  useEffect(() => {
+    const lifecycle = sessionsLifecycleRef.current + 1;
+    sessionsLifecycleRef.current = lifecycle;
+    sessionsDisposedRef.current = false;
+
+    return () => {
+      if (sessionsLifecycleRef.current !== lifecycle) return;
+      sessionsDisposedRef.current = true;
+      initialLoadDone.current = false;
+      initialSessionsLoadPendingRef.current = false;
+      bufferedSessionRefreshRef.current = false;
+      if (pendingRefreshRef.current) {
+        clearTimeout(pendingRefreshRef.current);
+        pendingRefreshRef.current = null;
+      }
+      if (sessionRefreshTimerRef.current) {
+        clearTimeout(sessionRefreshTimerRef.current);
+        sessionRefreshTimerRef.current = null;
+      }
+      sessionsAbortRef.current?.abort();
+      sessionsAbortRef.current = null;
+    };
+  }, []);
+
   const loadSessions = useCallback(async (showLoading = false) => {
+    const lifecycle = sessionsLifecycleRef.current;
+    const isActive = () => !sessionsDisposedRef.current && sessionsLifecycleRef.current === lifecycle;
+    if (!isActive()) return;
+    if (showLoading) {
+      initialSessionsLoadPendingRef.current = true;
+    } else if (initialSessionsLoadPendingRef.current) {
+      // An explicit/non-buffered load intentionally supersedes the initial
+      // request; do not let its stale finally block flush a second refresh.
+      initialSessionsLoadPendingRef.current = false;
+      bufferedSessionRefreshRef.current = false;
+    }
+
     sessionsAbortRef.current?.abort();
     const controller = new AbortController();
     sessionsAbortRef.current = controller;
@@ -574,11 +633,13 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
       const headers: Record<string, string> = {};
       if (sessionsEtagRef.current) headers["If-None-Match"] = sessionsEtagRef.current;
       const res = await fetch("/api/sessions", { headers, signal: controller.signal });
+      if (!isActive()) return;
       if (res.status === 304) return;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const etag = res.headers.get("ETag");
       if (etag) sessionsEtagRef.current = etag;
       const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[] };
+      if (!isActive()) return;
       setAllSessions(data.sessions);
       // Treat the fetched running set as an initial fallback only. Once SSE is
       // live it owns this state, so a slow fetch can't revive a stale snapshot.
@@ -596,17 +657,39 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
       if (!showLoading) {
         setSessionRefreshDone(true);
         if (sessionRefreshTimerRef.current) clearTimeout(sessionRefreshTimerRef.current);
-        sessionRefreshTimerRef.current = setTimeout(() => setSessionRefreshDone(false), 2000);
+        sessionRefreshTimerRef.current = null;
+        const refreshTimer = setTimeout(() => {
+          if (sessionRefreshTimerRef.current === refreshTimer) sessionRefreshTimerRef.current = null;
+          if (!isActive()) return;
+          setSessionRefreshDone(false);
+        }, 2000);
+        sessionRefreshTimerRef.current = refreshTimer;
       }
     } catch (e) {
-      if ((e as Error)?.name === "AbortError") return;
+      if ((e as Error)?.name === "AbortError" || !isActive()) return;
       setError(translate("sessionSidebar.loadFailed", { detail: e instanceof Error ? e.message : String(e) }));
     } finally {
-      if (showLoading) setLoading(false);
+      if (!isActive()) return;
+      if (showLoading) {
+        setLoading(false);
+        if (sessionsAbortRef.current === controller) {
+          initialSessionsLoadPendingRef.current = false;
+          if (bufferedSessionRefreshRef.current) {
+            bufferedSessionRefreshRef.current = false;
+            if (!pendingRefreshRef.current) {
+              const refreshTimer = setTimeout(() => {
+                if (pendingRefreshRef.current === refreshTimer) pendingRefreshRef.current = null;
+                if (!isActive()) return;
+                void loadSessions(false);
+              }, 300);
+              pendingRefreshRef.current = refreshTimer;
+            }
+          }
+        }
+      }
     }
   }, []);
 
-  const initialLoadDone = useRef(false);
   useEffect(() => {
     const isFirst = !initialLoadDone.current;
     initialLoadDone.current = true;
@@ -647,22 +730,35 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
     saveUnreadSessionIds(unreadSessionIds);
   }, [unreadSessionIds]);
 
-  // Debounce refresh bursts (agent_start + session_info_update + file-appear signal can fire within 250ms)
-  const pendingRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Debounce refresh bursts (agent_start + session_info_update + file-appear signal can fire within 250ms).
+  // During the initial list request, retain only the fact that a refresh is
+  // needed; the request's finally block schedules one refresh after it settles.
   const scheduleRefresh = useCallback(() => {
+    const lifecycle = sessionsLifecycleRef.current;
+    const isActive = () => !sessionsDisposedRef.current && sessionsLifecycleRef.current === lifecycle;
+    if (!isActive()) return;
+    if (initialSessionsLoadPendingRef.current) {
+      bufferedSessionRefreshRef.current = true;
+      return;
+    }
     if (pendingRefreshRef.current) return;
-    pendingRefreshRef.current = setTimeout(() => {
-      pendingRefreshRef.current = null;
+    const refreshTimer = setTimeout(() => {
+      if (pendingRefreshRef.current === refreshTimer) pendingRefreshRef.current = null;
+      if (!isActive()) return;
       void loadSessions(false);
     }, 300);
+    pendingRefreshRef.current = refreshTimer;
   }, [loadSessions]);
 
   useEffect(() => {
     // Live running status and session-list invalidations arrive via SSE; the
     // sidebar never has to poll while an agent is working.
+    const lifecycle = sessionsLifecycleRef.current;
+    const isActive = () => !sessionsDisposedRef.current && sessionsLifecycleRef.current === lifecycle;
     const source = new EventSource("/api/agent/running/events");
 
     source.onmessage = (e) => {
+      if (!isActive()) return;
       try {
         const data = JSON.parse(e.data) as {
           type?: string;
@@ -681,7 +777,10 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
 
     // On error EventSource auto-reconnects; keep the last known state meanwhile.
     return () => {
-      if (pendingRefreshRef.current) clearTimeout(pendingRefreshRef.current);
+      if (pendingRefreshRef.current) {
+        clearTimeout(pendingRefreshRef.current);
+        pendingRefreshRef.current = null;
+      }
       source.close();
     };
   }, [loadSessions, scheduleRefresh]);
@@ -705,11 +804,11 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
     // appears on disk), reload so it replaces the optimistic placeholder
     // without waiting for another refresh trigger.
     if (completedInBackground.length > 0 || newlyRunning.length > 0) {
-      loadSessions(false);
+      scheduleRefresh();
     }
 
     previousRunningSessionIdsRef.current = runningSessionIds;
-  }, [runningSessionIds, selectedSessionId, loadSessions]);
+  }, [runningSessionIds, selectedSessionId, scheduleRefresh]);
 
   useEffect(() => {
     if (!selectedSessionId) return;
@@ -1372,6 +1471,14 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
     />
   ) : null;
 
+  const toggleExplorer = useCallback(() => {
+    setExplorerOpen((open) => {
+      const nextOpen = !open;
+      if (nextOpen) explorerHasOpenedRef.current = true;
+      return nextOpen;
+    });
+  }, []);
+
   return (
     <div className="sidebar-shell">
       {addProjectOpen && (
@@ -1554,6 +1661,7 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
                 onRemoveProject={handleRemoveProject}
                 removeBusy={removeProjectPath === project.path}
                 onSelectSession={handleSelectSessionFromList}
+                onSessionIntent={onSessionIntent}
                 onRenamed={loadSessions}
                 onSessionDeleted={handleSessionDeleted}
                 activeWorktreeSwitcher={isActive ? activeProjectSwitcher : null}
@@ -1575,7 +1683,7 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
         >
           <div className="sidebar-explorer-header">
             <button
-              onClick={() => setExplorerOpen((v) => !v)}
+              onClick={toggleExplorer}
               className="sidebar-explorer-toggle"
               aria-expanded={explorerOpen}
             >
@@ -1630,16 +1738,18 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
             style={{ flex: explorerOpen ? "1 1 auto" : "0 0 0px" }}
           >
             <div className="accordion-flow-inner sidebar-explorer-flow-inner">
-              <FileExplorer
-                ref={fileExplorerRef}
-                cwd={selectedCwd ?? selectedCwdProp!}
-                onOpenFile={onOpenFile ?? (() => {})}
-                refreshKey={explorerKey}
-                onAtMention={onAtMention}
-                onAtMentions={onAtMentions}
-                onUploadBusyChange={setExplorerUploadBusy}
-                onRefreshDone={onExplorerRefreshDone}
-              />
+              {(explorerHasOpenedRef.current || (sidebarVisible && explorerOpen)) && (
+                <FileExplorer
+                  ref={fileExplorerRef}
+                  cwd={selectedCwd ?? selectedCwdProp!}
+                  onOpenFile={onOpenFile ?? (() => {})}
+                  refreshKey={explorerKey}
+                  onAtMention={onAtMention}
+                  onAtMentions={onAtMentions}
+                  onUploadBusyChange={setExplorerUploadBusy}
+                  onRefreshDone={onExplorerRefreshDone}
+                />
+              )}
             </div>
           </div>
         </div>
@@ -1707,6 +1817,7 @@ interface ProjectRowProps {
   onRemoveProject: (path: string) => void;
   removeBusy: boolean;
   onSelectSession: (s: SessionInfo) => void;
+  onSessionIntent?: () => void;
   onRenamed?: () => void;
   onSessionDeleted?: (id: string) => void;
   activeWorktreeSwitcher?: ReactNode;
@@ -1738,6 +1849,7 @@ function ProjectRow({
   onRemoveProject,
   removeBusy,
   onSelectSession,
+  onSessionIntent,
   onRenamed,
   onSessionDeleted,
   activeWorktreeSwitcher,
@@ -1887,6 +1999,7 @@ function ProjectRow({
                   unreadSessionIds={unreadSessionIds}
                   relativeTimeNow={relativeTimeNow}
                   onSelectSession={onSelectSession}
+                  onSessionIntent={onSessionIntent}
                   onRenamed={onRenamed}
                   onSessionDeleted={onSessionDeleted}
                   depth={0}
@@ -2106,6 +2219,7 @@ const SessionTreeItem = memo(function SessionTreeItem({
   unreadSessionIds,
   relativeTimeNow,
   onSelectSession,
+  onSessionIntent,
   onRenamed,
   onSessionDeleted,
   depth,
@@ -2116,6 +2230,7 @@ const SessionTreeItem = memo(function SessionTreeItem({
   unreadSessionIds: Set<string>;
   relativeTimeNow: number;
   onSelectSession: (s: SessionInfo) => void;
+  onSessionIntent?: () => void;
   onRenamed?: () => void;
   onSessionDeleted?: (id: string) => void;
   depth: number;
@@ -2159,6 +2274,7 @@ const SessionTreeItem = memo(function SessionTreeItem({
           isUnread={isUnread}
           relativeTimeNow={relativeTimeNow}
           onClick={handleClick}
+          onSessionIntent={onSessionIntent}
           onRenamed={onRenamed}
           onDeleted={handleDeleted}
           depth={depth}
@@ -2178,6 +2294,7 @@ const SessionTreeItem = memo(function SessionTreeItem({
               unreadSessionIds={unreadSessionIds}
               relativeTimeNow={relativeTimeNow}
               onSelectSession={onSelectSession}
+              onSessionIntent={onSessionIntent}
               onRenamed={onRenamed}
               onSessionDeleted={onSessionDeleted}
               depth={depth + 1}
@@ -2205,6 +2322,7 @@ const SessionTreeItem = memo(function SessionTreeItem({
   }
   if (prev.relativeTimeNow !== next.relativeTimeNow) return false;
   if (prev.onSelectSession !== next.onSelectSession
+    || prev.onSessionIntent !== next.onSessionIntent
     || prev.onRenamed !== next.onRenamed
     || prev.onSessionDeleted !== next.onSessionDeleted) return false;
   return true;
@@ -2273,6 +2391,7 @@ const SessionItem = memo(function SessionItem({
   isRunning,
   isUnread,
   onClick,
+  onSessionIntent,
   onRenamed,
   onDeleted,
   depth = 0,
@@ -2286,6 +2405,7 @@ const SessionItem = memo(function SessionItem({
   isRunning?: boolean;
   isUnread?: boolean;
   onClick: () => void;
+  onSessionIntent?: () => void;
   onRenamed?: () => void;
   onDeleted?: (id: string) => void;
   depth?: number;
@@ -2310,6 +2430,9 @@ const SessionItem = memo(function SessionItem({
   const title = session.name || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
   const relativeTime = formatRelativeTime(session.modified, locale, relativeTimeNow);
   const confirming = confirmArchive || confirmDelete;
+  const handleSessionIntent = useCallback(() => {
+    onSessionIntent?.();
+  }, [onSessionIntent]);
   const startRename = useCallback((event: React.MouseEvent) => {
     event.stopPropagation();
     setRenameValue(session.name ?? "");
@@ -2370,9 +2493,14 @@ const SessionItem = memo(function SessionItem({
   return (
     <div
       onClick={confirmArchive || confirmDelete || renaming ? undefined : onClick}
+      onPointerDown={handleSessionIntent}
+      onTouchStart={handleSessionIntent}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onFocus={() => setFocusWithin(true)}
+      onFocus={() => {
+        handleSessionIntent();
+        setFocusWithin(true);
+      }}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusWithin(false);
       }}

@@ -928,8 +928,8 @@ export function scanSessionInfo(filePath: string, withStatus = true): OmpSession
 
 // Memo of per-file scan results keyed by (size, mtimeMs). The session list
 // cache is invalidated after every agent turn/rename/model change, so full
-// rescans are frequent; the memo turns each UNCHANGED file's prefix+suffix
-// window reads into a single stat. (path, size, mtimeMs) covers every session
+// rescans are frequent; the memo turns each UNCHANGED file's prefix
+// window read into a single stat. (path, size, mtimeMs) covers every session
 // mutation ompgui cares about. Stored on globalThis for hot-reload safety and
 // LRU-bounded (Map iteration order doubles as recency order).
 interface SessionScanCacheEntry {
@@ -966,7 +966,7 @@ function scanSessionInfoCached(filePath: string): OmpSessionInfo | undefined {
     return cached.info;
   }
   if (cached) cache.delete(filePath);
-  const info = scanSessionInfo(filePath, true);
+  const info = scanSessionInfo(filePath, false);
   // Failed scans are not negatively cached: a transient read error must not
   // hide a session until its next mtime bump.
   if (info) {
