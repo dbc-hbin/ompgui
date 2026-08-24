@@ -356,7 +356,6 @@ export function AppShell() {
   const [systemPromptLoading, setSystemPromptLoading] = useState(false);
   const systemPromptLoaderRef = useRef<(() => Promise<void>) | null>(null);
   const systemPromptLoadIdRef = useRef(0);
-  const systemBtnRef = useRef<HTMLButtonElement>(null);
   const sessionStatsBtnRef = useRef<HTMLButtonElement>(null);
 
   const handleSystemPromptChange = useCallback((prompt: string | null) => {
@@ -403,18 +402,16 @@ export function AppShell() {
   }, []);
 
   // Single active panel — only one dropdown open at a time
-  const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | "session" | null>(null);
+  const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "session" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
-  const toggleTopPanel = useCallback((panel: "branches" | "system" | "session") => {
+  const toggleTopPanel = useCallback((panel: "branches" | "session") => {
     if (isMobile) setSidebarOpen(false);
     setActiveTopPanel((cur) => cur === panel ? null : panel);
   }, [isMobile]);
 
-  const handleSystemPromptToggle = useCallback(() => {
-    const opening = activeTopPanel !== "system";
-    toggleTopPanel("system");
-    if (!opening || systemPromptLoading || systemPrompt !== null) return;
+  const handleLoadSystemPrompt = useCallback(() => {
+    if (systemPromptLoading) return;
 
     const load = systemPromptLoaderRef.current;
     if (!load) return;
@@ -425,7 +422,7 @@ export function AppShell() {
     }).finally(() => {
       if (systemPromptLoadIdRef.current === loadId) setSystemPromptLoading(false);
     });
-  }, [activeTopPanel, systemPrompt, systemPromptLoading, toggleTopPanel]);
+  }, [systemPromptLoading]);
 
   const openSessionStatsPanel = useCallback(() => {
     if (isMobile) setSidebarOpen(false);
@@ -503,7 +500,7 @@ export function AppShell() {
   }, []);
 
   useEffect(() => {
-    if (!activeTopPanel || !topBarRef.current) return;
+    if (activeTopPanel !== "session" || !topBarRef.current) return;
     const update = () => {
       const rect = topBarRef.current!.getBoundingClientRect();
       setTopPanelPos({ top: rect.bottom, left: rect.left, width: rect.width });
@@ -514,16 +511,14 @@ export function AppShell() {
     return () => ro.disconnect();
   }, [activeTopPanel]);
 
-  // Dismiss the system/session dropdowns on outside click or Escape. The
-  // Escape handler stops propagation so the global Esc (abort agent) does not
-  // fire while a panel is open; clicks on the trigger buttons themselves are
-  // ignored here — their onClick toggles the panel.
+  // Dismiss the session dropdown on outside click or Escape. The Escape
+  // handler stops propagation so the global Esc (abort agent) does not fire
+  // while the panel is open; the trigger itself is ignored here because its
+  // onClick toggles the panel.
   useEffect(() => {
-    // The branch panel manages its own outside-click and Escape dismissal.
-    if (!activeTopPanel || activeTopPanel === "branches") return;
+    if (activeTopPanel !== "session") return;
     const onPointerDown = (event: MouseEvent) => {
       if (event.target instanceof Element && event.target.closest("[data-top-panel]")) return;
-      if (systemBtnRef.current?.contains(event.target as Node)) return;
       if (sessionStatsBtnRef.current?.contains(event.target as Node)) return;
       setActiveTopPanel(null);
     };
@@ -786,6 +781,11 @@ export function AppShell() {
     router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
   }, [router, hydrateSelectedSession]);
 
+  const handleSessionRestored = useCallback((session: SessionInfo) => {
+    setRefreshKey((k) => k + 1);
+    handleSelectSession(session);
+  }, [handleSelectSession]);
+
   const handleAgentEnd = useCallback(() => {
     setRefreshKey((k) => k + 1);
     setExplorerRefreshKey((k) => k + 1);
@@ -963,6 +963,7 @@ export function AppShell() {
         onInitialRestoreDone={handleInitialRestoreDone}
         refreshKey={refreshKey}
         onSessionDeleted={handleSessionDeleted}
+        onSessionRestored={handleSessionRestored}
         selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
         sidebarVisible={sidebarOpen && mobileSidebarReady}
         onCwdChange={handleCwdChange}
@@ -1111,7 +1112,7 @@ export function AppShell() {
         {/* Top bar: compact icon-led control bar */}
         <div ref={topBarRef} className="shell-topbar">
         {/* Utility group: sidebar, theme, language */}
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", height: "100%", paddingLeft: isMobile ? "var(--space-2)" : "var(--space-4)" }}>
+        <div className="shell-toolbar-utility" style={{ paddingLeft: isMobile ? "var(--space-2)" : "var(--space-4)" }}>
           <button
             onClick={handleSidebarToggle}
             title={sidebarOpen ? t("appShell.hideSidebar") : t("appShell.showSidebar")}
@@ -1137,8 +1138,8 @@ export function AppShell() {
         {showChat && (
           <>
             <div className="shell-toolbar-divider" aria-hidden="true" />
-            {/* Session controls: history, generate title, branches, system */}
-            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", height: "100%" }}>
+            {/* Lower-priority session controls use only the remaining toolbar space. */}
+            <div className="shell-session-actions">
               <button
                 onClick={handleViewFullHistory}
                 disabled={!selectedSession}
@@ -1206,21 +1207,27 @@ export function AppShell() {
                 onToggle={() => toggleTopPanel("branches")}
                 hasSession
               />
-              <button
-                ref={systemBtnRef}
-                onClick={handleSystemPromptToggle}
-                title={t("appShell.system")}
-                aria-label={t("appShell.system")}
-                aria-pressed={activeTopPanel === "system"}
-                className="shell-toolbar-btn ui-focus-ring"
-              >
-                <Terminal size={16} strokeWidth={1.8} aria-hidden="true" style={{ color: systemPrompt ? "var(--accent)" : undefined }} />
-              </button>
+              {!isMobile && (
+                <button
+                  type="button"
+                  onClick={() => setSettingsTab("system")}
+                  title={t("appShell.system")}
+                  aria-label={t("appShell.system")}
+                  className="shell-toolbar-btn ui-focus-ring"
+                >
+                  <Terminal
+                    size={16}
+                    strokeWidth={1.8}
+                    aria-hidden="true"
+                    style={{ color: systemPrompt ? "var(--accent)" : undefined }}
+                  />
+                </button>
+              )}
             </div>
           </>
         )}
-          {/* Session stats — right-aligned in top bar */}
-          {showChat && (sessionStats || contextUsage) && (() => {
+          {/* Session stats/info — right-aligned in top bar */}
+          {showChat && (() => {
             const tok = sessionStats?.tokens;
             const c = sessionStats?.cost ?? 0;
             const costStr = c > 0 ? (c >= 0.01 ? `$${c.toFixed(2)}` : `<$0.01`) : null;
@@ -1233,6 +1240,13 @@ export function AppShell() {
               else if (pct !== null && pct > 70) ctxColor = "var(--status-warning)";
               ctxStr = pct !== null ? `${formatPercent(pct)} / ${formatCompactNumber(contextUsage.contextWindow)}` : `? / ${formatCompactNumber(contextUsage.contextWindow)}`;
             }
+            const hasMetrics = Boolean(
+              !isMobile && (
+                (tok && (tok.input > 0 || tok.output > 0 || tok.cacheRead > 0))
+                || costStr
+                || ctxStr
+              ),
+            );
 
             const tooltipParts: string[] = [];
             if (tok) {
@@ -1261,7 +1275,7 @@ export function AppShell() {
                 aria-pressed={activeTopPanel === "session"}
                 className="shell-stats-btn ui-focus-ring"
               >
-                {isMobile && (
+                {!hasMetrics && (
                   <Info size={16} strokeWidth={1.8} aria-hidden="true" />
                 )}
                 {!isMobile && tok && tok.input > 0 && (
@@ -1293,7 +1307,7 @@ export function AppShell() {
                     {costStr}
                   </span>
                 )}
-                {ctxStr && (
+                {!isMobile && ctxStr && (
                   <span style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", color: ctxColor, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M1 9 L1 5 Q1 1 5 1 Q9 1 9 5 L9 9" /><line x1="1" y1="9" x2="9" y2="9" />
@@ -1308,7 +1322,7 @@ export function AppShell() {
               branch panel renders inside BranchNavigator itself; never mount
               an empty fixed layer for it (it would sit over the top-bar
               region and swallow clicks). */}
-          {(activeTopPanel === "system" || activeTopPanel === "session") && topPanelPos && (
+          {activeTopPanel === "session" && topPanelPos && (
             <div data-top-panel className="dropdown-surface" style={{
               position: "fixed",
               top: topPanelPos.top,
@@ -1320,35 +1334,6 @@ export function AppShell() {
               overflow: "auto",
               zIndex: "var(--z-dropdown)",
             }}>
-              {activeTopPanel === "system" && (
-                <div style={{
-                  background: "var(--bg-panel)",
-                  borderBottom: "1px solid var(--border)",
-                }}>
-                  {systemPrompt ? (
-                    <div style={{
-                      maxHeight: "min(600px, 75vh)",
-                      overflowY: "auto",
-                      padding: "var(--space-5) var(--space-6)",
-                      color: "var(--text-muted)",
-                      fontSize: "var(--text-md)",
-                      lineHeight: 1.6,
-                      whiteSpace: "pre-wrap",
-                      fontFamily: "var(--font-mono)",
-                    }}>
-                      {systemPrompt}
-                    </div>
-                  ) : systemPrompt === "" ? (
-                    <div style={{ padding: "10px var(--space-6)", fontSize: "var(--text-md)", color: "var(--text-muted)", fontStyle: "italic" }}>
-                      {t("appShell.systemPromptEmpty")}
-                    </div>
-                  ) : (
-                    <div style={{ padding: "10px var(--space-6)", fontSize: "var(--text-md)", color: "var(--text-muted)", fontStyle: "italic" }}>
-                      {systemPromptLoading ? t("appShell.systemPromptLoading") : t("appShell.systemPromptLoadHint")}
-                    </div>
-                  )}
-                </div>
-              )}
               {activeTopPanel === "session" && (
                 <div className="session-info-popover" style={{
                   background: "var(--bg-panel)",
@@ -1679,7 +1664,7 @@ export function AppShell() {
     >
       <PanelRight size={16} strokeWidth={1.8} aria-hidden="true" />
     </button>
-    {settingsTab && <SettingsConfig activeTab={settingsTab} advisorEnabled={advisorEnabled} onAdvisorChange={handleAdvisorChange} toolCallsDefaultCollapsed={toolCallsDefaultCollapsed} onToolCallsDefaultCollapsedChange={handleToolCallsDefaultCollapsedChange} cwd={activeCwd ?? selectedSession?.cwd ?? newSessionCwd} sessionId={selectedSession?.id ?? null} onModelsSaved={() => setModelsRefreshKey((k) => k + 1)} onPluginsReloaded={() => setSessionKey((k) => k + 1)} onOmpUpdateAvailabilityChange={setOmpUpdateAvailable} onSelectTab={setSettingsTab} onClose={() => setSettingsTab(null)} />}
+    {settingsTab && <SettingsConfig activeTab={settingsTab} advisorEnabled={advisorEnabled} onAdvisorChange={handleAdvisorChange} toolCallsDefaultCollapsed={toolCallsDefaultCollapsed} onToolCallsDefaultCollapsedChange={handleToolCallsDefaultCollapsedChange} cwd={activeCwd ?? selectedSession?.cwd ?? newSessionCwd} sessionId={selectedSession?.id ?? null} systemPrompt={systemPrompt} systemPromptLoading={systemPromptLoading} onLoadSystemPrompt={handleLoadSystemPrompt} onModelsSaved={() => setModelsRefreshKey((k) => k + 1)} onPluginsReloaded={() => setSessionKey((k) => k + 1)} onOmpUpdateAvailabilityChange={setOmpUpdateAvailable} onSelectTab={setSettingsTab} onClose={() => setSettingsTab(null)} />}
     {usageOpen && <UsageConfig onClose={() => setUsageOpen(false)} />}
     </ToastProvider>
     </>

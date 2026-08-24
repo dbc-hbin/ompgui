@@ -439,6 +439,18 @@ export interface ManagedProject {
   addedAt?: string;
 }
 
+/** Bounded metadata returned for a compressed native OMP archive. */
+export interface ArchivedSessionInfo {
+  key: string;
+  id: string;
+  name?: string;
+  cwd?: string;
+  created: string;
+  modified: string;
+  size: number;
+  hasArtifacts: boolean;
+}
+
 export interface SessionContext {
   messages: AgentMessage[];
   entryIds: string[]; // parallel to messages — the session entry id for each message

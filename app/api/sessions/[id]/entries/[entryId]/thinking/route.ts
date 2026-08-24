@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionEntries } from "@/lib/session-reader";
+import { isRecord } from "@/lib/type-guards";
 import { apiErrorResponse, resolveSessionPathOr404 } from "@/lib/api-utils";
 
 export async function GET(
@@ -20,12 +21,15 @@ export async function GET(
 
     // Lenient JSONL parsing keeps omp's malformed-line tolerance.
     const entry = getSessionEntries(filePath).find((candidate) => candidate.id === entryId);
-    if (!entry || entry.type !== "message" || entry.message.role !== "assistant") {
+    const message = entry && entry.type === "message" && isRecord(entry.message)
+      ? entry.message
+      : null;
+    if (!message || message.role !== "assistant" || !Array.isArray(message.content)) {
       return NextResponse.json({ error: "Assistant message not found", code: "assistant_message_not_found" }, { status: 404 });
     }
 
-    const block = entry.message.content[blockIndex];
-    if (!block || block.type !== "thinking") {
+    const block = message.content[blockIndex];
+    if (!isRecord(block) || block.type !== "thinking" || typeof block.thinking !== "string") {
       return NextResponse.json({ error: "Thinking block not found", code: "thinking_block_not_found" }, { status: 404 });
     }
 

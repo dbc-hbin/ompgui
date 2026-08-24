@@ -7,13 +7,15 @@ import { translate, useI18n } from "@/lib/i18n";
 import { formatApiError } from "@/lib/i18n/api-error";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
+import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
 import { Tooltip } from "./ui/primitives";
 import { toast } from "./ui/toast";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { clearLastOpenSession, setLastOpenSession, workspaceKeyOf } from "@/lib/workspace-memory";
 import { groupSessionsByProject, projectActivityCounts, sortManagedProjects } from "@/lib/project-ordering";
 import { comparableProjectPath } from "@/lib/comparable-path";
-import { Check, ChevronDown, ChevronRight, FileUp, Folder, Gauge, GitBranch, MoreHorizontal, Plus, RefreshCw, Search, Settings2, SlidersHorizontal, Trash2, Upload } from "lucide-react";
+import { publishSessionChange } from "@/lib/session-change-bus";
+import { Archive, Check, ChevronDown, ChevronRight, FileUp, Folder, Gauge, GitBranch, MoreHorizontal, Plus, RefreshCw, Search, Settings2, SlidersHorizontal, Trash2, Upload } from "lucide-react";
 
 declare global {
   interface Window {
@@ -37,6 +39,7 @@ interface Props {
   onInitialRestoreDone?: () => void;
   refreshKey?: number;
   onSessionDeleted?: (sessionId: string) => void;
+  onSessionRestored?: (session: SessionInfo) => void;
   selectedCwd?: string | null;
   onCwdChange?: (cwd: string | null, projectRoot?: string | null) => void;
   onOpenFile?: (filePath: string, fileName: string) => void;
@@ -512,7 +515,7 @@ function OmpGuiTitle() {
     </button>
   );
 }
-export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectSession, onSessionIntent, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, sidebarVisible = true, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, explorerRefreshing, onExplorerRefreshDone, onAtMention, onAtMentions, onOpenSettings, onOpenUsage, updateAvailable }: Props) {
+export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectSession, onSessionIntent, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, onSessionRestored, selectedCwd: selectedCwdProp, sidebarVisible = true, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, explorerRefreshing, onExplorerRefreshDone, onAtMention, onAtMentions, onOpenSettings, onOpenUsage, updateAvailable }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -524,6 +527,7 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
   const [projectsError, setProjectsError] = useState<string | null>(null);
   // Add-project picker state.
   const [addProjectOpen, setAddProjectOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [addProjectBusy, setAddProjectBusy] = useState(false);
   const [addProjectError, setAddProjectError] = useState<string | null>(null);
   // Per-project expansion, persisted to localStorage (null = nothing stored).
@@ -762,13 +766,31 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
       try {
         const data = JSON.parse(e.data) as {
           type?: string;
-          runningSessionIds?: string[];
+          runningSessionIds?: unknown;
+          sessionIds?: unknown;
           refreshSessionList?: boolean;
         };
+        if (data.type === "sessions-changed") {
+          const sessionIds = Array.isArray(data.sessionIds)
+            ? data.sessionIds.filter((id): id is string => typeof id === "string")
+            : [];
+          if (data.refreshSessionList === true) {
+            publishSessionChange({
+              type: "sessions-changed",
+              sessionIds,
+              refreshSessionList: true,
+            });
+            scheduleRefresh();
+          }
+          return;
+        }
         if (data.type === "running") {
           sseAuthoritativeRef.current = true;
-          setRunningSessionIds(new Set(data.runningSessionIds ?? []));
-          if (data.refreshSessionList) scheduleRefresh();
+          const runningSessionIds = Array.isArray(data.runningSessionIds)
+            ? data.runningSessionIds.filter((id): id is string => typeof id === "string")
+            : [];
+          setRunningSessionIds(new Set(runningSessionIds));
+          if (data.refreshSessionList === true) scheduleRefresh();
         }
       } catch {
         // ignore malformed frames
@@ -1481,6 +1503,16 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
 
   return (
     <div className="sidebar-shell">
+      {archiveOpen && (
+        <ArchivedSessionsDialog
+          onClose={() => setArchiveOpen(false)}
+          onRestored={(session) => {
+            onSessionRestored?.(session);
+            void loadSessions(false);
+            void loadProjects();
+          }}
+        />
+      )}
       {addProjectOpen && (
         <DirectoryPicker
           busy={addProjectBusy}
@@ -1497,6 +1529,14 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
         <div className="sidebar-header-row">
           <OmpGuiTitle />
           <div className="sidebar-header-actions">
+            <Tooltip content={t("sessionSidebar.archivedSessions")} side="bottom">
+              <SidebarIconButton
+                label={t("sessionSidebar.archivedSessions")}
+                onClick={() => setArchiveOpen(true)}
+              >
+                <Archive size={14} strokeWidth={1.9} aria-hidden="true" />
+              </SidebarIconButton>
+            </Tooltip>
             <Tooltip content={t("sessionSidebar.importTitle")} side="bottom">
               <SidebarIconButton
                 label={t("sessionSidebar.import")}

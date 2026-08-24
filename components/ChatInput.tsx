@@ -10,7 +10,10 @@ import { toast } from "@/components/ui/toast";
 import { formatCompactNumber } from "@/lib/format";
 import { clearDraft, getDraft, setDraft, type ChatDraftFile, type ChatDraftImage } from "@/lib/draft-store";
 import { WEB_SLASH_COMMANDS, expandWebSlashCommand } from "@/lib/web-slash-commands";
-import { CHAT_COLUMN_MAX_WIDTH } from "@/lib/chat-layout";
+import {
+  CHAT_COLUMN_MAX_WIDTH,
+  CHAT_BASE_HORIZONTAL_PADDING,
+} from "@/lib/chat-layout";
 import {
   composeMessageWithTextAttachments,
   MAX_ATTACHED_TEXT_BYTES,
@@ -1472,8 +1475,10 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       style={{
         flexShrink: 0,
         background: "transparent",
-         padding: "0 16px calc(8px + env(safe-area-inset-bottom))",
-        paddingRight: isMobile ? 16 : 52, // desktop: 16px base + 36px for ChatMinimap alignment
+        paddingTop: 0,
+        paddingBottom: "calc(8px + env(safe-area-inset-bottom))",
+        paddingLeft: CHAT_BASE_HORIZONTAL_PADDING,
+        paddingRight: CHAT_BASE_HORIZONTAL_PADDING,
       }}
     >
       {/* Hidden file input */}

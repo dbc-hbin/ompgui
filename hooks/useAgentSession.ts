@@ -24,6 +24,7 @@ import {
   type EventStreamConnectionStatus,
 } from "@/lib/event-stream-connection";
 import { getToolNamesForPreset, type ToolPreset } from "@/lib/tool-presets";
+import { subscribeSessionChanges } from "@/lib/session-change-bus";
 import { getPreferredToolPreset, setPreferredToolPreset } from "@/lib/tool-preset-preference";
 import { toast } from "@/components/ui/toast";
 import { expandWebSlashCommand } from "@/lib/web-slash-commands";
@@ -1108,6 +1109,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (showLoading && !messagesLoaded) setLoading(false);
     }
   }, [refreshSubagentHistory, applyAuthoritativeModel, beginAuthoritativeModelSync, setContextUsage]);
+
+  // External omp/TUI writes arrive through the sidebar's session-change bus.
+  // Reload only when this selected session has no managed per-session stream;
+  // a live RPC EventSource already delivers authoritative transcript frames.
+  useEffect(() => {
+    return subscribeSessionChanges(({ sessionIds }) => {
+      const sid = sessionIdRef.current;
+      if (!sid || !sessionIds.includes(sid)) return;
+      const source = eventConnectionManagerRef.current?.currentSource(sid);
+      if (source && source.readyState !== EventSource.CLOSED) return;
+      void loadSession(sid);
+    });
+  }, [loadSession]);
 
   const loadContext = useCallback(async (sid: string, leafId: string | null) => {
     const seq = ++contextRequestSeqRef.current;

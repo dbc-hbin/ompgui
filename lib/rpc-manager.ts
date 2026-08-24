@@ -693,6 +693,11 @@ export class AgentSessionWrapper {
       resolveOutput = resolve;
       rejectOutput = reject;
     });
+    // sendCommand can fail before the command_output frame is observed. The
+    // caller must receive that command error, while the waiter is still
+    // rejected by the existing lifecycle cleanup; attach a sink so that
+    // rejection does not become an orphaned unhandled promise.
+    output.catch(() => {});
     const waiter = {
       resolve: resolveOutput,
       reject: rejectOutput,

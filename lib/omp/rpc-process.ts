@@ -116,8 +116,19 @@ export class RpcProcess {
     // the process dies before anyone awaited readiness.
     this.readyPromise.catch(() => {});
 
+    // A child can close either pipe before the process `exit` event (for
+    // example, during teardown). Node treats an unobserved stream `error` as
+    // uncaught, so consume those transport-level events here. stdin write
+    // callbacks still receive their errors through writeFrame/sendCommand and
+    // reject the corresponding command promise as before.
+    this.child.stdin.on("error", () => {});
+    this.child.stdout.on("error", () => {});
+
     const decoder = new RpcFrameDecoder();
     const rl = createInterface({ input: this.child.stdout });
+    // readline forwards input stream errors through its own EventEmitter;
+    // consume that second hop as well as the child stdout error above.
+    rl.on("error", () => {});
     rl.on("line", (line) => {
       const trimmed = line.trim();
       if (!trimmed) return;

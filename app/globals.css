@@ -1716,34 +1716,63 @@ html.dark .dropdown-surface :is(select, option) {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
+/* Toolbar groups keep the utility controls and the always-available session
+   info action outside the overflowable, lower-priority session actions. */
+.shell-toolbar-utility {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 100%;
+  flex: 0 0 auto;
+  min-width: 0;
+  order: 1;
+}
+.shell-session-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  order: 3;
+}
+.shell-session-actions > * {
+  flex: 0 0 auto;
+  min-width: 0;
+}
 /* Subtle group separator between toolbar control clusters */
 .shell-toolbar-divider {
   width: 1px;
   height: 18px;
-  margin: 0 8px;
+  margin: 0 var(--space-4);
   background: var(--border);
-  flex-shrink: 0;
+  flex: 0 0 auto;
+  order: 2;
 }
 /* Top bar: single height token, with the right end reserved for the
-   floating file-panel toggle so stats never slide underneath it. */
+   floating file-panel toggle so info never slides underneath it. */
 .shell-topbar {
   display: flex;
   align-items: center;
   flex-shrink: 0;
+  min-width: 0;
   height: var(--shell-topbar-height);
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
-  padding-right: var(--shell-topbar-height);
+  padding-right: calc(var(--shell-file-toggle-size) + var(--space-3));
 }
 /* Session info / stats button: desktop shows the token + cost chips, mobile
-   shows a single info icon. Same 40px touch target as other toolbar
-   buttons, same pressed hover semantics, no per-button sizing hacks. */
+   shows a single info icon. It never shrinks, so lower-priority actions
+   cannot push it beneath the fixed file-panel toggle. */
 .shell-stats-btn {
-  margin-left: auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  flex: 0 0 auto;
+  order: 4;
+  min-width: var(--control-touch-icon);
+  gap: var(--control-padding-inline);
   padding: 0 var(--control-padding-inline);
   height: 100%;
   overflow: hidden;
@@ -1801,16 +1830,26 @@ html.dark .dropdown-surface :is(select, option) {
     --composer-send-size: 34px;
     --composer-shell-padding: var(--space-5) var(--space-5) var(--space-2) calc(var(--space-5) + var(--space-1));
   }
-  .shell-toolbar-btn {
-    width: 40px;
-    height: 40px;
-  }
-  .shell-toolbar-divider {
-    margin: 0 4px;
+  .shell-toolbar-utility,
+  .shell-session-actions {
+    gap: var(--space-3);
   }
   .shell-stats-btn {
-    padding: 0 10px;
-    min-width: 40px;
+    order: 3;
+  }
+  .shell-session-actions {
+    order: 4;
+  }
+  .shell-toolbar-btn {
+    width: var(--control-touch-icon);
+    height: var(--control-touch-icon);
+  }
+  .shell-toolbar-divider {
+    margin: 0 var(--space-3);
+  }
+  .shell-stats-btn {
+    padding: 0 var(--space-4);
+    min-width: var(--control-touch-icon);
   }
 }
 

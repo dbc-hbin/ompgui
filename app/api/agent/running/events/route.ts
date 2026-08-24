@@ -1,10 +1,12 @@
+import { subscribeSessionFileChanges } from "@/lib/session-file-watcher";
 import { getRunningRpcSessionIds, subscribeRunningSessions } from "@/lib/rpc-manager";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/agent/running/events - SSE stream of the set of currently-running
-// session ids. Also carries refresh hints when a live session's file metadata
-// changes, so the sidebar can show a newly-started session immediately.
+// session ids plus external session-file changes. File changes use their own
+// sessions-changed frame so the selected-session hook can reload disk state
+// without creating or attaching an RPC child.
 export async function GET(req: Request) {
   // Hoisted so the stream's cancel() (half-open disconnects that never fire
   // the abort signal) can release the heartbeat and the subscriber.
@@ -29,6 +31,13 @@ export async function GET(req: Request) {
           // controller already closed
         }
       });
+      const unsubscribeSessionFiles = subscribeSessionFileChanges((change) => {
+        try {
+          encode(change);
+        } catch {
+          // controller already closed
+        }
+      });
 
       // Initial snapshot so the client renders the correct state immediately.
       // (A duplicate frame here is harmless: the client just sets the same set.)
@@ -46,6 +55,7 @@ export async function GET(req: Request) {
       const cleanup = () => {
         clearInterval(heartbeat);
         unsubscribe();
+        unsubscribeSessionFiles();
         try { controller.close(); } catch { /* already closed */ }
       };
       streamCleanup = cleanup;

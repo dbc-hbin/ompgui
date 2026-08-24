@@ -2,6 +2,8 @@ import { randomUUID } from "crypto";
 import type { Dirent } from "fs";
 import {
   closeSync,
+  createReadStream,
+  createWriteStream,
   existsSync,
   mkdtempSync,
   mkdirSync,
@@ -21,13 +23,15 @@ import {
 import * as fsRuntime from "fs";
 import * as path from "path";
 import { StringDecoder } from "string_decoder";
-import { gunzipSync, gzipSync } from "zlib";
+import { pipeline } from "stream/promises";
+import { createGunzip, gunzipSync, gzipSync } from "zlib";
 import { isRecord } from "../type-guards";
 
 // Keep user-session directory traversal out of Next's static NFT globbing.
 // These paths are resolved and authorized at request time by ompgui.
 const readDirectorySyncRuntime = Reflect.get(fsRuntime, "readdirSync") as typeof readdirSync;
 import type {
+  ArchivedSessionInfo,
   CompactionEntry,
   SessionEntry,
   SessionHeader,
@@ -509,28 +513,7 @@ export function loadSessionFile(filePath: string, options: LoadSessionOptions = 
   return { header, entries, titleSlot };
 }
 
-/**
- * Bounded, slot-aware header read: parses only the first physical line (plus
- * the second when line 1 is a title slot), capped at 64 KiB. The slot title is
- * folded into the returned header.
- */
-export function readSessionHeaderSync(filePath: string): SessionHeader | null {
-  const maxHeaderBytes = 64 * 1024 + SESSION_TITLE_SLOT_BYTES;
-  let fd: number;
-  try {
-    fd = openSync(filePath, "r");
-  } catch {
-    return null;
-  }
-  let head: string;
-  try {
-    const buffer = Buffer.allocUnsafe(maxHeaderBytes);
-    const bytesRead = readSync(fd, buffer, 0, buffer.length, 0);
-    head = buffer.subarray(0, bytesRead).toString("utf8");
-  } finally {
-    closeSync(fd);
-  }
-
+function parseSessionHeaderText(head: string, maxHeaderBytes: number): SessionHeader | null {
   let firstLineEnd = head.indexOf("\n");
   if (firstLineEnd === -1) {
     if (Buffer.byteLength(head, "utf8") >= maxHeaderBytes) return null;
@@ -566,6 +549,31 @@ export function readSessionHeaderSync(filePath: string): SessionHeader | null {
     delete header.titleSource;
   }
   return header;
+}
+
+/**
+ * Bounded, slot-aware header read: parses only the first physical line (plus
+ * the second when line 1 is a title slot), capped at 64 KiB. The slot title is
+ * folded into the returned header.
+ */
+export function readSessionHeaderSync(filePath: string): SessionHeader | null {
+  const maxHeaderBytes = 64 * 1024 + SESSION_TITLE_SLOT_BYTES;
+  let fd: number;
+  try {
+    fd = openSync(filePath, "r");
+  } catch {
+    return null;
+  }
+  let head: string;
+  try {
+    const buffer = Buffer.allocUnsafe(maxHeaderBytes);
+    const bytesRead = readSync(fd, buffer, 0, buffer.length, 0);
+    head = buffer.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    closeSync(fd);
+  }
+
+  return parseSessionHeaderText(head, maxHeaderBytes);
 }
 
 // ============================================================================
@@ -1261,6 +1269,275 @@ export function archiveSessionFileWithArtifacts(filePath: string, roots: Session
       try { unlinkSync(destination); } catch { /* preserve original error */ }
     }
     throw error;
+  } finally {
+    try { rmSync(tempDir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
+
+export interface RestoredArchivedSession {
+  path: string;
+  id: string;
+  header: SessionHeader;
+}
+
+export type SessionArchiveErrorCode =
+  | "invalid_key"
+  | "not_found"
+  | "invalid_archive"
+  | "destination_conflict"
+  | "invalid_session_header"
+  | "restore_failed";
+
+export class SessionArchiveError extends Error {
+  readonly code: SessionArchiveErrorCode;
+
+  constructor(code: SessionArchiveErrorCode, message: string) {
+    super(message);
+    this.name = "SessionArchiveError";
+    this.code = code;
+  }
+}
+
+const MAX_ARCHIVED_SESSION_ENTRIES = 500;
+const MAX_ARCHIVE_KEY_LENGTH = 1024;
+const MAX_ARCHIVE_HEADER_BYTES = 64 * 1024 + SESSION_TITLE_SLOT_BYTES;
+
+function archivePathExists(value: string): boolean {
+  try {
+    lstatSync(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function rejectSymlinkAncestors(root: string, target: string): void {
+  const relative = path.relative(root, target);
+  let current = root;
+  for (const segment of relative.split(path.sep)) {
+    if (!segment) continue;
+    current = path.join(current, segment);
+    try {
+      if (lstatSync(current).isSymbolicLink()) {
+        throw new SessionArchiveError("invalid_key", "Archive path contains a symbolic-link escape");
+      }
+    } catch (error) {
+      if (error instanceof SessionArchiveError) throw error;
+      break;
+    }
+  }
+}
+
+function resolveArchiveKey(key: string, archiveRoot: string): string {
+  if (
+    typeof key !== "string" ||
+    key.length === 0 ||
+    key.length > MAX_ARCHIVE_KEY_LENGTH ||
+    key.includes("\\") ||
+    key.includes("\0") ||
+    key.startsWith("/") ||
+    path.isAbsolute(key) ||
+    path.win32.isAbsolute(key) ||
+    /^[A-Za-z]:/.test(key) ||
+    !key.endsWith(".jsonl.gz")
+  ) {
+    throw new SessionArchiveError("invalid_key", "Invalid archived session key");
+  }
+  const segments = key.split("/");
+  if (segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")) {
+    throw new SessionArchiveError("invalid_key", "Invalid archived session key");
+  }
+  const resolved = path.resolve(archiveRoot, ...segments);
+  const relative = path.relative(archiveRoot, resolved);
+  if (!relative || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)) {
+    throw new SessionArchiveError("invalid_key", "Invalid archived session key");
+  }
+  rejectSymlinkAncestors(archiveRoot, resolved);
+  return resolved;
+}
+
+async function readGzipHead(filePath: string, maxBytes: number): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    const input = createReadStream(filePath);
+    const gunzip = createGunzip();
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let settled = false;
+
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      input.destroy();
+      gunzip.destroy();
+      reject(error);
+    };
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      input.destroy();
+      gunzip.destroy();
+      resolve(Buffer.concat(chunks, total));
+    };
+
+    input.on("error", fail);
+    gunzip.on("error", fail);
+    gunzip.on("data", (chunk: Buffer) => {
+      if (settled) return;
+      const remaining = maxBytes - total;
+      if (remaining <= 0) {
+        finish();
+        return;
+      }
+      const part = chunk.subarray(0, remaining);
+      chunks.push(part);
+      total += part.length;
+      if (total >= maxBytes) finish();
+    });
+    gunzip.on("end", finish);
+    input.pipe(gunzip);
+  });
+}
+
+function archiveFilesUnderRoot(archiveRoot: string): string[] {
+  const files: string[] = [];
+  let rootEntries: Dirent[];
+  try {
+    rootEntries = readDirectorySyncRuntime(archiveRoot, { withFileTypes: true });
+  } catch {
+    return files;
+  }
+  for (const entry of rootEntries) {
+    if (files.length >= MAX_ARCHIVED_SESSION_ENTRIES) break;
+    const child = path.join(archiveRoot, entry.name);
+    if (entry.isFile() && entry.name.endsWith(".jsonl.gz")) {
+      files.push(child);
+      continue;
+    }
+    if (!entry.isDirectory()) continue;
+    let projectEntries: Dirent[];
+    try {
+      projectEntries = readDirectorySyncRuntime(child, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const projectEntry of projectEntries) {
+      if (files.length >= MAX_ARCHIVED_SESSION_ENTRIES) break;
+      if (!projectEntry.isFile() || !projectEntry.name.endsWith(".jsonl.gz")) continue;
+      files.push(path.join(child, projectEntry.name));
+    }
+  }
+  return files;
+}
+
+function archiveDate(value: unknown, fallback: Date): string {
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  }
+  return fallback.toISOString();
+}
+
+/** List a bounded set of valid native OMP archives without materializing bodies. */
+export async function listArchivedSessionInfos(roots: SessionArchiveRoots = {}): Promise<ArchivedSessionInfo[]> {
+  const archiveRoot = path.resolve(roots.archiveRoot ?? getArchivedSessionsDir());
+  const files = archiveFilesUnderRoot(archiveRoot);
+  const infos = await Promise.all(files.map(async (filePath) => {
+    let fileStat: ReturnType<typeof statSync>;
+    try {
+      if (!lstatSync(filePath).isFile()) return undefined;
+      fileStat = statSync(filePath);
+      const head = await readGzipHead(filePath, MAX_ARCHIVE_HEADER_BYTES);
+      const header = parseSessionHeaderText(head.toString("utf8"), MAX_ARCHIVE_HEADER_BYTES);
+      if (!header || typeof header.id !== "string" || header.id.length === 0) return undefined;
+      const relative = path.relative(archiveRoot, filePath);
+      const artifactPath = filePath.slice(0, -".gz".length);
+      return {
+        key: relative.split(path.sep).join("/"),
+        id: header.id,
+        ...(typeof header.title === "string" && header.title ? { name: header.title } : {}),
+        ...(typeof header.cwd === "string" && header.cwd ? { cwd: header.cwd } : {}),
+        created: archiveDate(header.timestamp, fileStat.mtime),
+        modified: fileStat.mtime.toISOString(),
+        size: fileStat.size,
+        hasArtifacts: archivePathExists(artifactPath) && lstatSync(artifactPath).isDirectory(),
+      } satisfies ArchivedSessionInfo;
+    } catch {
+      return undefined;
+    }
+  }));
+  return infos
+    .filter((info): info is ArchivedSessionInfo => Boolean(info))
+    .sort((a, b) => b.modified.localeCompare(a.modified));
+}
+
+/**
+ * Restore a compressed native OMP archive and its sibling artifacts atomically
+ * enough that a failed restore leaves the archive in place and retryable.
+ */
+export async function restoreArchivedSessionWithArtifacts(
+  key: string,
+  roots: SessionArchiveRoots = {},
+): Promise<RestoredArchivedSession> {
+  const archiveRoot = path.resolve(roots.archiveRoot ?? getArchivedSessionsDir());
+  const sessionsRoot = path.resolve(roots.sessionsRoot ?? getSessionsDir());
+  const archivePath = resolveArchiveKey(key, archiveRoot);
+  let archiveStat: ReturnType<typeof lstatSync>;
+  try {
+    archiveStat = lstatSync(archivePath);
+  } catch {
+    throw new SessionArchiveError("not_found", "Archived session was not found");
+  }
+  if (!archiveStat.isFile()) {
+    throw new SessionArchiveError("not_found", "Archived session was not found");
+  }
+
+  const relativeArchive = path.relative(archiveRoot, archivePath);
+  const relativeSession = relativeArchive.slice(0, -".gz".length);
+  const destination = path.resolve(sessionsRoot, relativeSession);
+  rejectSymlinkAncestors(sessionsRoot, destination);
+  const sourceArtifacts = archivePath.slice(0, -".gz".length);
+  const destinationArtifacts = destination.slice(0, -".jsonl".length);
+  if (archivePathExists(destination) || archivePathExists(destinationArtifacts)) {
+    throw new SessionArchiveError("destination_conflict", "Active session destination already exists");
+  }
+  if (archivePathExists(sourceArtifacts) && !lstatSync(sourceArtifacts).isDirectory()) {
+    throw new SessionArchiveError("invalid_archive", "Archived session artifacts are not a directory");
+  }
+
+  mkdirSync(path.dirname(destination), { recursive: true });
+  const tempDir = mkdtempSync(path.join(path.dirname(destination), ".ompgui-restore-"));
+  const tempPath = path.join(tempDir, path.basename(destination));
+  let destinationCreated = false;
+  let artifactsMoved = false;
+  let header: SessionHeader | null = null;
+  try {
+    await pipeline(createReadStream(archivePath), createGunzip(), createWriteStream(tempPath, { flags: "wx" }));
+    header = readSessionHeaderSync(tempPath);
+    if (!header || typeof header.id !== "string" || header.id.length === 0) {
+      throw new SessionArchiveError("invalid_session_header", "Restored archive has an invalid session header");
+    }
+
+    renameSync(tempPath, destination);
+    destinationCreated = true;
+    if (archivePathExists(sourceArtifacts)) {
+      if (archivePathExists(destinationArtifacts)) {
+        throw new SessionArchiveError("destination_conflict", "Active session artifacts destination already exists");
+      }
+      renameSync(sourceArtifacts, destinationArtifacts);
+      artifactsMoved = true;
+    }
+    unlinkSync(archivePath);
+    return { path: destination, id: header.id, header };
+  } catch (error) {
+    if (artifactsMoved) {
+      try { renameSync(destinationArtifacts, sourceArtifacts); } catch { /* preserve original error */ }
+    }
+    if (destinationCreated) {
+      try { unlinkSync(destination); } catch { /* preserve original error */ }
+    }
+    if (error instanceof SessionArchiveError) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new SessionArchiveError("restore_failed", message);
   } finally {
     try { rmSync(tempDir, { recursive: true, force: true }); } catch { /* best effort */ }
   }

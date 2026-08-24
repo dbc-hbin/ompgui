@@ -303,6 +303,32 @@ export function getSessionEntries(filePath: string): SessionEntry[] {
   return loadSessionEntriesCached(filePath);
 }
 
+/**
+ * Session files are JSONL and may contain shape-valid records with a missing
+ * or malformed `message` payload (for example while another process is
+ * writing a line). Keep all readers on the same defensive boundary before
+ * inspecting a message role or any role-specific fields.
+ */
+function getMessageForEntry(entry: SessionEntry): AgentMessage | null {
+  if (entry.type !== "message" || !isRecord(entry.message) || typeof entry.message.role !== "string") {
+    return null;
+  }
+
+  const message = entry.message;
+  if (message.role === "assistant") {
+    // Legacy entries may keep assistant content as plain text, but optional
+    // provider/model fields must still be scalar strings before inference.
+    if (
+      (message.provider !== undefined && typeof message.provider !== "string") ||
+      (message.model !== undefined && typeof message.model !== "string") ||
+      (typeof message.content !== "string" && !Array.isArray(message.content))
+    ) {
+      return null;
+    }
+  }
+  return message as AgentMessage;
+}
+
 function parseTodoPhases(value: unknown): TodoPhase[] | null {
   if (!Array.isArray(value)) return null;
   const statuses = new Set(["pending", "in_progress", "completed", "blocked", "abandoned"]);
@@ -343,10 +369,11 @@ export function getTodoPhasesFromEntries(entries: SessionEntry[], leafId?: strin
       const phases = isRecord(current.data) ? parseTodoPhases(current.data.phases) : null;
       if (phases) return phases;
     }
-    if (current.type === "message" && current.message.role === "toolResult") {
-      const message = current.message as { role?: string; toolName?: string; isError?: boolean; details?: unknown };
-      if (message.toolName !== "todo" || message.isError) continue;
-      const phases = isRecord(message.details) ? parseTodoPhases(message.details.phases) : null;
+    const message = getMessageForEntry(current);
+    if (message?.role === "toolResult") {
+      const toolResult = message as { role: "toolResult"; toolName?: string; isError?: boolean; details?: unknown };
+      if (toolResult.toolName !== "todo" || toolResult.isError) continue;
+      const phases = isRecord(toolResult.details) ? parseTodoPhases(toolResult.details.phases) : null;
       if (phases) return phases;
     }
   }
@@ -413,9 +440,17 @@ export function buildSessionContext(
         models.default = `${entry.provider}/${entry.modelId}`;
         hasExplicitDefaultModel = true;
       }
-    } else if (entry.type === "message" && entry.message.role === "assistant") {
-      if (!hasExplicitDefaultModel && entry.message.provider && entry.message.model) {
-        models.default = `${entry.message.provider}/${entry.message.model}`;
+    } else if (entry.type === "message") {
+      const message = getMessageForEntry(entry);
+      if (
+        message?.role === "assistant" &&
+        !hasExplicitDefaultModel &&
+        typeof message.provider === "string" &&
+        message.provider.length > 0 &&
+        typeof message.model === "string" &&
+        message.model.length > 0
+      ) {
+        models.default = `${message.provider}/${message.model}`;
       }
     } else if (entry.type === "compaction") {
       compaction = entry;
@@ -656,7 +691,8 @@ export function entryToUiMessage(
 ): AgentMessage | null {
   switch (entry.type) {
     case "message": {
-      const raw = entry.message;
+      const raw = getMessageForEntry(entry);
+      if (!raw) return null;
       // omp-only roles are folded into displayable custom messages so the
       // existing role-keyed UI renders them without new components.
       if (raw.role === "developer") {

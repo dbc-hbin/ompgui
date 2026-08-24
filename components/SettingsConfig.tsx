@@ -90,6 +90,9 @@ type SettingIndexEntry = {
   section: string;
   label: string;
   description: string;
+  labelKey?: string;
+  descriptionKey?: string;
+  sectionKey?: string;
   scope?: "UI" | "Native OMP" | "Workspace";
 };
 
@@ -138,6 +141,8 @@ const SETTING_INDEX: SettingIndexEntry[] = [
   { tab: "mcp", section: "Extensions & Tools", label: "Load Project MCP Servers", description: "Allow project-root MCP configuration to be discovered.", scope: "Native OMP" },
   { tab: "mcp", section: "Extensions & Tools", label: "Render MCP Markdown", description: "Render non-JSON MCP results as Markdown in transcript.", scope: "Native OMP" },
   { tab: "mcp", section: "Extensions & Tools", label: "MCP Resource Updates", description: "Inject server resource updates into conversation.", scope: "Native OMP" },
+  // System & Updates — active session diagnostics
+  { tab: "system", section: "System & Updates", label: "Active session system prompt", description: "Inspect the system prompt used by the active session.", labelKey: "settingsConfig.sessionSystemPrompt", descriptionKey: "settingsConfig.sessionSystemPromptDescription", sectionKey: "settingsConfig.systemUpdates", scope: "Native OMP" },
 ];
 
 function SearchResultsList({ results, query, onSelect }: { results: SearchResult[]; query: string; onSelect: (result: SearchResult) => void }) {
@@ -266,7 +271,7 @@ function NativeSetting({ label, description, scope, compact = false, hideDescrip
   );
 }
 
-export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, toolCallsDefaultCollapsed, onToolCallsDefaultCollapsedChange, cwd, sessionId, onModelsSaved, onPluginsReloaded, onOmpUpdateAvailabilityChange, onSelectTab, onClose }: {
+export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, toolCallsDefaultCollapsed, onToolCallsDefaultCollapsedChange, cwd, sessionId, systemPrompt, systemPromptLoading, onLoadSystemPrompt, onModelsSaved, onPluginsReloaded, onOmpUpdateAvailabilityChange, onSelectTab, onClose }: {
   activeTab: SettingsTab;
   advisorEnabled: boolean;
   onAdvisorChange: (enabled: boolean) => void;
@@ -274,6 +279,9 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
   onToolCallsDefaultCollapsedChange: (collapsed: boolean) => void;
   cwd: string | null;
   sessionId: string | null;
+  systemPrompt: string | null;
+  systemPromptLoading: boolean;
+  onLoadSystemPrompt: () => void;
   onModelsSaved: () => void;
   onPluginsReloaded: () => void;
   onOmpUpdateAvailabilityChange: (available: boolean) => void;
@@ -445,13 +453,16 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
       }
     }
     for (const setting of SETTING_INDEX) {
-      const haystack = `${setting.label} ${setting.description} ${setting.section}`.toLowerCase();
+      const label = setting.labelKey ? t(setting.labelKey) : setting.label;
+      const description = setting.descriptionKey ? t(setting.descriptionKey) : setting.description;
+      const section = setting.sectionKey ? t(setting.sectionKey) : setting.section;
+      const haystack = `${label} ${description} ${section}`.toLowerCase();
       if (haystack.includes(trimmedQuery)) {
-        results.push({ id: slugify(setting.label), kind: "setting", tab: setting.tab, label: setting.label, description: setting.description, scope: setting.scope, section: setting.section });
+        results.push({ id: slugify(setting.label), kind: "setting", tab: setting.tab, label, description, scope: setting.scope, section });
       }
     }
     return results;
-  }, [trimmedQuery]);
+  }, [trimmedQuery, t]);
 
   const openSearchResult = useCallback((result: SearchResult) => {
     onSelectTab(result.tab);
@@ -1041,6 +1052,79 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                   <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{t("settingsConfig.systemUpdates")}</h3>
                   <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>{t("settingsConfig.systemUpdatesDescription")}</p>
                 </div>
+
+                {/* Active session system prompt */}
+                <section
+                  data-search-id={slugify("Active session system prompt")}
+                  style={{
+                    padding: "var(--space-5)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius-card)",
+                    background: "var(--bg-panel)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "var(--space-4)",
+                    ...(highlightId === slugify("Active session system prompt") ? { borderColor: "var(--accent)", boxShadow: "0 0 0 2px var(--accent)" } : {}),
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "var(--space-4)", flexWrap: "wrap" }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: "var(--text-md)", fontWeight: 650 }}>{t("settingsConfig.sessionSystemPrompt")}</div>
+                      <div style={{ marginTop: "var(--space-1)", color: "var(--text-muted)", fontSize: "var(--text-sm)", lineHeight: 1.45 }}>{t("settingsConfig.sessionSystemPromptDescription")}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onLoadSystemPrompt}
+                      disabled={!sessionId || systemPromptLoading}
+                      aria-label={t("settingsConfig.systemPromptActionAria")}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "var(--space-2)",
+                        flexShrink: 0,
+                        padding: "var(--space-3) var(--space-4)",
+                        border: "1px solid var(--border)",
+                        borderRadius: "var(--radius-control)",
+                        background: "var(--bg)",
+                        color: "var(--text)",
+                        cursor: !sessionId || systemPromptLoading ? "not-allowed" : "pointer",
+                        opacity: !sessionId || systemPromptLoading ? 0.65 : 1,
+                        fontSize: "var(--text-sm)",
+                      }}
+                    >
+                      <RefreshCw size={13} aria-hidden="true" className={systemPromptLoading ? "spin" : undefined} />
+                      {systemPromptLoading ? t("settingsConfig.systemPromptLoading") : systemPrompt === null ? t("settingsConfig.loadSystemPrompt") : t("settingsConfig.reloadSystemPrompt")}
+                    </button>
+                  </div>
+                  <div
+                    aria-live="polite"
+                    aria-busy={systemPromptLoading}
+                    style={{
+                      minHeight: "var(--control-height-lg)",
+                      maxHeight: "45dvh",
+                      overflowY: "auto",
+                      padding: "var(--space-4)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "var(--radius-control)",
+                      background: "var(--bg)",
+                      color: "var(--text-muted)",
+                      fontSize: "var(--text-sm)",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {systemPromptLoading ? (
+                      <div role="status">{t("settingsConfig.systemPromptLoading")}</div>
+                    ) : !sessionId ? (
+                      <div style={{ fontStyle: "italic" }}>{t("settingsConfig.systemPromptNoSession")}</div>
+                    ) : systemPrompt === null ? (
+                      <div style={{ fontStyle: "italic" }}>{t("settingsConfig.systemPromptUnavailable")}</div>
+                    ) : systemPrompt.length === 0 ? (
+                      <div style={{ fontStyle: "italic" }}>{t("settingsConfig.systemPromptEmpty")}</div>
+                    ) : (
+                      <pre aria-label={t("settingsConfig.sessionSystemPrompt")} style={{ margin: 0, color: "var(--text)", fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", lineHeight: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{systemPrompt}</pre>
+                    )}
+                  </div>
+                </section>
 
                 {/* ompgui app update card */}
                 <section style={{ padding: 14, border: "1px solid var(--border)", borderRadius: "var(--radius-card)", background: "var(--bg-panel)", display: "flex", flexDirection: "column", gap: 10 }}>

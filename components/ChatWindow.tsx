@@ -11,7 +11,11 @@ import { ExtensionDialog } from "./ExtensionDialog";
 import { SubagentTranscriptDialog } from "./SubagentTranscriptDialog";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ComposerPanels } from "./ComposerPanels";
-import { CHAT_COLUMN_MAX_WIDTH } from "@/lib/chat-layout";
+import {
+  CHAT_COLUMN_MAX_WIDTH,
+  CHAT_BASE_HORIZONTAL_PADDING,
+  CHAT_DESKTOP_MINIMAP_WIDTH,
+} from "@/lib/chat-layout";
 import { useAgentSession, type AgentPhase, type NoticeItem, type SubagentInfo } from "@/hooks/useAgentSession";
 import { useAudio } from "@/hooks/useAudio";
 import { useDragDrop } from "@/hooks/useDragDrop";
@@ -59,8 +63,6 @@ function phaseLabel(phase: AgentPhase): string {
   return translate("chatWindow.thinking");
 }
 
-const CHAT_MINIMAP_WIDTH = 20;
-const CHAT_COLUMN_PADDING = 16;
 // Trigger the next history page while the sentinel is still this far below
 // the top edge, so a normal upward scroll seamlessly continues into the newly
 // loaded messages. Triggering only at the very top made the load invisible:
@@ -879,9 +881,9 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
             position: "absolute",
             top: 12,
             left: 0,
-            right: isMobile ? 0 : CHAT_MINIMAP_WIDTH,
+            right: isMobile ? 0 : CHAT_DESKTOP_MINIMAP_WIDTH,
             zIndex: 40,
-            padding: `0 ${CHAT_COLUMN_PADDING}px`,
+            padding: `0 ${CHAT_BASE_HORIZONTAL_PADDING}px`,
             pointerEvents: "none",
           }}
         >
@@ -893,7 +895,12 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
             position indicator there, but on mobile there is no minimap and
             users need the scrollbar (Chrome's overlay scrollbar still shows). */}
         <div ref={scrollContainerRef} className={`flex-1 overflow-y-auto pt-6` + (isMobile ? "" : " [scrollbar-width:none]")}>
-          <div style={{ padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
+          <div
+            style={{
+              paddingLeft: CHAT_BASE_HORIZONTAL_PADDING,
+              paddingRight: CHAT_BASE_HORIZONTAL_PADDING,
+            }}
+          >
             <div style={{ maxWidth: CHAT_COLUMN_MAX_WIDTH, margin: "0 auto" }}>
               <ExtensionStatusBar statuses={extensionStatuses} />
               <ExtensionWidgets widgets={aboveEditorWidgets} />
@@ -1003,7 +1010,8 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
       <div className="relative" style={{ flexShrink: 0 }}>
         <div
           style={{
-            padding: `0 ${CHAT_COLUMN_PADDING}px`,
+            paddingLeft: CHAT_BASE_HORIZONTAL_PADDING,
+            paddingRight: CHAT_BASE_HORIZONTAL_PADDING,
           }}
         >
           <div style={{ maxWidth: CHAT_COLUMN_MAX_WIDTH, margin: "0 auto" }}>
