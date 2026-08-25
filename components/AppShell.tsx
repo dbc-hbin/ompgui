@@ -12,7 +12,7 @@ import { BranchNavigator } from "./BranchNavigator";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { Check, History, Info, Menu, Moon, PanelLeft, PanelRight, Sun, Terminal, Wand2 } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
-import { formatCompactNumber, formatPercent } from "@/lib/format";
+import { formatCompactNumber, formatPercent, getCacheHitRate } from "@/lib/format";
 import { translate, useI18n } from "@/lib/i18n";
 import { formatApiError } from "@/lib/i18n/api-error";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -341,6 +341,11 @@ export function AppShell() {
   const [branchTree, setBranchTree] = useState<SessionTreeNode[]>([]);
   const [branchActiveLeafId, setBranchActiveLeafId] = useState<string | null>(null);
   const branchLeafChangeFnRef = useRef<((leafId: string | null) => void) | null>(null);
+  const [runtimeReady, setRuntimeReady] = useState(false);
+
+  const handleRuntimeReadyChange = useCallback((ready: boolean) => {
+    setRuntimeReady(ready);
+  }, []);
 
   const handleBranchDataChange = useCallback((tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => {
     setBranchTree(tree);
@@ -349,8 +354,9 @@ export function AppShell() {
   }, []);
 
   const handleBranchLeafChange = useCallback((leafId: string | null) => {
+    if (selectedSession && !runtimeReady) return;
     branchLeafChangeFnRef.current?.(leafId);
-  }, []);
+  }, [selectedSession, runtimeReady]);
 
   const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
   const [systemPromptLoading, setSystemPromptLoading] = useState(false);
@@ -707,6 +713,7 @@ export function AppShell() {
       return prev;
     });
     setSessionKey((k) => k + 1);
+    setRuntimeReady(false);
     setBranchTree([]);
     setBranchActiveLeafId(null);
     setSystemPrompt(null);
@@ -720,6 +727,7 @@ export function AppShell() {
     setNewSessionCwd(null);
     setSelectedSession(session);
     setSessionKey((k) => k + 1);
+    setRuntimeReady(false);
     setSystemPrompt(null);
     setSystemPromptLoading(false);
     setInitialSessionRestored(true);
@@ -742,6 +750,7 @@ export function AppShell() {
     setSelectedSession(null);
     setNewSessionCwd(cwd);
     setSessionKey((k) => k + 1);
+    setRuntimeReady(false);
     setBranchTree([]);
     setBranchActiveLeafId(null);
     setSystemPrompt(null);
@@ -876,6 +885,7 @@ export function AppShell() {
       setSelectedSession(null);
       setNewSessionCwd(cwd ?? null);
       setSessionKey((k) => k + 1);
+      setRuntimeReady(false);
       setBranchTree([]);
       setBranchActiveLeafId(null);
       setSystemPrompt(null);
@@ -1205,7 +1215,9 @@ export function AppShell() {
                 containerRef={topBarRef}
                 open={activeTopPanel === "branches"}
                 onToggle={() => toggleTopPanel("branches")}
-                hasSession
+                hasSession={Boolean(selectedSession)}
+                runtimeReady={selectedSession === null || runtimeReady}
+                disabled={selectedSession !== null && !runtimeReady}
               />
               {!isMobile && (
                 <button
@@ -1362,7 +1374,9 @@ export function AppShell() {
                       [t("appShell.statTotal"), sessionStats.tokens.total.toLocaleString(locale)],
                     ];
                     const ctx = contextUsage ?? sessionStats.contextUsage;
+                    const cacheHitRate = getCacheHitRate(sessionStats.tokens.input, sessionStats.tokens.cacheRead);
                     const extraTokenRows = [
+                      ...(cacheHitRate !== null ? [[t("appShell.statCacheRate"), formatPercent(cacheHitRate)]] : []),
                       ...(sessionStats.cost > 0 ? [[t("appShell.statCost"), `$${sessionStats.cost.toFixed(4)}`]] : []),
                       ...(ctx?.contextWindow ? [[t("appShell.statContext"), `${ctx.percent !== null ? formatPercent(ctx.percent) : "?"} / ${formatCompactNumber(ctx.contextWindow)}`]] : []),
                     ];
@@ -1512,6 +1526,7 @@ export function AppShell() {
               onOpenSettingsTab={(tab) => setSettingsTab(tab)}
               onContextUsageChange={handleContextUsageChange}
               onOpenFile={handleOpenLinkedFile}
+              onRuntimeReadyChange={handleRuntimeReadyChange}
               advisorEnabled={advisorEnabled}
               toolCallsDefaultCollapsed={toolCallsDefaultCollapsed}
             />
@@ -1664,7 +1679,7 @@ export function AppShell() {
     >
       <PanelRight size={16} strokeWidth={1.8} aria-hidden="true" />
     </button>
-    {settingsTab && <SettingsConfig activeTab={settingsTab} advisorEnabled={advisorEnabled} onAdvisorChange={handleAdvisorChange} toolCallsDefaultCollapsed={toolCallsDefaultCollapsed} onToolCallsDefaultCollapsedChange={handleToolCallsDefaultCollapsedChange} cwd={activeCwd ?? selectedSession?.cwd ?? newSessionCwd} sessionId={selectedSession?.id ?? null} systemPrompt={systemPrompt} systemPromptLoading={systemPromptLoading} onLoadSystemPrompt={handleLoadSystemPrompt} onModelsSaved={() => setModelsRefreshKey((k) => k + 1)} onPluginsReloaded={() => setSessionKey((k) => k + 1)} onOmpUpdateAvailabilityChange={setOmpUpdateAvailable} onSelectTab={setSettingsTab} onClose={() => setSettingsTab(null)} />}
+    {settingsTab && <SettingsConfig activeTab={settingsTab} advisorEnabled={advisorEnabled} onAdvisorChange={handleAdvisorChange} toolCallsDefaultCollapsed={toolCallsDefaultCollapsed} onToolCallsDefaultCollapsedChange={handleToolCallsDefaultCollapsedChange} cwd={activeCwd ?? selectedSession?.cwd ?? newSessionCwd} sessionId={selectedSession?.id ?? null} systemPrompt={systemPrompt} systemPromptLoading={systemPromptLoading} onLoadSystemPrompt={handleLoadSystemPrompt} onModelsSaved={() => setModelsRefreshKey((k) => k + 1)} onPluginsReloaded={() => setSessionKey((k) => k + 1)} onOmpUpdateAvailabilityChange={setOmpUpdateAvailable} onSelectTab={setSettingsTab} onClose={() => setSettingsTab(null)} runtimeReady={selectedSession === null || runtimeReady} />}
     {usageOpen && <UsageConfig onClose={() => setUsageOpen(false)} />}
     </ToastProvider>
     </>

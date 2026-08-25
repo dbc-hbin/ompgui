@@ -475,11 +475,19 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   // Bumped whenever the user clears/sends the composer: in-flight FileReader
   // and file.text() reads must not re-append their results afterwards.
   const attachmentRevisionRef = useRef(0);
+  const runtimeReadyRef = useRef(runtimeReady);
+  runtimeReadyRef.current = runtimeReady;
   const pendingImageCountRef = useRef(0);
   const pendingTextFileCountRef = useRef(0);
   valueRef.current = value;
   attachedImagesRef.current = attachedImages;
   attachedTextFilesRef.current = attachedTextFiles;
+
+  useEffect(() => {
+    if (!runtimeReady) {
+      attachmentRevisionRef.current += 1;
+    }
+  }, [runtimeReady]);
 
   useImperativeHandle(ref, () => ({
     insertIfEmpty(text: string) {
@@ -536,11 +544,13 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       });
     },
     addFiles(files: File[]) {
+      if (!runtimeReadyRef.current) return;
       processFiles(files);
     },
   }));
 
   const processImageFiles = useCallback(async (files: File[]) => {
+    if (!runtimeReadyRef.current) return;
     const remaining = Math.max(
       0,
       MAX_ATTACHED_IMAGES - attachedImagesRef.current.length - pendingImageCountRef.current,
@@ -580,9 +590,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             })
         )
       );
-      // The composer was cleared/sent while the reads were in flight —
+      // The composer was cleared/sent, or runtime became not ready while the reads were in flight —
       // drop the batch instead of re-appending stale attachments.
-      if (attachmentRevisionRef.current !== revision) {
+      if (attachmentRevisionRef.current !== revision || !runtimeReadyRef.current) {
         newImages.forEach(revokeImagePreview);
         return;
       }
@@ -602,6 +612,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, []);
 
   const processTextFiles = useCallback(async (files: File[]) => {
+    if (!runtimeReadyRef.current) return;
     const remaining = Math.max(
       0,
       MAX_ATTACHED_TEXT_FILES - attachedTextFilesRef.current.length - pendingTextFileCountRef.current,
@@ -630,9 +641,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
           size: file.size,
         })),
       );
-      // The composer was cleared/sent while the reads were in flight —
+      // The composer was cleared/sent, or runtime became not ready while the reads were in flight —
       // drop the batch instead of re-appending stale attachments.
-      if (attachmentRevisionRef.current !== revision) return;
+      if (attachmentRevisionRef.current !== revision || !runtimeReadyRef.current) return;
       // Binary content cannot be inlined into the prompt: NUL bytes, or
       // U+FFFD replacement characters left by mis-decoded binary (e.g.
       // UTF-16 text read as UTF-8).
@@ -657,7 +668,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, []);
 
   const processFiles = useCallback((files: File[]) => {
-    if (!runtimeReady) return;
+    if (!runtimeReady || !runtimeReadyRef.current) return;
     if (isStreaming) {
       setAttachError("Attachments are disabled while the agent is running.");
       return;
@@ -669,6 +680,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, [isStreaming, processImageFiles, processTextFiles, runtimeReady]);
 
   const removeImage = useCallback((index: number) => {
+    if (!runtimeReadyRef.current) return;
     setAttachedImages((prev) => {
       const next = [...prev];
       const [removed] = next.splice(index, 1);
@@ -679,6 +691,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, []);
 
   const removeTextFile = useCallback((index: number) => {
+    if (!runtimeReadyRef.current) return;
     setAttachedTextFiles((prev) => prev.filter((_, fileIndex) => fileIndex !== index));
     setAttachError(null);
   }, []);

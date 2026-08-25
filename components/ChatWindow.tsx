@@ -49,6 +49,7 @@ interface Props {
   onOpenSettingsTab?: (tab: "agents") => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
   onOpenFile?: (filePath: string) => void;
+  onRuntimeReadyChange?: (ready: boolean) => void;
 }
 
 function phaseLabel(phase: AgentPhase): string {
@@ -415,7 +416,7 @@ const CommittedTranscript = memo(function CommittedTranscript({
   );
 });
 
-export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDefaultCollapsed = true, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onOpenSettingsTab, onContextUsageChange, onOpenFile }: Props) {
+export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDefaultCollapsed = true, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onOpenSettingsTab, onContextUsageChange, onOpenFile, onRuntimeReadyChange }: Props) {
   const { t, tn } = useI18n();
   const { playDoneSound, unlockAudio } = useAudio();
   const isMobile = useIsMobile();
@@ -462,6 +463,13 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
     onOpenFile,
   });
   const sessionBusy = agentRunning || bashRunning;
+
+  useEffect(() => {
+    onRuntimeReadyChange?.(runtimeReady);
+    return () => {
+      onRuntimeReadyChange?.(false);
+    };
+  }, [onRuntimeReadyChange, runtimeReady]);
 
   // Register the abort handler for the global Esc shortcut. The cleanup
   // matters: unmounting mid-run must not leave the module-global handler
@@ -861,6 +869,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
         <ExtensionDialog
           request={extensionDialog}
           onRespond={respondToExtensionUi}
+          runtimeReady={runtimeReady}
         />
       )}
 
@@ -876,40 +885,48 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
         <ExtensionCustomPanel
           request={extensionCustomUi}
           onInput={sendExtensionCustomInput}
+          runtimeReady={runtimeReady}
         />
       )}
 
       {isEmptyNew ? (
         <div className="relative flex flex-1 flex-col overflow-hidden">
-          <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8" style={{ minHeight: 0 }}>
-          <div className="w-full" style={{ maxWidth: CHAT_COLUMN_MAX_WIDTH }}>
-            <div
-               className="mb-3 empty-chat-brand"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "var(--space-5)",
-                marginLeft: "var(--space-4)",
-                marginRight: "var(--space-4)",
-                fontFamily: "var(--font-mono)",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0, flex: 1, lineHeight: 1.4, overflow: "hidden" }}>
-                <span style={{ fontSize: 18, fontWeight: 600, letterSpacing: "0.04em", color: "var(--accent)", flexShrink: 0, whiteSpace: "nowrap" }}>⌥</span>
-                <span style={{ fontSize: 18, color: "var(--text)", fontWeight: 600, letterSpacing: "0.02em", flexShrink: 0, whiteSpace: "nowrap" }}>ompgui</span>
+          <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto py-8" style={{ minHeight: 0 }}>
+            <div className="w-full">
+              <div
+                style={{
+                  paddingLeft: CHAT_BASE_HORIZONTAL_PADDING,
+                  paddingRight: CHAT_BASE_HORIZONTAL_PADDING,
+                }}
+              >
+                <div style={{ maxWidth: CHAT_COLUMN_MAX_WIDTH, margin: "0 auto" }}>
+                  <div
+                    className="mb-3 empty-chat-brand"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "var(--space-5)",
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0, flex: 1, lineHeight: 1.4, overflow: "hidden" }}>
+                      <span style={{ fontSize: 18, fontWeight: 600, letterSpacing: "0.04em", color: "var(--accent)", flexShrink: 0, whiteSpace: "nowrap" }}>⌥</span>
+                      <span style={{ fontSize: 18, color: "var(--text)", fontWeight: 600, letterSpacing: "0.02em", flexShrink: 0, whiteSpace: "nowrap" }}>ompgui</span>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "var(--space-1)", flexShrink: 0 }}>
+                      <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
+                        gui <span style={{ color: "var(--text)" }}>v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.4.1"}</span>
+                      </span>
+                      <OmpRuntimeVersion />
+                    </div>
+                  </div>
+                  <NoticeShelf notices={notices} align="right" />
+                </div>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "var(--space-1)", flexShrink: 0 }}>
-                <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
-                  gui <span style={{ color: "var(--text)" }}>v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.4.1"}</span>
-                </span>
-                <OmpRuntimeVersion />
-              </div>
+              {chatInputElement}
             </div>
-            <NoticeShelf notices={notices} align="right" />
-            {chatInputElement}
           </div>
-        </div>
         </div>
       ) : (
       <>
@@ -1210,9 +1227,11 @@ function renderAnsiLine(line: string, keyPrefix: string): ReactNode[] {
 function ExtensionCustomPanel({
   request,
   onInput,
+  runtimeReady = true,
 }: {
   request: ExtensionCustomRequest;
   onInput: (request: ExtensionCustomRequest, data: string) => void;
+  runtimeReady?: boolean;
 }) {
   const { t } = useI18n();
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -1220,8 +1239,10 @@ function ExtensionCustomPanel({
   const displayLines = normalizeCustomPanelLines(request.lines);
 
   useEffect(() => {
-    inputRef.current?.focus();
-  }, [request.id]);
+    if (runtimeReady) {
+      inputRef.current?.focus();
+    }
+  }, [request.id, runtimeReady]);
 
   return (
     <div
@@ -1240,6 +1261,7 @@ function ExtensionCustomPanel({
         role="dialog"
         aria-modal="true"
         onClick={(event) => {
+          if (!runtimeReady) return;
           if (!(event.target as HTMLElement).closest("button")) inputRef.current?.focus();
         }}
         style={{
@@ -1257,12 +1279,14 @@ function ExtensionCustomPanel({
         <textarea
           ref={inputRef}
           aria-label={t("chatWindow.extensionTerminalInput")}
+          aria-disabled={!runtimeReady}
+          disabled={!runtimeReady}
           autoCapitalize="off"
           autoComplete="off"
           autoCorrect="off"
           spellCheck={false}
           onKeyDown={(event) => {
-            if (composingRef.current || event.nativeEvent.isComposing) return;
+            if (!runtimeReady || composingRef.current || event.nativeEvent.isComposing) return;
             const data = toTerminalKeyData(event);
             if (!data) return;
             event.preventDefault();
@@ -1270,7 +1294,7 @@ function ExtensionCustomPanel({
             onInput(request, data);
           }}
           onInput={(event) => {
-            if (composingRef.current || event.nativeEvent.isComposing) return;
+            if (!runtimeReady || composingRef.current || event.nativeEvent.isComposing) return;
             const text = event.currentTarget.value;
             event.currentTarget.value = "";
             if (text) onInput(request, text);
@@ -1280,15 +1304,17 @@ function ExtensionCustomPanel({
           }}
           onCompositionEnd={(event) => {
             composingRef.current = false;
+            if (!runtimeReady) return;
             const input = event.currentTarget;
             queueMicrotask(() => {
               const text = input.value;
               input.value = "";
-              if (text) onInput(request, text);
+              if (text && runtimeReady) onInput(request, text);
             });
           }}
           onPaste={(event) => {
             event.preventDefault();
+            if (!runtimeReady) return;
             const text = event.clipboardData.getData("text");
             if (text) onInput(request, asBracketedPaste(text));
           }}
@@ -1305,14 +1331,20 @@ function ExtensionCustomPanel({
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--space-5)", padding: "10px var(--space-5)", borderBottom: "1px solid var(--border)" }}>
           <div style={{ color: "var(--text)", fontSize: "var(--text-base)", fontWeight: 650 }}>{t("chatWindow.extensionPanel")}</div>
           <button
-            onClick={() => onInput(request, "\x03")}
+            onClick={() => {
+              if (!runtimeReady) return;
+              onInput(request, "\x03");
+            }}
+            disabled={!runtimeReady}
+            aria-disabled={!runtimeReady}
             style={{
               padding: "5px 9px",
               borderRadius: 6,
               border: "1px solid var(--border)",
               background: "var(--bg-panel)",
               color: "var(--text-muted)",
-              cursor: "pointer",
+              cursor: !runtimeReady ? "not-allowed" : "pointer",
+              opacity: !runtimeReady ? 0.5 : undefined,
               fontSize: "var(--text-md)",
             }}
           >

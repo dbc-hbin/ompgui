@@ -14,3 +14,10 @@ export function formatCompactNumber(n: number, locale?: string): string {
 export function formatPercent(pct: number): string {
   return `${pct.toFixed(1)}%`;
 }
+
+/** Provider prompt-cache hit rate, matching `omp stats`:
+ * cache-read tokens divided by cache-read plus uncached input tokens. */
+export function getCacheHitRate(input: number, cacheRead: number): number | null {
+  const totalInput = input + cacheRead;
+  return totalInput > 0 ? (cacheRead / totalInput) * 100 : null;
+}

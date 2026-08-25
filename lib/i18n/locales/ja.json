@@ -87,6 +87,7 @@
   "appShell.skills": "スキル",
   "appShell.statAssistant": "アシスタント",
   "appShell.statCacheRead": "キャッシュ読み取り",
+  "appShell.statCacheRate": "キャッシュヒット率",
   "appShell.statCacheWrite": "キャッシュ書き込み",
   "appShell.statContext": "コンテキスト",
   "appShell.statCost": "コスト",

@@ -271,7 +271,7 @@ function NativeSetting({ label, description, scope, compact = false, hideDescrip
   );
 }
 
-export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, toolCallsDefaultCollapsed, onToolCallsDefaultCollapsedChange, cwd, sessionId, systemPrompt, systemPromptLoading, onLoadSystemPrompt, onModelsSaved, onPluginsReloaded, onOmpUpdateAvailabilityChange, onSelectTab, onClose }: {
+export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, toolCallsDefaultCollapsed, onToolCallsDefaultCollapsedChange, cwd, sessionId, systemPrompt, systemPromptLoading, onLoadSystemPrompt, onModelsSaved, onPluginsReloaded, onOmpUpdateAvailabilityChange, onSelectTab, onClose, runtimeReady }: {
   activeTab: SettingsTab;
   advisorEnabled: boolean;
   onAdvisorChange: (enabled: boolean) => void;
@@ -287,6 +287,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
   onOmpUpdateAvailabilityChange: (available: boolean) => void;
   onSelectTab: (tab: SettingsTab) => void;
   onClose: () => void;
+  runtimeReady?: boolean;
 }) {
   const isMobile = useIsMobile();
   const { t } = useI18n();
@@ -1041,7 +1042,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
             {/* PLUGINS SUB-PANEL CONTRACT MATCH */}
             {cwd && visitedTabs.has("plugins") && (
               <div role="tabpanel" id="settings-panel-plugins" aria-labelledby="settings-tab-plugins" style={{ display: activeTab === "plugins" ? "flex" : "none", height: "100%", minHeight: 0, flexDirection: "column" }}>
-                <PluginsConfig embedded cwd={cwd} sessionId={sessionId} onClose={onClose} onReloaded={onPluginsReloaded} />
+                <PluginsConfig embedded cwd={cwd} sessionId={sessionId} onClose={onClose} onReloaded={onPluginsReloaded} runtimeReady={runtimeReady} />
               </div>
             )}
 

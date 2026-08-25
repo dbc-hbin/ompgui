@@ -437,7 +437,7 @@ function AddPluginPanel({
   );
 }
 
-function PackageDetail({
+export function PackageDetail({
   pkg,
   cwd,
   busyKey,
@@ -446,6 +446,7 @@ function PackageDetail({
   sessionId,
   onAction,
   onReloadSession,
+  runtimeReady = true,
 }: {
   pkg: PluginPackageInfo;
   cwd: string;
@@ -455,6 +456,7 @@ function PackageDetail({
   sessionId: string | null;
   onAction: (action: PluginAction, pkg: PluginPackageInfo) => void;
   onReloadSession: () => void;
+  runtimeReady?: boolean;
 }) {
   const { t } = useI18n();
   const key = packageKey(pkg);
@@ -462,6 +464,7 @@ function PackageDetail({
   const reloadBusy = busyKey === "reload";
   const enabled = !pkg.disabled;
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const reloadDisabled = !sessionId || runtimeReady === false || reloadBusy || busy;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 680 }}>
@@ -523,9 +526,9 @@ function PackageDetail({
           </button>
           <button
             onClick={onReloadSession}
-            disabled={!sessionId || reloadBusy || busy}
-            style={buttonStyle(!sessionId || reloadBusy || busy)}
-            title={sessionId ? t("pluginsConfig.reloadCurrentSession") : t("pluginsConfig.openSessionToReload")}
+            disabled={reloadDisabled}
+            style={buttonStyle(reloadDisabled)}
+            title={!sessionId || runtimeReady === false ? t("pluginsConfig.openSessionToReload") : t("pluginsConfig.reloadCurrentSession")}
           >
             {reloadBusy ? t("pluginsConfig.reloading") : t("pluginsConfig.reloadSession")}
           </button>
@@ -615,6 +618,7 @@ export function PluginsConfig({
   onReloaded,
   onSelectTab,
   embedded = false,
+  runtimeReady = true,
 }: {
   cwd: string;
   sessionId: string | null;
@@ -622,6 +626,7 @@ export function PluginsConfig({
   onReloaded?: () => void;
   onSelectTab?: (tab: SettingsTab) => void;
   embedded?: boolean;
+  runtimeReady?: boolean;
 }) {
   const isMobile = useIsMobile();
   const { t, tn } = useI18n();
@@ -736,7 +741,7 @@ export function PluginsConfig({
   }, [cwd, installScope, installSource]);
 
   const reloadSession = useCallback(async () => {
-    if (!sessionId) return;
+    if (!sessionId || runtimeReady === false) return;
     setBusyKey("reload");
     setActionError(null);
     setActionMessage(null);
@@ -750,7 +755,7 @@ export function PluginsConfig({
     } finally {
       setBusyKey(null);
     }
-  }, [loadPlugins, onReloaded, sessionId]);
+  }, [loadPlugins, onReloaded, runtimeReady, sessionId]);
 
   const addBusy = busyKey?.startsWith("install:") ?? false;
 
@@ -995,6 +1000,7 @@ export function PluginsConfig({
                 sessionId={sessionId}
                 onAction={runAction}
                 onReloadSession={reloadSession}
+                runtimeReady={runtimeReady}
               />
             ) : (
               <div

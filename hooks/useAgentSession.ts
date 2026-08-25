@@ -30,6 +30,7 @@ import { toast } from "@/components/ui/toast";
 import { expandWebSlashCommand } from "@/lib/web-slash-commands";
 import { createActiveGoal, parseActiveGoal, type ActiveGoal, type ActivePlan } from "@/lib/web-mode-state";
 import { deriveContextUsage, mergeContextUsage, resolveContextWindow } from "@/lib/context-usage";
+import { matchesStateLoadFence } from "@/lib/session-load-fence";
 import type { HostToolDefinition, HostUriSchemeDefinition, RpcAvailableSlashCommand, SessionStatsInfo, TodoPhase } from "@/lib/pi-types";
 import { isRecord } from "@/lib/type-guards";
 import {
@@ -1086,14 +1087,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     sid: string,
     agentState: { running: boolean; state?: AgentStateResponse },
     token: number,
-    loadGeneration: number,
+    runtimeLoadGeneration: number,
+    sessionLoadGeneration: number,
     fenceRunId?: number,
   ): boolean => {
     if (
       !hookAliveRef.current
-      || sessionIdRef.current !== sid
-      || runtimeLoadGenerationRef.current !== loadGeneration
-      || (fenceRunId !== undefined && promptRunIdRef.current !== fenceRunId)
+      || !matchesStateLoadFence(
+        sessionIdRef.current,
+        sid,
+        sessionLoadGenerationRef.current,
+        sessionLoadGeneration,
+        runtimeLoadGenerationRef.current,
+        runtimeLoadGeneration,
+        promptRunIdRef.current,
+        fenceRunId,
+      )
     ) return false;
 
     const liveState = agentState.state;
@@ -1125,14 +1134,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setIsCompacting(false);
       if (!agentState.running && Date.now() - queueMutatedAtRef.current >= 5000) setQueuedMessages(EMPTY_QUEUE);
     }
-    updateRuntimeReadiness(sid, loadGeneration, { runtime: "ready" });
+    updateRuntimeReadiness(sid, runtimeLoadGeneration, { runtime: "ready" });
     setRuntimeError(null);
     return true;
   }, [applyAuthoritativeModel, setContextUsage, updateRuntimeReadiness]);
 
   const loadRuntimeStateForGeneration = useCallback(async (
     sid: string,
-    loadGeneration: number,
+    runtimeLoadGeneration: number,
+    sessionLoadGeneration: number,
     fenceRunId?: number,
   ): Promise<{ running: boolean; state?: AgentStateResponse } | null> => {
     const token = beginAuthoritativeModelSync();
@@ -1140,16 +1150,23 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const stateRes = await fetch(`/api/sessions/${encodeURIComponent(sid)}/state`);
       if (!stateRes.ok) throw new Error(`HTTP ${stateRes.status}`);
       const agentState = await stateRes.json() as { running: boolean; state?: AgentStateResponse };
-      return applyLoadedAgentState(sid, agentState, token, loadGeneration, fenceRunId) ? agentState : null;
+      return applyLoadedAgentState(sid, agentState, token, runtimeLoadGeneration, sessionLoadGeneration, fenceRunId) ? agentState : null;
     } catch (e) {
       if (
         hookAliveRef.current
-        && sessionIdRef.current === sid
-        && runtimeLoadGenerationRef.current === loadGeneration
-        && (fenceRunId === undefined || promptRunIdRef.current === fenceRunId)
+        && matchesStateLoadFence(
+          sessionIdRef.current,
+          sid,
+          sessionLoadGenerationRef.current,
+          sessionLoadGeneration,
+          runtimeLoadGenerationRef.current,
+          runtimeLoadGeneration,
+          promptRunIdRef.current,
+          fenceRunId,
+        )
       ) {
         const message = e instanceof Error ? e.message : String(e);
-        updateRuntimeReadiness(sid, loadGeneration, { runtime: "error" });
+        updateRuntimeReadiness(sid, runtimeLoadGeneration, { runtime: "error" });
         setRuntimeError(message);
       }
       console.error("Failed to load agent state:", e);
@@ -1169,7 +1186,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       try {
         const res = await historyResponsePromise;
         if (res.status === 404) {
-          if (!hookAliveRef.current || sessionIdRef.current !== sid || sessionLoadGenerationRef.current !== loadGeneration) return false;
+          if (
+            !hookAliveRef.current
+            || sessionIdRef.current !== sid
+            || sessionLoadGenerationRef.current !== loadGeneration
+            || (fenceRunId !== undefined && promptRunIdRef.current !== fenceRunId)
+          ) return false;
           setData(null);
           setActiveLeafId(null);
           setMessages([]);
@@ -1221,7 +1243,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     // Calling this immediately after fetch(history) starts the state request
     // in the same turn, while its result remains independently fenced.
     const statePromise = includeState
-      ? loadRuntimeStateForGeneration(sid, loadGeneration, fenceRunId)
+      ? loadRuntimeStateForGeneration(sid, loadGeneration, loadGeneration, fenceRunId)
       : Promise.resolve(null);
     if (!includeState) {
       await historyPromise;
@@ -1864,15 +1886,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const retryRuntimeState = useCallback(async () => {
     const sid = sessionIdRef.current;
     if (!sid || isNew) return null;
-    const loadGeneration = loadGenerationCounterRef.current + 1;
-    loadGenerationCounterRef.current = loadGeneration;
-    runtimeLoadGenerationRef.current = loadGeneration;
+    const runtimeLoadGeneration = loadGenerationCounterRef.current + 1;
+    loadGenerationCounterRef.current = runtimeLoadGeneration;
+    runtimeLoadGenerationRef.current = runtimeLoadGeneration;
+    const sessionLoadGeneration = sessionLoadGenerationRef.current;
     const next: SessionReadiness = { ...sessionReadinessRef.current, runtime: "loading" };
     sessionReadinessRef.current = next;
     runtimeReadyRef.current = false;
     setSessionReadiness(next);
     setRuntimeError(null);
-    const agentState = await loadRuntimeStateForGeneration(sid, loadGeneration);
+    const agentState = await loadRuntimeStateForGeneration(sid, runtimeLoadGeneration, sessionLoadGeneration);
     if (agentState) restoreRuntimeFromState(sid, agentState);
     return agentState;
   }, [isNew, loadRuntimeStateForGeneration, restoreRuntimeFromState]);

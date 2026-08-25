@@ -28,9 +28,11 @@ export type ExtensionDialogResponse =
 export function ExtensionDialog({
   request,
   onRespond,
+  runtimeReady = true,
 }: {
   request: ExtensionDialogRequest;
   onRespond: (request: ExtensionDialogRequest, response: ExtensionDialogResponse) => void;
+  runtimeReady?: boolean;
 }) {
   const { t } = useI18n();
   const [value, setValue] = useState(request.method === "editor" ? request.prefill ?? "" : "");
@@ -39,16 +41,20 @@ export function ExtensionDialog({
     setValue(request.method === "editor" ? request.prefill ?? "" : "");
   }, [request]);
 
-  const cancel = () => onRespond(request, { cancelled: true });
+  const cancel = () => {
+    if (!runtimeReady) return;
+    onRespond(request, { cancelled: true });
+  };
 
   // useModalDialog gives us: focus-in on open, focus-restore on close,
   // document-level Escape (top-of-stack), and Tab wrapping inside the panel.
   const panelRef = useModalDialog<HTMLDivElement>({
     onClose: cancel,
-    active: true,
+    active: runtimeReady,
   });
 
   const submitValue = () => {
+    if (!runtimeReady) return;
     if (request.method === "confirm") {
       onRespond(request, { confirmed: true });
     } else {
@@ -62,7 +68,7 @@ export function ExtensionDialog({
       onMouseDown={(event) => {
         // Close when the pointer goes down on the backdrop itself (not when
         // the press starts inside the panel and is dragged out).
-        if (event.target === event.currentTarget) cancel();
+        if (runtimeReady && event.target === event.currentTarget) cancel();
       }}
       style={{
         position: "absolute",
@@ -106,7 +112,12 @@ export function ExtensionDialog({
               {request.options.map((option) => (
                 <button
                   key={option}
-                  onClick={() => onRespond(request, { value: option })}
+                  disabled={!runtimeReady}
+                  aria-disabled={!runtimeReady}
+                  onClick={() => {
+                    if (!runtimeReady) return;
+                    onRespond(request, { value: option });
+                  }}
                   style={{
                     width: "100%",
                     padding: "9px 10px",
@@ -114,13 +125,14 @@ export function ExtensionDialog({
                     border: "1px solid var(--border)",
                     background: "var(--bg-panel)",
                     color: "var(--text)",
-                    cursor: "pointer",
+                    cursor: !runtimeReady ? "not-allowed" : "pointer",
+                    opacity: !runtimeReady ? 0.5 : undefined,
                     textAlign: "left",
                     fontSize: "var(--text-base)",
                     transition: "background-color var(--dur-fast) var(--ease-out-warm), border-color var(--dur-fast) var(--ease-out-warm)",
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "var(--bg-panel)"; }}
+                  onMouseEnter={(e) => { if (runtimeReady) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                  onMouseLeave={(e) => { if (runtimeReady) e.currentTarget.style.background = "var(--bg-panel)"; }}
                 >
                   {option}
                 </button>
@@ -129,12 +141,16 @@ export function ExtensionDialog({
           )}
           {request.method === "input" && (
             <input
-              autoFocus
+              autoFocus={runtimeReady}
+              disabled={!runtimeReady}
+              aria-disabled={!runtimeReady}
+              readOnly={!runtimeReady}
               aria-label={request.title || request.placeholder || "Input value"}
               value={value}
               placeholder={request.placeholder}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={(e) => {
+                if (!runtimeReady) return;
                 if (e.key === "Enter") submitValue();
               }}
               style={{
@@ -146,16 +162,22 @@ export function ExtensionDialog({
                 color: "var(--text)",
                 outline: "none",
                 fontSize: "var(--text-base)",
+                opacity: !runtimeReady ? 0.6 : undefined,
+                cursor: !runtimeReady ? "not-allowed" : undefined,
               }}
             />
           )}
           {request.method === "editor" && (
             <textarea
-              autoFocus
+              autoFocus={runtimeReady}
+              disabled={!runtimeReady}
+              aria-disabled={!runtimeReady}
+              readOnly={!runtimeReady}
               aria-label={request.title || "Input value"}
               value={value}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={(e) => {
+                if (!runtimeReady) return;
                 if ((e.metaKey || e.ctrlKey) && e.key === "Enter") submitValue();
               }}
               style={{
@@ -171,6 +193,8 @@ export function ExtensionDialog({
                 fontSize: "var(--text-base)",
                 lineHeight: 1.55,
                 fontFamily: "var(--font-mono)",
+                opacity: !runtimeReady ? 0.6 : undefined,
+                cursor: !runtimeReady ? "not-allowed" : undefined,
               }}
             />
           )}
@@ -179,51 +203,60 @@ export function ExtensionDialog({
         <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--space-4)", padding: "10px 14px", borderTop: "1px solid var(--border)", background: "var(--bg-panel)" }}>
           <button
             onClick={cancel}
+            disabled={!runtimeReady}
+            aria-disabled={!runtimeReady}
             style={{
               padding: "var(--space-3) 10px",
               borderRadius: 6,
               border: "1px solid var(--border)",
               background: "var(--bg)",
               color: "var(--text-muted)",
-              cursor: "pointer",
+              cursor: !runtimeReady ? "not-allowed" : "pointer",
+              opacity: !runtimeReady ? 0.5 : undefined,
               transition: "background-color var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm)",
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "var(--bg)"; e.currentTarget.style.color = "var(--text-muted)"; }}
+            onMouseEnter={(e) => { if (runtimeReady) { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; } }}
+            onMouseLeave={(e) => { if (runtimeReady) { e.currentTarget.style.background = "var(--bg)"; e.currentTarget.style.color = "var(--text-muted)"; } }}
           >
             {t("chatWindow.cancel")}
           </button>
           {request.method === "confirm" ? (
             <button
               onClick={submitValue}
+              disabled={!runtimeReady}
+              aria-disabled={!runtimeReady}
               style={{
                 padding: "var(--space-3) 10px",
                 borderRadius: 6,
                 border: "1px solid var(--accent)",
                 background: "var(--accent)",
                 color: "var(--on-accent)",
-                cursor: "pointer",
+                cursor: !runtimeReady ? "not-allowed" : "pointer",
+                opacity: !runtimeReady ? 0.5 : undefined,
                 transition: "background-color var(--dur-fast) var(--ease-out-warm)",
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--accent-hover)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "var(--accent)"; }}
+              onMouseEnter={(e) => { if (runtimeReady) e.currentTarget.style.background = "var(--accent-hover)"; }}
+              onMouseLeave={(e) => { if (runtimeReady) e.currentTarget.style.background = "var(--accent)"; }}
             >
               {t("chatWindow.confirm")}
             </button>
           ) : request.method !== "select" ? (
             <button
               onClick={submitValue}
+              disabled={!runtimeReady}
+              aria-disabled={!runtimeReady}
               style={{
                 padding: "var(--space-3) 10px",
                 borderRadius: 6,
                 border: "1px solid var(--accent)",
                 background: "var(--accent)",
                 color: "var(--on-accent)",
-                cursor: "pointer",
+                cursor: !runtimeReady ? "not-allowed" : "pointer",
+                opacity: !runtimeReady ? 0.5 : undefined,
                 transition: "background-color var(--dur-fast) var(--ease-out-warm)",
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--accent-hover)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "var(--accent)"; }}
+              onMouseEnter={(e) => { if (runtimeReady) e.currentTarget.style.background = "var(--accent-hover)"; }}
+              onMouseLeave={(e) => { if (runtimeReady) e.currentTarget.style.background = "var(--accent)"; }}
             >
               {t("chatWindow.submit")}
             </button>

@@ -306,3 +306,34 @@ test("renders active stop button when agent is streaming", () => {
   assert.match(html, /title="(Stop agent|chatInput\.stopAgent)"/);
   assert.match(html, /<span class="composer-primary-label">(Stop|chatInput\.stop)<\/span>/);
 });
+
+test("renders shared horizontal padding and column width at composer root", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(ChatInput, {
+      onSend: noop,
+      onAbort: noop,
+      isStreaming: false,
+    }),
+  );
+
+  assert.match(html, /padding-left:\s*16px/);
+  assert.match(html, /padding-right:\s*16px/);
+  assert.match(html, /max-width:\s*960px/);
+});
+
+test("disables attachment controls and model selection when runtimeReady is false", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(ChatInput, {
+      onSend: noop,
+      onAbort: noop,
+      onModelChange: noop,
+      isStreaming: false,
+      runtimeReady: false,
+      model: { provider: "test", modelId: "model" },
+      modelList: [{ provider: "test", modelId: "model", id: "model", name: "Test model" }],
+    }),
+  );
+
+  assert.match(html, /<input[^>]*type="file"[^>]*disabled/);
+  assert.match(html, /<button[^>]*class="[^"]*composer-model-button[^"]*"[^>]*disabled/);
+});

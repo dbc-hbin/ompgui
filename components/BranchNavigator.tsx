@@ -19,6 +19,9 @@ interface Props {
   onToggle?: () => void;
   /** Whether a session is currently active (used to show appropriate empty reason) */
   hasSession?: boolean;
+  /** Whether the runtime is ready for mutations/branch navigation */
+  runtimeReady?: boolean;
+  disabled?: boolean;
 }
 
 // Find the visible entry IDs on the path from root to activeLeafId.
@@ -99,9 +102,10 @@ interface TreeNodeProps {
   isLast: boolean;
   parentLines: boolean[]; // whether ancestor at each depth has more siblings after
   onSelect: (id: string) => void;
+  disabled?: boolean;
 }
 
-const TreeNodeView = memo(function TreeNodeView({ node, activePathIds, depth, isLast, parentLines, onSelect }: TreeNodeProps) {
+const TreeNodeView = memo(function TreeNodeView({ node, activePathIds, depth, isLast, parentLines, onSelect, disabled }: TreeNodeProps) {
   const { t } = useI18n();
   const { node: rep, skipped, branchPreview, labelEntry } = useMemo(() => compress(node), [node]);
   const repId = rep.entry.id;
@@ -118,16 +122,22 @@ const TreeNodeView = memo(function TreeNodeView({ node, activePathIds, depth, is
       {/* This node row */}
       <div
         role="button"
-        tabIndex={0}
+        tabIndex={disabled ? -1 : 0}
+        aria-disabled={disabled}
         aria-label={label}
         style={{
           display: "flex",
           alignItems: "center",
           height: 24,
-          cursor: "pointer",
+          cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.6 : undefined,
         }}
-        onClick={() => onSelect(rep.entry.id)}
+        onClick={() => {
+          if (disabled) return;
+          onSelect(rep.entry.id);
+        }}
         onKeyDown={(event) => {
+          if (disabled) return;
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
             onSelect(rep.entry.id);
@@ -234,6 +244,7 @@ const TreeNodeView = memo(function TreeNodeView({ node, activePathIds, depth, is
           isLast={idx === rep.children.length - 1}
           parentLines={[...parentLines, !isLast]}
           onSelect={onSelect}
+          disabled={disabled}
         />
       ))}
     </div>
@@ -244,6 +255,7 @@ const TreeNodeView = memo(function TreeNodeView({ node, activePathIds, depth, is
   // and stable for a given node so they're intentionally ignored.
   if (prev.node !== next.node) return false;
   if (prev.onSelect !== next.onSelect) return false;
+  if (prev.disabled !== next.disabled) return false;
   if (prev.activePathIds === next.activePathIds) return true;
   // node is unchanged here, so the compressed representative id is stable —
   // compute it once and check membership against both Set identities.
@@ -254,10 +266,11 @@ const TreeNodeView = memo(function TreeNodeView({ node, activePathIds, depth, is
   return true;
 });
 
-export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, containerRef, open: openProp, onToggle, hasSession }: Props) {
+export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, containerRef, open: openProp, onToggle, hasSession, runtimeReady, disabled }: Props) {
+  const isDisabled = disabled ?? (runtimeReady !== undefined ? !runtimeReady : false);
   const { t } = useI18n();
   const [openInternal, setOpenInternal] = useState(false);
-  const open = openProp !== undefined ? openProp : openInternal;
+  const open = !isDisabled && (openProp !== undefined ? openProp : openInternal);
   const btnRef = useRef<HTMLButtonElement>(null);
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
 
@@ -319,9 +332,10 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
   );
 
   const handleSelect = useCallback((id: string) => {
+    if (isDisabled) return;
     onLeafChange(id);
     if (openProp === undefined) setOpenInternal(false);
-  }, [onLeafChange, openProp]);
+  }, [isDisabled, onLeafChange, openProp]);
 
   const noBranchReason = useMemo(() => !hasSession
     ? t("branchNavigator.noActiveSession")
@@ -356,11 +370,19 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
       <div style={{ height: "100%", display: "flex", alignItems: "center" }}>
         <button
           ref={btnRef}
-          onClick={() => onToggle ? onToggle() : setOpenInternal((v) => !v)}
+          disabled={isDisabled}
+          aria-disabled={isDisabled}
+          onClick={() => {
+            if (isDisabled) return;
+            if (onToggle) onToggle();
+            else setOpenInternal((v) => !v);
+          }}
           className="shell-toolbar-btn ui-focus-ring"
           style={{
             background: open ? "var(--bg-selected)" : undefined,
             color: open ? "var(--text)" : undefined,
+            opacity: isDisabled ? 0.5 : undefined,
+            cursor: isDisabled ? "not-allowed" : undefined,
           }}
           title={t("branchNavigator.branches")}
           aria-label={t("branchNavigator.branches")}
@@ -390,6 +412,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
                     isLast={idx === topLevelBranches.length - 1}
                     parentLines={[]}
                     onSelect={handleSelect}
+                    disabled={isDisabled}
                   />
                 ))}
               </div>
@@ -408,7 +431,12 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
     <div style={{ borderBottom: "1px solid var(--border)", background: "var(--bg)", flexShrink: 0, position: "relative" }}>
       {/* Header toggle */}
       <button
-        onClick={() => setOpenInternal((v) => !v)}
+        disabled={isDisabled}
+        aria-disabled={isDisabled}
+        onClick={() => {
+          if (isDisabled) return;
+          setOpenInternal((v) => !v);
+        }}
         style={{
           display: "flex",
           alignItems: "center",
@@ -417,7 +445,8 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
           padding: "5px var(--space-5)",
           background: "none",
           border: "none",
-          cursor: "pointer",
+          cursor: isDisabled ? "not-allowed" : "pointer",
+          opacity: isDisabled ? 0.5 : undefined,
           color: "var(--text-muted)",
           fontSize: "var(--text-sm)",
           textAlign: "left",
@@ -451,6 +480,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
                   isLast={idx === topLevelBranches.length - 1}
                   parentLines={[]}
                   onSelect={handleSelect}
+                  disabled={isDisabled}
                 />
               ))}
             </div>
