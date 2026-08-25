@@ -53,6 +53,13 @@ import {
 // history module); keep the export path stable for components.
 export type { SubagentInfo } from "@/lib/subagent-types";
 
+export type SessionReadinessState = "idle" | "loading" | "ready" | "error";
+
+export interface SessionReadiness {
+  history: SessionReadinessState;
+  runtime: SessionReadinessState;
+}
+
 export interface SessionData {
   sessionId: string;
   filePath: string;
@@ -595,10 +602,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const reducedMotion = usePrefersReducedMotion();
   const isNew = session === null && newSessionCwd !== null;
+  const initialReadiness: SessionReadiness = isNew
+    ? { history: "ready", runtime: "ready" }
+    : { history: "idle", runtime: "idle" };
 
   const [data, setData] = useState<SessionData | null>(null);
   const [loading, setLoading] = useState(!isNew);
   const [error, setError] = useState<string | null>(null);
+  const [sessionReadiness, setSessionReadiness] = useState<SessionReadiness>(initialReadiness);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [activeLeafId, setActiveLeafId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [entryIds, setEntryIds] = useState<string[]>([]);
@@ -676,6 +688,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const reconnectActionsRef = useRef<((sid: string) => void) | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
+  // Every transcript/runtime load gets a new generation. Responses from an
+  // older load must not mutate this hook, even when the session id is the same
+  // (for example, two reloads started back-to-back).
+  const sessionLoadGenerationRef = useRef(0);
+  const runtimeLoadGenerationRef = useRef(0);
+  const loadGenerationCounterRef = useRef(0);
+  const sessionReadinessRef = useRef<SessionReadiness>(initialReadiness);
+  const runtimeReadyRef = useRef(isNew || initialReadiness.runtime === "ready");
+  sessionReadinessRef.current = sessionReadiness;
+  runtimeReadyRef.current = isNew || sessionReadiness.runtime === "ready";
   // Guards stale branch/leaf context responses: two rapid navigate clicks must
   // not let the older response overwrite the newer branch's messages.
   const contextRequestSeqRef = useRef(0);
@@ -724,6 +746,48 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // just-mounted empty state cannot wipe a stored queue before restore runs.
   const queuePersistDirtyRef = useRef(false);
   const eventCoalescerRef = useRef<MessageUpdateCoalescer | null>(null);
+
+  // New sessions can create their runtime as part of the first mutation. An
+  // existing session, however, is read-only until its state request succeeds.
+  const canMutateSession = useCallback((sid: string | null = sessionIdRef.current): boolean => {
+    if (isNew) return true;
+    return !!sid && sessionIdRef.current === sid && runtimeReadyRef.current;
+  }, [isNew]);
+
+  const beginSessionLoad = useCallback((sid: string, includeState: boolean): number => {
+    const generation = loadGenerationCounterRef.current + 1;
+    loadGenerationCounterRef.current = generation;
+    sessionLoadGenerationRef.current = generation;
+    if (includeState) runtimeLoadGenerationRef.current = generation;
+    const next: SessionReadiness = {
+      ...sessionReadinessRef.current,
+      history: "loading",
+      ...(includeState && !isNew ? { runtime: "loading" as const } : {}),
+    };
+    sessionReadinessRef.current = next;
+    runtimeReadyRef.current = isNew || next.runtime === "ready";
+    setSessionReadiness(next);
+    if (includeState && !isNew) setRuntimeError(null);
+    return generation;
+  }, [isNew]);
+
+  const updateSessionReadiness = useCallback((sid: string, generation: number, patch: Partial<SessionReadiness>): boolean => {
+    if (!hookAliveRef.current || sessionIdRef.current !== sid || sessionLoadGenerationRef.current !== generation) return false;
+    const next = { ...sessionReadinessRef.current, ...patch };
+    sessionReadinessRef.current = next;
+    runtimeReadyRef.current = isNew || next.runtime === "ready";
+    setSessionReadiness(next);
+    return true;
+  }, [isNew]);
+
+  const updateRuntimeReadiness = useCallback((sid: string, generation: number, patch: Partial<SessionReadiness>): boolean => {
+    if (!hookAliveRef.current || sessionIdRef.current !== sid || runtimeLoadGenerationRef.current !== generation) return false;
+    const next = { ...sessionReadinessRef.current, ...patch };
+    sessionReadinessRef.current = next;
+    runtimeReadyRef.current = isNew || next.runtime === "ready";
+    setSessionReadiness(next);
+    return true;
+  }, [isNew]);
   if (eventCoalescerRef.current === null) {
     eventCoalescerRef.current = createMessageUpdateCoalescer((event) => {
       handleAgentEventRef.current?.(event as AgentEvent);
@@ -769,6 +833,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const eventConnectionManager = eventConnectionManagerRef.current!;
 
   const setToolPresetState = opts.setToolPreset ?? setToolPreset;
+  const runtimeReady = isNew || sessionReadiness.runtime === "ready";
 
   const currentModel = currentModelOverride ?? data?.context.model ?? pendingModel ?? null;
   // For existing sessions, the live state's resolved model wins over the
@@ -881,7 +946,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   // Recover the ON-DISK roster from the parent session's task toolResults.
   // Survives page reloads and shows finished runs from previous sessions.
-  const refreshSubagentHistory = useCallback(async (sid: string) => {
+  const refreshSubagentHistory = useCallback(async (sid: string, loadGeneration?: number) => {
     const generation = subagentRosterGenerationRef.current;
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/subagents`);
@@ -889,7 +954,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const data = await res.json() as { subagents?: SubagentHistoryEntry[] };
       // Fence AFTER the awaited json: the session or roster generation may
       // have changed while the response was in flight.
-      if (sessionIdRef.current !== sid || subagentRosterGenerationRef.current !== generation) return;
+      if (
+        sessionIdRef.current !== sid
+        || subagentRosterGenerationRef.current !== generation
+        || (loadGeneration !== undefined && sessionLoadGenerationRef.current !== loadGeneration)
+      ) return;
       const entries = (data.subagents ?? []).map(historyEntryToSubagentInfo);
       mergeSubagents(entries);
     } catch {
@@ -901,6 +970,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // currently-running subagents, so this fills gaps after an SSE reconnect or
   // a missed lifecycle frame; it never reports finished runs.
   const refreshSubagentRoster = useCallback(async (sid: string) => {
+    if (!canMutateSession(sid)) return;
     const requestedAt = Date.now();
     const runId = promptRunIdRef.current;
     const generation = subagentRosterGenerationRef.current;
@@ -932,7 +1002,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch {
       // Best effort: subagent_lifecycle/progress frames are the primary source.
     }
-  }, [mergeSubagents, refreshSubagentHistory]);
+  }, [canMutateSession, mergeSubagents, refreshSubagentHistory]);
 
   // Clear per-run activity state at run end. MUST also cancel the pending
   // version-flush rAF: a queued subagent_event flush would otherwise repopulate
@@ -982,12 +1052,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // session file — the freshly resolved model (and clamped thinking level)
   // must reach the composer so the ladder/active level match reality.
   const refreshLiveModelState = useCallback(async (sid: string) => {
+    if (!canMutateSession(sid)) return;
+    const loadGeneration = runtimeLoadGenerationRef.current;
     const token = beginAuthoritativeModelSync();
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/state`);
       if (!res.ok) return;
       const agentState = await res.json() as { running: boolean; state?: AgentStateResponse };
-      if (sessionIdRef.current !== sid) return;
+      if (sessionIdRef.current !== sid || runtimeLoadGenerationRef.current !== loadGeneration) return;
       const applied = applyAuthoritativeModel(toThinkingModelMeta(agentState.state?.model), token);
       if (!applied) return; // stale snapshot — drop its thinking level too
       if (agentState.state?.thinkingLevel !== undefined) {
@@ -1008,107 +1080,159 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch {
       // Best effort; the next loadSession/reconcile re-syncs.
     }
-  }, [applyAuthoritativeModel, beginAuthoritativeModelSync]);
+  }, [applyAuthoritativeModel, beginAuthoritativeModelSync, canMutateSession]);
+
+  const applyLoadedAgentState = useCallback((
+    sid: string,
+    agentState: { running: boolean; state?: AgentStateResponse },
+    token: number,
+    loadGeneration: number,
+    fenceRunId?: number,
+  ): boolean => {
+    if (
+      !hookAliveRef.current
+      || sessionIdRef.current !== sid
+      || runtimeLoadGenerationRef.current !== loadGeneration
+      || (fenceRunId !== undefined && promptRunIdRef.current !== fenceRunId)
+    ) return false;
+
+    const liveState = agentState.state;
+    const modelApplied = applyAuthoritativeModel(toThinkingModelMeta(liveState?.model), token);
+    if (liveState) {
+      if (liveState.contextUsage !== undefined) setContextUsage(liveState.contextUsage ?? null);
+      if (liveState.systemPrompt !== undefined) setSystemPrompt(liveState.systemPrompt || null);
+      if (modelApplied && liveState.thinkingLevel !== undefined) setThinkingLevel(normalizeThinkingLevel(liveState.thinkingLevel));
+      if (liveState.fastModeEnabled !== undefined) setFastModeEnabled(liveState.fastModeEnabled);
+      setFastModeActive(liveState.fastModeActive);
+      if (liveState.autoRetryEnabled !== undefined) setAutoRetryEnabled(liveState.autoRetryEnabled);
+      if (liveState.interruptMode !== undefined) setInterruptMode(liveState.interruptMode);
+      if (liveState.isCompacting !== undefined) {
+        isCompactingRef.current = liveState.isCompacting;
+        setIsCompacting(liveState.isCompacting);
+      }
+      if (liveState.autoCompactionEnabled !== undefined) setAutoCompactionEnabled(liveState.autoCompactionEnabled);
+      if (liveState.steeringMode !== undefined) setSteeringMode(liveState.steeringMode);
+      if (liveState.followUpMode !== undefined) setFollowUpMode(liveState.followUpMode);
+      if (liveState.extensionStatuses !== undefined) setExtensionStatuses(liveState.extensionStatuses ?? []);
+      if (liveState.extensionWidgets !== undefined) setExtensionWidgets(liveState.extensionWidgets ?? []);
+      if (liveState.todoPhases !== undefined) setTodoPhases(liveState.todoPhases ?? []);
+      if (liveState.queuedMessageCount === 0 && Date.now() - queueMutatedAtRef.current >= 5000) setQueuedMessages(EMPTY_QUEUE);
+    } else {
+      // No live wrapper: the ring and compaction state must not freeze on the
+      // last live snapshot. The derived message usage remains authoritative.
+      setContextUsage(null);
+      isCompactingRef.current = false;
+      setIsCompacting(false);
+      if (!agentState.running && Date.now() - queueMutatedAtRef.current >= 5000) setQueuedMessages(EMPTY_QUEUE);
+    }
+    updateRuntimeReadiness(sid, loadGeneration, { runtime: "ready" });
+    setRuntimeError(null);
+    return true;
+  }, [applyAuthoritativeModel, setContextUsage, updateRuntimeReadiness]);
+
+  const loadRuntimeStateForGeneration = useCallback(async (
+    sid: string,
+    loadGeneration: number,
+    fenceRunId?: number,
+  ): Promise<{ running: boolean; state?: AgentStateResponse } | null> => {
+    const token = beginAuthoritativeModelSync();
+    try {
+      const stateRes = await fetch(`/api/sessions/${encodeURIComponent(sid)}/state`);
+      if (!stateRes.ok) throw new Error(`HTTP ${stateRes.status}`);
+      const agentState = await stateRes.json() as { running: boolean; state?: AgentStateResponse };
+      return applyLoadedAgentState(sid, agentState, token, loadGeneration, fenceRunId) ? agentState : null;
+    } catch (e) {
+      if (
+        hookAliveRef.current
+        && sessionIdRef.current === sid
+        && runtimeLoadGenerationRef.current === loadGeneration
+        && (fenceRunId === undefined || promptRunIdRef.current === fenceRunId)
+      ) {
+        const message = e instanceof Error ? e.message : String(e);
+        updateRuntimeReadiness(sid, loadGeneration, { runtime: "error" });
+        setRuntimeError(message);
+      }
+      console.error("Failed to load agent state:", e);
+      return null;
+    }
+  }, [applyLoadedAgentState, beginAuthoritativeModelSync, updateRuntimeReadiness]);
 
   const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false, fenceRunId?: number) => {
-    let messagesLoaded = false;
-    try {
-      if (showLoading) setLoading(true);
-      const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1" });
-      const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}?${params}`);
-      if (res.status === 404) {
-        if (showLoading) {
+    const loadGeneration = beginSessionLoad(sid, includeState);
+    if (showLoading) setLoading(true);
+    const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1" });
+    // Start both network requests before awaiting either one. History is
+    // applied independently so a slow runtime round-trip cannot delay the
+    // transcript paint.
+    const historyResponsePromise = fetch(`/api/sessions/${encodeURIComponent(sid)}?${params}`);
+    const historyPromise = (async (): Promise<boolean> => {
+      try {
+        const res = await historyResponsePromise;
+        if (res.status === 404) {
+          if (!hookAliveRef.current || sessionIdRef.current !== sid || sessionLoadGenerationRef.current !== loadGeneration) return false;
           setData(null);
           setActiveLeafId(null);
           setMessages([]);
+          setEntryIds([]);
           setError(null);
+          updateSessionReadiness(sid, loadGeneration, { history: "error" });
+          setLoading(false);
+          return false;
         }
-        return null;
-      }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json() as SessionData;
-      if (sessionIdRef.current !== sid) return null;
-      // A terminal reload for a finished run must not overwrite the messages
-      // of a run that started while this fetch was in flight (it would delete
-      // the new run's optimistic user bubble).
-      if (fenceRunId !== undefined && promptRunIdRef.current !== fenceRunId) return null;
-      setData(d);
-      setActiveLeafId(d.leafId);
-      setMessages(d.context.messages);
-      setEntryIds(d.context.entryIds ?? []);
-      setTodoPhases(d.context.todoPhases ?? []);
-      // Recover on-disk subagent history (task toolResults) for this session —
-      // populates the composer roster for finished/past runs.
-      void refreshSubagentHistory(sid);
-      setCurrentModelOverride(null);
-      setError(null);
-      if (d.context.thinkingLevel && d.context.thinkingLevel !== "off") {
-        setThinkingLevel(d.context.thinkingLevel as ThinkingLevelOption);
-      }
-
-      messagesLoaded = true;
-      if (!includeState) {
-        if (showLoading) setLoading(false);
-        return null;
-      }
-
-      try {
-        // Capture the sequence token BEFORE the fetch: a response snapshotted
-        // earlier must not mint a fresh token on arrival and clobber a newer
-        // sync that started while this request was in flight.
-        const token = beginAuthoritativeModelSync();
-        const stateRes = await fetch(`/api/sessions/${encodeURIComponent(sid)}/state`);
-        if (!stateRes.ok) throw new Error(`HTTP ${stateRes.status}`);
-        const agentState = await stateRes.json() as { running: boolean; state?: AgentStateResponse };
-        if (sessionIdRef.current !== sid) {
-          if (showLoading) setLoading(false);
-          return null;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const d = await res.json() as SessionData;
+        if (
+          !hookAliveRef.current
+          || sessionIdRef.current !== sid
+          || sessionLoadGenerationRef.current !== loadGeneration
+          || (fenceRunId !== undefined && promptRunIdRef.current !== fenceRunId)
+        ) return false;
+        setData(d);
+        setActiveLeafId(d.leafId);
+        setMessages(d.context.messages);
+        setEntryIds(d.context.entryIds ?? []);
+        setTodoPhases(d.context.todoPhases ?? []);
+        // Recover on-disk subagent history (task toolResults) for this
+        // session. It is independently fenced by both roster and load gen.
+        void refreshSubagentHistory(sid, loadGeneration);
+        setCurrentModelOverride(null);
+        setError(null);
+        if (d.context.thinkingLevel && d.context.thinkingLevel !== "off") {
+          setThinkingLevel(d.context.thinkingLevel as ThinkingLevelOption);
         }
-        if (fenceRunId !== undefined && promptRunIdRef.current !== fenceRunId) {
-          if (showLoading) setLoading(false);
-          return null;
-        }
-
-        const liveState = agentState.state;
-        const modelApplied = applyAuthoritativeModel(toThinkingModelMeta(liveState?.model), token);
-        if (liveState) {
-          if (liveState.contextUsage !== undefined) setContextUsage(liveState.contextUsage ?? null);
-          if (liveState.systemPrompt !== undefined) setSystemPrompt(liveState.systemPrompt || null);
-          if (modelApplied && liveState.thinkingLevel !== undefined) setThinkingLevel(normalizeThinkingLevel(liveState.thinkingLevel));
-          if (liveState.fastModeEnabled !== undefined) setFastModeEnabled(liveState.fastModeEnabled);
-          setFastModeActive(liveState.fastModeActive);
-          if (liveState.autoRetryEnabled !== undefined) setAutoRetryEnabled(liveState.autoRetryEnabled);
-          if (liveState.interruptMode !== undefined) setInterruptMode(liveState.interruptMode);
-          if (liveState.autoCompactionEnabled !== undefined) setAutoCompactionEnabled(liveState.autoCompactionEnabled);
-          if (liveState.steeringMode !== undefined) setSteeringMode(liveState.steeringMode);
-          if (liveState.followUpMode !== undefined) setFollowUpMode(liveState.followUpMode);
-          if (liveState.extensionStatuses !== undefined) setExtensionStatuses(liveState.extensionStatuses ?? []);
-          if (liveState.extensionWidgets !== undefined) setExtensionWidgets(liveState.extensionWidgets ?? []);
-          if (liveState.todoPhases !== undefined) setTodoPhases(liveState.todoPhases ?? []);
-          if (liveState.queuedMessageCount === 0 && Date.now() - queueMutatedAtRef.current >= 5000) setQueuedMessages(EMPTY_QUEUE);
-        } else {
-          // No live wrapper: the ring state the polls carried is stale from
-          // here on — clear so the message-derived fallback renders instead
-          // of a frozen last-live value.
-          setContextUsage(null);
-          if (!agentState.running && Date.now() - queueMutatedAtRef.current >= 5000) {
-            setQueuedMessages(EMPTY_QUEUE);
-          }
-        }
-        if (showLoading) setLoading(false);
-        return agentState;
+        updateSessionReadiness(sid, loadGeneration, { history: "ready" });
+        setLoading(false);
+        return true;
       } catch (e) {
-        console.error("Failed to load agent state:", e);
-        if (showLoading) setLoading(false);
-        return null;
+        if (
+          hookAliveRef.current
+          && sessionIdRef.current === sid
+          && sessionLoadGenerationRef.current === loadGeneration
+          && (fenceRunId === undefined || promptRunIdRef.current === fenceRunId)
+        ) {
+          setError(String(e));
+          updateSessionReadiness(sid, loadGeneration, { history: "error" });
+          setLoading(false);
+        }
+        return false;
       }
-    } catch (e) {
-      setError(String(e));
+    })();
+
+    // Calling this immediately after fetch(history) starts the state request
+    // in the same turn, while its result remains independently fenced.
+    const statePromise = includeState
+      ? loadRuntimeStateForGeneration(sid, loadGeneration, fenceRunId)
+      : Promise.resolve(null);
+    if (!includeState) {
+      await historyPromise;
       return null;
-    } finally {
-      if (showLoading && !messagesLoaded) setLoading(false);
     }
-  }, [refreshSubagentHistory, applyAuthoritativeModel, beginAuthoritativeModelSync, setContextUsage]);
+    const agentState = await statePromise;
+    // Keep history errors from becoming unhandled rejections while allowing
+    // the state response to resolve and restore a running runtime first.
+    await historyPromise;
+    return agentState;
+  }, [beginSessionLoad, loadRuntimeStateForGeneration, refreshSubagentHistory, updateSessionReadiness]);
 
   // External omp/TUI writes arrive through the sidebar's session-change bus.
   // Reload only when this selected session has no managed per-session stream;
@@ -1125,6 +1249,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const loadContext = useCallback(async (sid: string, leafId: string | null) => {
     const seq = ++contextRequestSeqRef.current;
+    const loadGeneration = sessionLoadGenerationRef.current;
     try {
       const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1" });
       if (leafId) params.set("leafId", leafId);
@@ -1134,7 +1259,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const d = await res.json() as { context: { messages: AgentMessage[]; entryIds: string[]; todoPhases: TodoPhase[] } };
       // Fence like loadSession: drop the response if the session changed or a
       // newer navigate started while this request was in flight.
-      if (sessionIdRef.current !== sid || contextRequestSeqRef.current !== seq) return;
+      if (
+        sessionIdRef.current !== sid
+        || contextRequestSeqRef.current !== seq
+        || sessionLoadGenerationRef.current !== loadGeneration
+      ) return;
       setMessages(d.context.messages);
       setEntryIds(d.context.entryIds ?? []);
       setTodoPhases(d.context.todoPhases ?? []);
@@ -1200,16 +1329,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // prompt or model run just to inspect the resolved system prompt.
   const loadSystemPrompt = useCallback(async () => {
     const sid = sessionIdRef.current ?? await ensureNewSession();
-    if (!sid) return;
+    if (!sid || !canMutateSession(sid)) return;
 
     const state = await sendAgentCommand<AgentStateResponse>(sid, { type: "get_state" });
     if (!hookAliveRef.current || sessionIdRef.current !== sid) return;
     setSystemPrompt(state.systemPrompt ?? "");
-  }, [ensureNewSession]);
+  }, [canMutateSession, ensureNewSession]);
 
   const loadSlashCommands = useCallback(async () => {
     const sid = sessionIdRef.current ?? await ensureNewSession();
-    if (!sid) {
+    if (!sid || !canMutateSession(sid)) {
       setSlashCommands([]);
       return [] as SlashCommandInfo[];
     }
@@ -1228,7 +1357,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       setSlashCommandsLoading(false);
     }
-  }, [ensureNewSession]);
+  }, [canMutateSession, ensureNewSession]);
 
   // Reconnect actions captured after their definitions (host-tool and URI
   // registrations are per-wrapper and are not persisted by omp, and the
@@ -1274,8 +1403,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     response: { value: string } | { confirmed: boolean } | { cancelled: true },
   ) => {
     const sid = sessionIdRef.current;
+    if (!sid || !canMutateSession(sid)) return;
     setExtensionDialog((current) => current?.id === request.id ? null : current);
-    if (!sid) return;
     try {
       await sendAgentCommand(sid, {
         type: "extension_ui_response",
@@ -1285,7 +1414,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (e) {
       console.error("Failed to send extension UI response:", e);
     }
-  }, []);
+  }, [canMutateSession]);
 
   // ---------------------------------------------------------------------
   // Host-tool bridge: omp-web registers tools the AGENT can call. The server
@@ -1330,12 +1459,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   /** Re-register host tools on run start / SSE reconnect so the agent always
    * has them available (set_host_tools is per-wrapper, not persisted). */
   const registerHostTools = useCallback(async (sid: string) => {
+    if (!canMutateSession(sid)) return;
     try {
       await sendAgentCommand(sid, { type: "set_host_tools", tools: HOST_TOOL_DEFINITIONS });
     } catch {
       // Older omp builds without host tools: the UI simply stays passive.
     }
-  }, [HOST_TOOL_DEFINITIONS]);
+  }, [HOST_TOOL_DEFINITIONS, canMutateSession]);
 
   /** URI schemes the agent's read/write tools can resolve through the web UI.
    * `pi-web://clipboard` lets the agent read the user's clipboard (best-effort:
@@ -1350,12 +1480,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   ], []);
 
   const registerHostUriSchemes = useCallback(async (sid: string) => {
+    if (!canMutateSession(sid)) return;
     try {
       await sendAgentCommand(sid, { type: "set_host_uri_schemes", schemes: HOST_URI_SCHEMES });
     } catch {
       // Older omp builds: no URI bridge, nothing to do.
     }
-  }, [HOST_URI_SCHEMES]);
+  }, [HOST_URI_SCHEMES, canMutateSession]);
 
   reconnectActionsRef.current = (sid: string) => {
     void registerHostTools(sid);
@@ -1365,6 +1496,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   /** Answer a host_tool_call with a toolResult payload. */
   const respondHostTool = useCallback(async (sid: string, id: string, text: string, isError = false) => {
+    if (!canMutateSession(sid)) return;
     try {
       await sendAgentCommand(sid, {
         type: "host_tool_result",
@@ -1375,11 +1507,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (e) {
       console.error("Failed to send host tool result:", e);
     }
-  }, []);
+  }, [canMutateSession]);
 
   const handleHostToolCall = useCallback(async (id: string, toolName: string, args: Record<string, unknown>) => {
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (!sid || !canMutateSession(sid)) return;
     const str = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
     switch (toolName) {
       case "open_url": {
@@ -1428,20 +1560,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       default:
         await respondHostTool(sid, id, `Host tool \"${toolName}\" is not available in omp-web`, true);
     }
-  }, [onOpenFile, respondHostTool]);
+  }, [canMutateSession, onOpenFile, respondHostTool]);
 
   /** Answer a host_uri_request (agent read/write of a registered scheme). */
   const respondHostUri = useCallback(async (sid: string, id: string, frame: { content?: string; contentType?: "text/markdown" | "application/json" | "text/plain"; isError?: boolean; error?: string }) => {
+    if (!canMutateSession(sid)) return;
     try {
       await sendAgentCommand(sid, { type: "host_uri_result", id, ...frame });
     } catch (e) {
       console.error("Failed to send host URI result:", e);
     }
-  }, []);
+  }, [canMutateSession]);
 
   const handleHostUriRequest = useCallback(async (id: string, operation: "read" | "write", url: string, content?: string) => {
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (!sid || !canMutateSession(sid)) return;
     const resource = url.replace(/^pi-web:\/\//i, "") || "";
     if (resource === "clipboard") {
       if (operation === "read") {
@@ -1472,11 +1605,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       return;
     }
     await respondHostUri(sid, id, { isError: true, error: `Unknown pi-web resource: ${resource}` });
-  }, [respondHostUri]);
+  }, [canMutateSession, respondHostUri]);
 
   const sendExtensionCustomInput = useCallback(async (request: ExtensionUiCustomRequest, data: string) => {
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (!sid || !canMutateSession(sid)) return;
     try {
       await sendAgentCommand(sid, {
         type: "extension_ui_input",
@@ -1486,7 +1619,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (e) {
       console.error("Failed to send extension custom UI input:", e);
     }
-  }, []);
+  }, [canMutateSession]);
 
   const addNotice = useCallback((notice: { id?: string; message: string; type?: NoticeType }) => {
     const message = notice.message.trim();
@@ -1632,6 +1765,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     await delay(PROMPT_SETTLE_INITIAL_DELAY_MS);
     const startedAt = Date.now();
 
+    const loadGeneration = runtimeLoadGenerationRef.current;
     while (
       hookAliveRef.current
       && sessionIdRef.current === sid
@@ -1643,6 +1777,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
         if (res.ok) {
           const data = await res.json() as { running?: boolean; state?: AgentStateResponse };
+          if (sessionIdRef.current !== sid || runtimeLoadGenerationRef.current !== loadGeneration) continue;
           const state = data.state;
           if (!data.running || !state || (!state.isStreaming && !state.isPromptRunning)) {
             await finishPromptWithoutStream(sid, runId);
@@ -1659,6 +1794,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const waitForBashSettlement = useCallback(async (sid: string) => {
     const recoveryId = bashRecoveryIdRef.current + 1;
     bashRecoveryIdRef.current = recoveryId;
+    const loadGeneration = runtimeLoadGenerationRef.current;
 
     while (
       bashRunningRef.current
@@ -1670,6 +1806,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
         if (!res.ok) continue;
         const data = await res.json() as { state?: AgentStateResponse };
+        if (sessionIdRef.current !== sid || runtimeLoadGenerationRef.current !== loadGeneration) continue;
         if (data.state?.isBashRunning) continue;
 
         await loadSession(sid);
@@ -1684,14 +1821,71 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [loadSession]);
 
+  const restoreRuntimeFromState = useCallback((sid: string, agentState: { running: boolean; state?: AgentStateResponse }) => {
+    if (!hookAliveRef.current || sessionIdRef.current !== sid || !runtimeReadyRef.current) return;
+    const liveState = agentState.state;
+    if (agentState.running && liveState && (liveState.isStreaming || liveState.isPromptRunning)) {
+      agentRunningRef.current = true;
+      setAgentRunning(true);
+      setAgentPhase(liveState.isStreaming ? { kind: "waiting_model" } : { kind: "running_command" });
+      dispatch({ type: "start" });
+      void connectEvents(sid);
+      // Host tools and URI schemes are per-wrapper, so restore them only after
+      // the runtime state request has proved that this wrapper is available.
+      void registerHostTools(sid);
+      void registerHostUriSchemes(sid);
+      if (rosterRefreshTimerRef.current) {
+        clearTimeout(rosterRefreshTimerRef.current);
+        rosterRefreshTimerRef.current = null;
+      }
+      const rosterTimerSid = sid;
+      rosterRefreshTimerRef.current = setTimeout(() => {
+        rosterRefreshTimerRef.current = null;
+        if (sessionIdRef.current !== rosterTimerSid || !runtimeReadyRef.current) return;
+        void refreshSubagentRoster(rosterTimerSid);
+      }, 600);
+      if (!liveState.isStreaming && liveState.isPromptRunning) {
+        void waitForPromptSettlement(sid);
+      }
+    }
+    if (liveState?.isBashRunning) {
+      bashRunningRef.current = true;
+      setBashRunning(true);
+      void waitForBashSettlement(sid);
+    }
+    if (liveState?.queuedMessageCount === 0) {
+      clearPersistedQueue(sid);
+    } else if (typeof liveState?.queuedMessageCount === "number") {
+      const persisted = readPersistedQueue(sid);
+      if (persisted) setQueuedMessages((prev) => (isEmptyQueue(prev) ? persisted : prev));
+    }
+  }, [connectEvents, refreshSubagentRoster, registerHostTools, registerHostUriSchemes, waitForBashSettlement, waitForPromptSettlement]);
+
+  const retryRuntimeState = useCallback(async () => {
+    const sid = sessionIdRef.current;
+    if (!sid || isNew) return null;
+    const loadGeneration = loadGenerationCounterRef.current + 1;
+    loadGenerationCounterRef.current = loadGeneration;
+    runtimeLoadGenerationRef.current = loadGeneration;
+    const next: SessionReadiness = { ...sessionReadinessRef.current, runtime: "loading" };
+    sessionReadinessRef.current = next;
+    runtimeReadyRef.current = false;
+    setSessionReadiness(next);
+    setRuntimeError(null);
+    const agentState = await loadRuntimeStateForGeneration(sid, loadGeneration);
+    if (agentState) restoreRuntimeFromState(sid, agentState);
+    return agentState;
+  }, [isNew, loadRuntimeStateForGeneration, restoreRuntimeFromState]);
+
   // Reconcile client streaming state with the server. When SSE events are
   // missed (network drop, mobile tab backgrounded, half-open connection),
   // agent_end never arrives and the UI stays in streaming state forever.
   // If the server reports idle while we still think it's running, finish
   // through the same path as prompt_done.
   const reconcileAgentState = useCallback(async (sid: string) => {
-    if (!agentRunningRef.current) return;
+    if (!agentRunningRef.current || !canMutateSession(sid)) return;
     const runId = promptRunIdRef.current;
+    const loadGeneration = runtimeLoadGenerationRef.current;
     try {
       const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
       if (!res.ok) return;
@@ -1699,7 +1893,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // A slow response can straddle a run boundary (previous run finished
       // and the user already started the next one while this request was in
       // flight) — everything in it is stale, drop it.
-      if (promptRunIdRef.current !== runId) return;
+      if (promptRunIdRef.current !== runId || sessionIdRef.current !== sid || runtimeLoadGenerationRef.current !== loadGeneration) return;
       const state = data.state;
       // Mirror compaction state unconditionally: a missed compaction_end
       // would otherwise leave the "Stop compaction" UI stuck. No state
@@ -1728,7 +1922,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch {
       // Network still down — the next poll / visibility / online tick retries.
     }
-  }, [finishPromptWithoutStream, refreshSubagentRoster, setContextUsage]);
+  }, [canMutateSession, finishPromptWithoutStream, refreshSubagentRoster, setContextUsage]);
 
   // Recovery net for missed SSE events: while the agent is running, verify
   // against the server periodically and whenever the tab returns to the
@@ -1774,7 +1968,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
    *  panel: a message removed here may still be delivered by the running agent
    *  (it then arrives in the chat like any delivered turn). */
   const removeQueuedMessage = useCallback((text: string) => {
-    if (!text) return;
+    if (!text || !canMutateSession()) return;
     setQueuedMessages((prev) => {
       const si = prev.steering.indexOf(text);
       const fi = prev.followUp.indexOf(text);
@@ -1784,12 +1978,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         followUp: fi === -1 ? prev.followUp : prev.followUp.filter((_, i) => i !== fi),
       };
     });
-  }, []);
+  }, [canMutateSession]);
 
   /** Promote the first queued follow-up to a steering message (client-side
    *  relabel; the delivery order itself is owned by omp). */
   const promoteQueuedToSteer = useCallback((text: string) => {
-    if (!text) return;
+    if (!text || !canMutateSession()) return;
     setQueuedMessages((prev) => {
       const fi = prev.followUp.indexOf(text);
       if (fi === -1) return prev;
@@ -1798,7 +1992,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         followUp: prev.followUp.filter((_, i) => i !== fi),
       };
     });
-  }, []);
+  }, [canMutateSession]);
 
   // Mirror queued texts into sessionStorage so a reload can restore them.
   // The dirty gate keeps the initial empty state from wiping a stored queue
@@ -1849,6 +2043,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         dispatch({ type: "end" });
         if (endedSid) {
           void loadSession(endedSid, false, false, endedRunId);
+          const endLoadGeneration = runtimeLoadGenerationRef.current;
           const endToken = beginAuthoritativeModelSync();
           fetch(`/api/agent/${encodeURIComponent(endedSid)}`)
             .then((r) => (r.ok ? r.json() as Promise<{ state?: AgentStateResponse }> : null))
@@ -1856,7 +2051,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               if (!d?.state?.model) return;
               // Stale terminal snapshot: the user switched sessions or started
               // the next run while this request was in flight — drop it.
-              if (sessionIdRef.current !== endedSid || promptRunIdRef.current !== endedRunId) return;
+              if (sessionIdRef.current !== endedSid || promptRunIdRef.current !== endedRunId || runtimeLoadGenerationRef.current !== endLoadGeneration) return;
               const applied = applyAuthoritativeModel(toThinkingModelMeta(d.state.model), endToken);
               if (!applied) return; // stale snapshot — drop everything derived from it
               if (d.state?.contextUsage !== undefined) setContextUsage(d.state.contextUsage ?? null);
@@ -1921,12 +2116,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         // retry-fallback, prewalk hand-off). No payload — sync from state.
         const sid = sessionIdRef.current;
         if (!sid) break;
+        const loadGeneration = runtimeLoadGenerationRef.current;
         const token = beginAuthoritativeModelSync();
         void fetch(`/api/agent/${encodeURIComponent(sid)}`)
           .then((r) => (r.ok ? r.json() as Promise<{ state?: AgentStateResponse }> : null))
           .then((d) => {
             if (!d?.state?.model) return;
-            if (sessionIdRef.current !== sid) return;
+            if (sessionIdRef.current !== sid || runtimeLoadGenerationRef.current !== loadGeneration) return;
             const applied = applyAuthoritativeModel(toThinkingModelMeta(d.state.model), token);
             if (!applied) return; // stale snapshot — drop its thinking level too
             if (d.state.thinkingLevel !== undefined) setThinkingLevel(normalizeThinkingLevel(d.state.thinkingLevel));
@@ -2254,6 +2450,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]): Promise<boolean> => {
     const trimmedMessage = message.trim();
     if (!trimmedMessage && !images?.length) return false;
+    if (!canMutateSession()) return false;
     if (agentRunningRef.current || bashRunningRef.current) return false;
     const isSlashCommandPrompt = !images?.length && trimmedMessage.startsWith("/");
 
@@ -2355,7 +2552,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       dispatch({ type: "end" });
       return false;
     }
-  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, opts.chatInputRef, refreshSubagentRoster, registerHostTools, registerHostUriSchemes]);
+  }, [canMutateSession, isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, opts.chatInputRef, refreshSubagentRoster, registerHostTools, registerHostUriSchemes]);
 
   /** Abort the running agent and send the message as a fresh prompt
    * (abort_and_prompt). Only valid mid-run; the old turn's agent_end is
@@ -2364,7 +2561,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const trimmedMessage = message.trim();
     if (!trimmedMessage && !images?.length) return false;
     const sid = sessionIdRef.current;
-    if (!sid || !agentRunningRef.current) return false;
+    if (!sid || !canMutateSession(sid) || !agentRunningRef.current) return false;
 
     const { userMsg, piImages: interruptPiImages } = buildOutgoingPrompt(message, images);
     setMessages((prev) => [...prev, userMsg]);
@@ -2398,9 +2595,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
       return false;
     }
-  }, [addNotice, ensureEventsConnected, refreshSubagentRoster]);
+  }, [addNotice, canMutateSession, ensureEventsConnected, refreshSubagentRoster]);
 
   const executeBash = useCallback(async (command: string, excludeFromContext: boolean) => {
+    if (!canMutateSession()) return;
     if (agentRunningRef.current || bashRunningRef.current) return;
     const inputText = `${excludeFromContext ? "!!" : "!"}${command}`;
     bashRunningRef.current = true;
@@ -2425,12 +2623,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setPendingBash(null);
       setBashRunning(false);
     }
-  }, [addNotice, ensureNewSession, loadSession, opts.chatInputRef, promoteNewSession, session]);
+  }, [addNotice, canMutateSession, ensureNewSession, loadSession, opts.chatInputRef, promoteNewSession, session]);
   executeBashRef.current = executeBash;
 
   const handleAbort = useCallback(async () => {
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (!sid || !canMutateSession(sid)) return;
     if (bashRunningRef.current) {
       try {
         await sendAgentCommand(sid, { type: "abort_bash" });
@@ -2444,12 +2642,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (e) {
       console.error("Failed to abort:", e);
     }
-  }, []);
+  }, [canMutateSession]);
 
   const handleFork = useCallback(async (entryId: string) => {
     if (bashRunningRef.current) return;
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (!sid || !canMutateSession(sid)) return;
     setForkingEntryId(entryId);
     try {
       const result = await sendAgentCommand<{ cancelled?: boolean; newSessionId?: string }>(sid, {
@@ -2465,7 +2663,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       setForkingEntryId(null);
     }
-  }, [onSessionForked]);
+  }, [canMutateSession, onSessionForked]);
 
   // omp's RPC protocol has no navigate-within-tree command, so branch
   // selection is display-only: the viewed branch is loaded from the session
@@ -2477,18 +2675,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     // sessionBusy-navigable check).
     if (bashRunningRef.current || agentRunningRef.current) return;
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (!sid || !canMutateSession(sid)) return;
     setActiveLeafId(entryId);
     await loadContext(sid, entryId);
-  }, [loadContext]);
+  }, [canMutateSession, loadContext]);
 
   const handleLeafChange = useCallback(async (leafId: string | null) => {
     if (bashRunningRef.current || agentRunningRef.current) return;
-    setActiveLeafId(leafId);
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (!sid || !canMutateSession(sid)) return;
+    setActiveLeafId(leafId);
     await loadContext(sid, leafId);
-  }, [loadContext]);
+  }, [canMutateSession, loadContext]);
 
   const handleModelChange = useCallback(async (provider: string, modelId: string) => {
     if (isNew) {
@@ -2504,7 +2702,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       return;
     }
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (!sid || !canMutateSession(sid)) return;
     try {
       await sendAgentCommand(sid, { type: "set_model", provider, modelId });
       setCurrentModelOverride({ provider, modelId });
@@ -2512,9 +2710,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (e) {
       console.error("Failed to set model:", e);
     }
-  }, [isNew, setNewSessionModel, refreshLiveModelState]);
+  }, [canMutateSession, isNew, setNewSessionModel, refreshLiveModelState]);
 
   const handleFastModeChange = useCallback(async (enabled: boolean) => {
+    if (!isNew && !canMutateSession()) return;
     // A brand-new session has no runtime yet: the model picker updates local
     // state (so the Fast button appears), but set_fast_mode is a live-process
     // command — without spawning the session the click silently no-ops.
@@ -2529,10 +2728,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       console.error("Failed to change Fast mode:", error);
       addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
     }
-  }, [addNotice, ensureNewSession, refreshLiveModelState]);
+  }, [addNotice, canMutateSession, ensureNewSession, isNew, refreshLiveModelState]);
 
   /** Toggle automatic retry for transient model failures. */
   const handleAutoRetryChange = useCallback(async (enabled: boolean) => {
+    if (!isNew && !canMutateSession()) return;
     const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
     if (!sid) return;
     setAutoRetryEnabled(enabled);
@@ -2542,10 +2742,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAutoRetryEnabled((current) => (current === enabled ? !enabled : current));
       addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
     }
-  }, [addNotice]);
+  }, [addNotice, canMutateSession, isNew]);
 
   /** Change how steering interrupts the running agent (immediate vs wait). */
   const handleInterruptModeChange = useCallback(async (mode: "immediate" | "wait") => {
+    if (!isNew && !canMutateSession()) return;
     const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
     if (!sid) return;
     setInterruptMode(mode);
@@ -2555,10 +2756,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       console.error("Failed to change interrupt mode:", error);
       addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
     }
-  }, [addNotice]);
+  }, [addNotice, canMutateSession, isNew]);
 
   /** Toggle automatic context compaction on the live session. */
   const handleAutoCompactionChange = useCallback(async (enabled: boolean) => {
+    if (!isNew && !canMutateSession()) return;
     const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
     if (!sid) return;
     setAutoCompactionEnabled(enabled);
@@ -2568,10 +2770,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       console.error("Failed to change auto-compaction:", error);
       addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
     }
-  }, [addNotice]);
+  }, [addNotice, canMutateSession, isNew]);
 
   /** Change how queued steering messages are delivered (all at once / one at a time). */
   const handleSteeringModeChange = useCallback(async (mode: "all" | "one-at-a-time") => {
+    if (!isNew && !canMutateSession()) return;
     const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
     if (!sid) return;
     setSteeringMode(mode);
@@ -2581,10 +2784,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       console.error("Failed to change steering mode:", error);
       addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
     }
-  }, [addNotice]);
+  }, [addNotice, canMutateSession, isNew]);
 
   /** Change how queued follow-up messages are delivered. */
   const handleFollowUpModeChange = useCallback(async (mode: "all" | "one-at-a-time") => {
+    if (!isNew && !canMutateSession()) return;
     const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
     if (!sid) return;
     setFollowUpMode(mode);
@@ -2594,12 +2798,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       console.error("Failed to change follow-up mode:", error);
       addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
     }
-  }, [addNotice]);
+  }, [addNotice, canMutateSession, isNew]);
 
   /** Cycle to the next available model (⌘/Ctrl+Alt+M). */
   const handleCycleModel = useCallback(async () => {
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (!sid || !canMutateSession(sid)) return;
     try {
       await sendAgentCommand(sid, { type: "cycle_model" });
       void refreshLiveModelState(sid);
@@ -2607,12 +2811,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       console.error("Failed to cycle model:", error);
       addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
     }
-  }, [addNotice, refreshLiveModelState]);
+  }, [addNotice, canMutateSession, refreshLiveModelState]);
 
   /** Cycle to the next thinking level (⌘/Ctrl+Alt+T). */
   const handleCycleThinkingLevel = useCallback(async () => {
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (!sid || !canMutateSession(sid)) return;
     try {
       await sendAgentCommand(sid, { type: "cycle_thinking_level" });
       void refreshLiveModelState(sid);
@@ -2620,12 +2824,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       console.error("Failed to cycle thinking level:", error);
       addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
     }
-  }, [addNotice, refreshLiveModelState]);
+  }, [addNotice, canMutateSession, refreshLiveModelState]);
 
   /** Stop an in-progress automatic retry from the retry banner. */
   const handleAbortRetry = useCallback(async () => {
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (!sid || !canMutateSession(sid)) return;
     setRetryInfo(null);
     try {
       await sendAgentCommand(sid, { type: "abort_retry" });
@@ -2633,11 +2837,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       console.error("Failed to abort retry:", error);
       addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
     }
-  }, [addNotice]);
+  }, [addNotice, canMutateSession]);
 
   const handleHandoff = useCallback(async () => {
     const sid = sessionIdRef.current;
-    if (!sid || isCompactingRef.current || agentRunningRef.current || bashRunningRef.current) return;
+    if (!sid || !canMutateSession(sid) || isCompactingRef.current || agentRunningRef.current || bashRunningRef.current) return;
     try {
       await sendAgentCommand(sid, { type: "handoff" });
       await loadSession(sid, true);
@@ -2645,11 +2849,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (error) {
       addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
     }
-  }, [addNotice, loadSession, refreshLiveModelState]);
+  }, [addNotice, canMutateSession, loadSession, refreshLiveModelState]);
 
   const handleCompact = useCallback(async () => {
     const sid = sessionIdRef.current;
-    if (!sid || isCompactingRef.current || isCompacting) return;
+    if (!sid || !canMutateSession(sid) || isCompactingRef.current || isCompacting) return;
     isCompactingRef.current = true;
     setIsCompacting(true);
     setCompactError(null);
@@ -2666,14 +2870,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       isCompactingRef.current = false;
       setIsCompacting(false);
     }
-  }, [isCompacting, loadSession, refreshLiveModelState]);
+  }, [canMutateSession, isCompacting, loadSession, refreshLiveModelState]);
 
   const loadModels = useCallback(async (signal?: AbortSignal) => {
     setModelsLoading(true);
     try {
       const modelCwd = newSessionCwd ?? session?.cwd ?? "";
       const modelsUrl = modelCwd ? `/api/models?cwd=${encodeURIComponent(modelCwd)}` : "/api/models";
-      const res = await fetch(modelsUrl, signal ? { signal } : undefined);
+      const res = await fetch(modelsUrl, { cache: "no-store", ...(signal ? { signal } : {}) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json() as ModelsResponse;
       setModelNames(d.models);
@@ -2715,6 +2919,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
       return result;
     };
+
+    if (!sid || !canMutateSession(sid)) {
+      return complete({ handled: true, error: runtimeError ?? "Session runtime is not ready." });
+    }
 
     try {
       switch (commandName) {
@@ -2824,7 +3032,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setIsCompacting(false);
       }
     }
-  }, [addNotice, ensureNewSession, handleSend, isCompacting, loadModels, loadSession, loadSlashCommands, promoteNewSession, onOpenSettingsTab, onSessionStatsPanelOpen]);
+  }, [addNotice, canMutateSession, ensureNewSession, handleSend, isCompacting, loadModels, loadSession, loadSlashCommands, promoteNewSession, onOpenSettingsTab, onSessionStatsPanelOpen, runtimeError]);
 
   // Queued (undelivered) messages live in the queue panel only; the chat gets
   // the real user message when pi delivers it (user message_end event). An
@@ -2833,7 +3041,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const toPiImages = (images?: AttachedImage[]) => images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
   const handleSteer = useCallback(async (message: string, images?: AttachedImage[]) => {
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (!sid || !canMutateSession(sid)) return;
     const piImages = toPiImages(images);
     try {
       await sendAgentCommand(sid, {
@@ -2853,7 +3061,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
       opts.chatInputRef?.current?.insertIfEmpty(message);
     }
-  }, [addNotice, opts.chatInputRef]);
+  }, [addNotice, canMutateSession, opts.chatInputRef]);
 
   const handlePromptWithStreamingBehavior = useCallback(async (
     message: string,
@@ -2861,7 +3069,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     images?: AttachedImage[],
   ) => {
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (!sid || !canMutateSession(sid)) return;
     const piImages = toPiImages(images);
     try {
       await sendAgentCommand(sid, {
@@ -2879,11 +3087,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
       opts.chatInputRef?.current?.insertIfEmpty(message);
     }
-  }, [addNotice, opts.chatInputRef]);
+  }, [addNotice, canMutateSession, opts.chatInputRef]);
 
   const handleFollowUp = useCallback(async (message: string, images?: AttachedImage[]) => {
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (!sid || !canMutateSession(sid)) return;
     const piImages = toPiImages(images);
     try {
       await sendAgentCommand(sid, {
@@ -2901,19 +3109,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
       opts.chatInputRef?.current?.insertIfEmpty(message);
     }
-  }, [addNotice, opts.chatInputRef]);
+  }, [addNotice, canMutateSession, opts.chatInputRef]);
 
   const handleAbortCompaction = useCallback(async () => {
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (!sid || !canMutateSession(sid)) return;
     try {
       await sendAgentCommand(sid, { type: "abort_compaction" });
     } catch (e) {
       console.error("Failed to abort compaction:", e);
     }
-  }, []);
+  }, [canMutateSession]);
 
   const handleThinkingLevelChange = useCallback(async (level: ThinkingLevelOption) => {
+    if (!canMutateSession()) return;
     setThinkingLevel(level);
     if (level === "auto") return; // "auto" leaves pi's current setting untouched
     const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
@@ -2924,9 +3133,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (e) {
       console.error("Failed to set thinking level:", e);
     }
-  }, [refreshLiveModelState]);
+  }, [canMutateSession, refreshLiveModelState]);
 
   const handleToolPresetChange = useCallback(async (preset: ToolPreset) => {
+    if (!canMutateSession()) return;
     setToolPresetState(preset);
     setPreferredToolPreset(preset);
     // The preset is applied at spawn time (--tools/--no-tools flags); omp's
@@ -2935,7 +3145,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (sid) {
       addNotice({ type: "info", message: translate("agentSession.toolPresetNotice") });
     }
-  }, [setToolPresetState, addNotice]);
+  }, [setToolPresetState, addNotice, canMutateSession]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     const container = scrollContainerRef.current;
@@ -2980,66 +3190,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (session) {
       sessionIdRef.current = session.id;
       loadSession(session.id, true, true).then((agentState) => {
-        if (agentState?.running) {
-          if (agentState.state?.isStreaming || agentState.state?.isPromptRunning) {
-            agentRunningRef.current = true;
-            setAgentRunning(true);
-            setAgentPhase(agentState.state.isStreaming ? { kind: "waiting_model" } : { kind: "running_command" });
-            dispatch({ type: "start" });
-            void connectEvents(session.id);
-            // Register the host-tool + URI bridges so the agent can call
-            // open_url/notify/open_file and resolve pi-web://clipboard.
-            void registerHostTools(session.id);
-            void registerHostUriSchemes(session.id);
-            // Rehydrate the live roster (missed lifecycle/progress frames).
-            // Tracked + session-guarded: a session switch during the delay must
-            // not issue a stale get_subagents against the old session.
-            if (rosterRefreshTimerRef.current) {
-              clearTimeout(rosterRefreshTimerRef.current);
-              rosterRefreshTimerRef.current = null;
-            }
-            const rosterTimerSid = session.id;
-            rosterRefreshTimerRef.current = setTimeout(() => {
-              rosterRefreshTimerRef.current = null;
-              if (sessionIdRef.current !== rosterTimerSid) return;
-              void refreshSubagentRoster(rosterTimerSid);
-            }, 600);
-            if (!agentState.state.isStreaming && agentState.state.isPromptRunning) {
-              void waitForPromptSettlement(session.id);
-            }
-          }
-          if (agentState.state?.isBashRunning) {
-            bashRunningRef.current = true;
-            setBashRunning(true);
-            void waitForBashSettlement(session.id);
-          }
-        }
-        if (agentState?.state) {
-          // Model + thinking level are owned by loadSession (token-guarded);
-          // re-applying this same snapshot here would mint a fresh token and
-          // bypass the stale-response guard.
-          if (agentState.state.isCompacting !== undefined) setIsCompacting(agentState.state.isCompacting);
-          if (agentState.state.contextUsage !== undefined) setContextUsage(agentState.state.contextUsage ?? null);
-          if (agentState.state.systemPrompt !== undefined) setSystemPrompt(agentState.state.systemPrompt || null);
-          if (agentState.state.extensionStatuses !== undefined) setExtensionStatuses(agentState.state.extensionStatuses ?? []);
-          if (agentState.state.extensionWidgets !== undefined) setExtensionWidgets(agentState.state.extensionWidgets ?? []);
-          if (agentState.state.queuedMessageCount === 0 && Date.now() - queueMutatedAtRef.current >= 5000) {
-            setQueuedMessages(EMPTY_QUEUE);
-            // The queue drained while the page was closed — a stored copy
-            // from a previous page load is stale.
-            clearPersistedQueue(session.id);
-          } else if (typeof agentState.state.queuedMessageCount === "number") {
-            // omp still holds queued messages: restore the client-tracked
-            // texts persisted by the previous page load.
-            const persisted = readPersistedQueue(session.id);
-            if (persisted) {
-              setQueuedMessages((prev) => (isEmptyQueue(prev) ? persisted : prev));
-            }
-          }
-        } else {
-          // No live wrapper on mount: derived fallback, not a frozen value.
-          setContextUsage(null);
-        }
+        if (agentState) restoreRuntimeFromState(session.id, agentState);
       });
     }
     return () => {
@@ -3065,7 +3216,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       subagentActivityFlushRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshSubagentRoster, registerHostTools, registerHostUriSchemes]);
+  }, [loadSession, restoreRuntimeFromState]);
 
   useEffect(() => {
     onSystemPromptChange?.(systemPrompt);
@@ -3205,7 +3356,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   return {
     // State
-    data, loading, error, activeLeafId, messages, entryIds, streamState,
+    data, loading, error, sessionReadiness, runtimeError, runtimeReady, activeLeafId, messages, entryIds, streamState,
     agentRunning, modelNames, modelList, modelsLoading, modelError, modelThinkingLevels, modelThinkingLevelMaps, newSessionModel, toolPreset, thinkingLevel, fastModeEnabled, fastModeActive, autoRetryEnabled, interruptMode, autoCompactionEnabled, steeringMode, followUpMode,
     liveModelMeta,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
@@ -3222,7 +3373,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     pendingScrollToUserRef, initialScrollDoneRef,
     // Actions
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange, handleFastModeChange, handleAutoRetryChange, handleInterruptModeChange, handleAutoCompactionChange, handleSteeringModeChange, handleFollowUpModeChange, handleCycleModel, handleCycleThinkingLevel, handleAbortRetry, handleInterruptAndReply,
-    handleCompact, handleHandoff, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
+    handleCompact, handleHandoff, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction, retryRuntimeState,
     removeQueuedMessage, promoteQueuedToSteer,
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands, setActiveLeafId, setData, setMessages,

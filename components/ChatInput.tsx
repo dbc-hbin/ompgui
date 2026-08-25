@@ -60,6 +60,8 @@ interface Props {
   onSteer?: (message: string, images?: AttachedImage[]) => void;
   onFollowUp?: (message: string, images?: AttachedImage[]) => void;
   onPromptWithStreamingBehavior?: (message: string, behavior: "steer" | "followUp", images?: AttachedImage[]) => void;
+  /** Existing-session RPC mutations stay disabled until state is ready. */
+  runtimeReady?: boolean;
   isStreaming: boolean;
   model?: { provider: string; modelId: string } | null;
   isAutoModelSelection?: boolean;
@@ -258,17 +260,20 @@ function QueuedActionButton({
   onClick,
   title,
   accent = false,
+  disabled = false,
   children,
 }: {
   onClick: () => void;
   title: string;
   accent?: boolean;
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       title={title}
       style={{
         flexShrink: 0,
@@ -277,7 +282,8 @@ function QueuedActionButton({
         borderRadius: 6,
         background: "transparent",
         color: accent ? "var(--accent)" : "var(--text-dim)",
-        cursor: "pointer",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.5 : 1,
         fontSize: 11,
         fontWeight: accent ? 600 : 400,
         transition: "background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm)",
@@ -403,6 +409,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   onBuiltinCommand,
   onAudioUnlock,
   onPromptWithStreamingBehavior,
+  runtimeReady = true,
   contextUsage,
   onRemoveQueuedMessage,
   onPromoteQueuedToSteer,
@@ -650,6 +657,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, []);
 
   const processFiles = useCallback((files: File[]) => {
+    if (!runtimeReady) return;
     if (isStreaming) {
       setAttachError("Attachments are disabled while the agent is running.");
       return;
@@ -658,7 +666,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     const otherFiles = files.filter((file) => !file.type.startsWith("image/"));
     void processImageFiles(imageFiles);
     void processTextFiles(otherFiles);
-  }, [isStreaming, processImageFiles, processTextFiles]);
+  }, [isStreaming, processImageFiles, processTextFiles, runtimeReady]);
 
   const removeImage = useCallback((index: number) => {
     setAttachedImages((prev) => {
@@ -750,7 +758,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const handleSend = useCallback(async () => {
     const msg = value.trim();
     if (!msg && !attachedImages.length && !attachedTextFiles.length) return;
-    if (isStreaming) return;
+    if (!runtimeReady || isStreaming) return;
     onAudioUnlock?.();
     const composedMessage = composeMessageWithTextAttachments(msg, attachedTextFiles);
     if (!attachedImages.length && !attachedTextFiles.length && msg.startsWith("/") && onBuiltinCommand) {
@@ -762,7 +770,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     }
     onSend(composedMessage, attachedImages.length ? attachedImages : undefined);
     clearInput();
-  }, [value, attachedImages, attachedTextFiles, isStreaming, onBuiltinCommand, onSend, clearInput, onAudioUnlock]);
+  }, [value, attachedImages, attachedTextFiles, isStreaming, runtimeReady, onBuiltinCommand, onSend, clearInput, onAudioUnlock]);
 
   const slashQuery = value.startsWith("/") && !/\s/.test(value.slice(1))
     ? value.slice(1).toLowerCase()
@@ -1028,6 +1036,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
   const sendQueued = useCallback((mode: "steer" | "followup") => {
     const msg = value.trim();
+    if (!runtimeReady) return;
     if (!msg && !attachedImages.length && !attachedTextFiles.length) return;
     if (attachedImages.length || attachedTextFiles.length) return;
     onAudioUnlock?.();
@@ -1060,7 +1069,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       onFollowUp(msg, attachedImages.length ? attachedImages : undefined);
     }
     clearInput();
-  }, [value, attachedImages, attachedTextFiles, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock, t]);
+  }, [value, attachedImages, attachedTextFiles, runtimeReady, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock, t]);
 
   // ── Queued follow-up bar ────────────────────────────────────────────────
   // omp reports only a queued count over RPC; the texts are tracked in a
@@ -1074,7 +1083,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const queuedCount = queuedEntries.length;
 
   const handleQueuedEdit = useCallback(() => {
-    if (!firstQueued) return;
+    if (!runtimeReady || !firstQueued) return;
     onRemoveQueuedMessage?.(firstQueued.text);
     setValue(firstQueued.text);
     setAtQuery(null);
@@ -1087,20 +1096,20 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       ta.style.height = "auto";
       ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
     });
-  }, [firstQueued, onRemoveQueuedMessage]);
+  }, [firstQueued, onRemoveQueuedMessage, runtimeReady]);
 
   const handleQueuedDelete = useCallback(() => {
-    if (!firstQueued) return;
+    if (!runtimeReady || !firstQueued) return;
     onRemoveQueuedMessage?.(firstQueued.text);
-  }, [firstQueued, onRemoveQueuedMessage]);
+  }, [firstQueued, onRemoveQueuedMessage, runtimeReady]);
 
   const handleQueuedSteer = useCallback(() => {
-    if (!firstQueued) return;
+    if (!runtimeReady || !firstQueued) return;
     if (firstQueued.kind === "follow-up") {
       onPromoteQueuedToSteer?.(firstQueued.text);
     }
     // Already a steering message: nothing to promote.
-  }, [firstQueued, onPromoteQueuedToSteer]);
+  }, [firstQueued, onPromoteQueuedToSteer, runtimeReady]);
 
   const getNextSlashIndex = useCallback((direction: "up" | "down" | "left" | "right") => {
     const lastIndex = filteredSlashCommands.length - 1;
@@ -1250,7 +1259,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       }
 
       // Esc stops the agent when no slash/@/history menu or IME composition is active.
-      if (e.key === "Escape" && !isComposing && isStreaming && onAbort) {
+      if (e.key === "Escape" && !isComposing && runtimeReady && isStreaming && onAbort) {
         e.preventDefault();
         onAbort();
         return;
@@ -1273,7 +1282,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         }
       }
     },
-    [isMobile, isStreaming, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, filteredSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
+    [isMobile, isStreaming, runtimeReady, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, filteredSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
   );
 
   const handleInput = useCallback(() => {
@@ -1372,7 +1381,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   // A failed load surfaces modelError; only an in-flight load shows the
   // loading chip, so "no models" can only appear after the fetch settled.
   const showModelsLoading = Boolean(modelsLoading) && !modelError;
-  const modelSelectorDisabled = isStreaming || (showModelsLoading && modelOptions.length === 0);
+  const modelSelectorDisabled = !runtimeReady || isStreaming || (showModelsLoading && modelOptions.length === 0);
 
   const compactSavedTokens = compactResult
     ? Math.max(0, compactResult.tokensBefore - compactResult.estimatedTokensAfter)
@@ -1490,7 +1499,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         // only hide files the app can attach (code, config, logs, ...).
         accept="*/*"
         multiple
-        disabled={isStreaming}
+        disabled={isStreaming || !runtimeReady}
         style={{ display: "none" }}
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
@@ -1574,6 +1583,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 />
                 <button
                   onClick={() => removeImage(i)}
+                  disabled={!runtimeReady}
                   title="Remove image"
                   aria-label="Remove image"
                   style={{
@@ -1631,6 +1641,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 </span>
                 <button
                   onClick={() => removeTextFile(i)}
+                  disabled={!runtimeReady}
                   title="Remove file"
                   aria-label="Remove file"
                   style={{
@@ -2000,13 +2011,13 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             >
               {firstQueued.text}
             </span>
-            <QueuedActionButton onClick={handleQueuedEdit} title={t("chatInput.queuedEditTitle")}>
+            <QueuedActionButton disabled={!runtimeReady} onClick={handleQueuedEdit} title={t("chatInput.queuedEditTitle")}>
               {t("chatInput.queuedEdit")}
             </QueuedActionButton>
-            <QueuedActionButton onClick={handleQueuedDelete} title={t("chatInput.queuedDeleteTitle")}>
+            <QueuedActionButton disabled={!runtimeReady} onClick={handleQueuedDelete} title={t("chatInput.queuedDeleteTitle")}>
               {t("chatInput.queuedDelete")}
             </QueuedActionButton>
-            <QueuedActionButton onClick={handleQueuedSteer} title={t("chatInput.queuedSteerTitle")} accent>
+            <QueuedActionButton disabled={!runtimeReady} onClick={handleQueuedSteer} title={t("chatInput.queuedSteerTitle")} accent>
               {t("chatInput.queuedSteerAction")}
             </QueuedActionButton>
           </div>
@@ -2048,6 +2059,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             }}
             onInput={handleInput}
             onPaste={handlePaste}
+            readOnly={!runtimeReady}
             placeholder={t("chatInput.placeholder")}
             rows={1}
             style={{
@@ -2080,7 +2092,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             <button
               className="composer-attachment ui-focus-ring"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isStreaming}
+              disabled={isStreaming || !runtimeReady}
               title={t("chatInput.attachFile")}
               aria-label={t("chatInput.attachFile")}
               data-has-attachments={attachedImages.length || attachedTextFiles.length ? "true" : undefined}
@@ -2210,7 +2222,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                             <button
                               className="dropdown-item"
                               key={`${opt.provider}:${opt.modelId}`}
-                              onClick={() => { setModelDropdownOpen(false); if (!isActive || isAutoModelSelection) onModelChange(opt.provider, opt.modelId); }}
+                              onClick={() => { setModelDropdownOpen(false); if (runtimeReady && (!isActive || isAutoModelSelection)) onModelChange(opt.provider, opt.modelId); }}
+                              disabled={!runtimeReady}
                               style={{
                                 display: "flex", alignItems: "center", gap: 8,
                                 width: "100%", padding: "7px 12px",
@@ -2247,7 +2260,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 <button
                   className="composer-thinking-button ui-focus-ring"
                   onClick={() => setThinkingDropdownOpen((v) => !v)}
-                  disabled={isStreaming}
+                  disabled={!runtimeReady || isStreaming}
                   title={t("chatInput.changeReasoningTitle", { level: thinkingDisplayLabel })}
                   aria-label={`${t("chatInput.changeReasoning")}: ${thinkingDisplayLabel}`}
                   style={{
@@ -2292,7 +2305,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                         <button
                           className="dropdown-item"
                           key={lvl}
-                          onClick={() => { setThinkingDropdownOpen(false); if (!isActive && !isStreaming) onThinkingLevelChange(lvl); }}
+                          onClick={() => { setThinkingDropdownOpen(false); if (runtimeReady && !isActive && !isStreaming) onThinkingLevelChange(lvl); }}
+                          disabled={!runtimeReady}
                           style={{
                             display: "flex", alignItems: "center", gap: 8,
                             width: "100%", padding: "7px 12px",
@@ -2331,8 +2345,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               <button
                 className="composer-fast-toggle ui-focus-ring"
                 type="button"
-                onClick={() => { if (isStreaming) return; onFastModeChange(!fastModeEnabled); }}
-                disabled={isStreaming}
+                onClick={() => { if (!runtimeReady || isStreaming) return; onFastModeChange(!fastModeEnabled); }}
+                disabled={!runtimeReady || isStreaming}
                 title={fastModeEnabled && fastModeActive === false ? "Fast mode is enabled but inactive for this model" : `Turn OMP Fast mode ${fastModeEnabled ? "off" : "on"} for this model`}
                 aria-pressed={fastModeEnabled}
                 style={{
@@ -2393,7 +2407,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 type="button"
                 className="composer-queue-action composer-queue-action-steer ui-focus-ring"
                 onClick={() => sendQueued("steer")}
-                disabled={!value.trim() || !!attachedImages.length || !!attachedTextFiles.length}
+                disabled={!runtimeReady || !value.trim() || !!attachedImages.length || !!attachedTextFiles.length}
                 title={(attachedImages.length || attachedTextFiles.length) ? t("chatInput.imagesCannotQueue") : t("chatInput.steerNowTitle")}
                 aria-label={t("chatInput.steer")}
               >
@@ -2408,7 +2422,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 type="button"
                 className="composer-queue-action composer-queue-action-followup ui-focus-ring"
                 onClick={() => sendQueued("followup")}
-                disabled={!value.trim() || !!attachedImages.length || !!attachedTextFiles.length}
+                disabled={!runtimeReady || !value.trim() || !!attachedImages.length || !!attachedTextFiles.length}
                 title={(attachedImages.length || attachedTextFiles.length) ? t("chatInput.imagesCannotQueue") : t("chatInput.followUpTitle")}
                 aria-label={t("chatInput.followUp")}
               >
@@ -2428,6 +2442,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 onClick={isCompacting ? onAbortCompaction : onAbort}
                 title={t("chatInput.stopAgent")}
                 aria-label={t("chatInput.stopAgent")}
+                disabled={!runtimeReady}
                 data-state="stop"
               >
                 <svg width="9" height="9" viewBox="0 0 10 10" fill="none" aria-hidden="true">
@@ -2440,7 +2455,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 className="composer-primary-action ui-focus-ring"
                 type="button"
                 onClick={handleSend}
-                disabled={!value.trim() && !attachedImages.length && !attachedTextFiles.length}
+                disabled={!runtimeReady || (!value.trim() && !attachedImages.length && !attachedTextFiles.length)}
                 title={t("chatInput.send")}
                 aria-label={t("chatInput.send")}
                 data-state="send"

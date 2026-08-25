@@ -1827,7 +1827,7 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }
   const loadRuntimeModels = useCallback(async () => {
     setRuntimeModelsLoading(true);
     try {
-      const response = await fetch("/api/models");
+      const response = await fetch("/api/models", { cache: "no-store" });
       const data = response.ok ? await response.json() as { modelList?: RuntimeModelEntry[]; connectedProviders?: ConnectedProvider[] } : null;
       setRuntimeModels(data?.modelList ?? []);
       setConnectedProviders(data?.connectedProviders ?? []);

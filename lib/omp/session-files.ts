@@ -1014,7 +1014,8 @@ export async function listAllSessionInfos(): Promise<OmpSessionInfo[]> {
 }
 
 interface SessionFileListCacheEntry {
-  mtimeMs: number;
+  rootMtimeMs: number;
+  subMaxMtimeMs: number;
   files: string[];
 }
 
@@ -1042,7 +1043,7 @@ async function listSessionFiles(sessionsRoot: string): Promise<string[]> {
   if (!globalThis.__ompSessionFileListCache) globalThis.__ompSessionFileListCache = new Map();
   const cache = globalThis.__ompSessionFileListCache;
   const cached = cache.get(sessionsRoot);
-  if (cached && cached.mtimeMs === rootStat.mtimeMs) {
+  if (cached && cached.rootMtimeMs === rootStat.mtimeMs) {
     // Windows/NTFS: root mtime may not bump when a file is added inside a project subdir.
     // Validate by sampling subdir mtimes (cheap: stat per project dir, not per file).
     let stale = false;
@@ -1051,22 +1052,24 @@ async function listSessionFiles(sessionsRoot: string): Promise<string[]> {
         if (!dirent.isDirectory()) continue;
         const subPath = path.join(sessionsRoot, dirent.name);
         const subMtime = statSync(subPath).mtimeMs;
-        if (subMtime > cached.mtimeMs) { stale = true; break; }
+        if (subMtime > cached.subMaxMtimeMs) { stale = true; break; }
       }
     } catch { stale = true; }
     if (!stale) return cached.files;
   }
 
   const files = collectSessionFiles(sessionsRoot);
-  // Store max mtime across root + subdirs so future NTFS checks are accurate
-  let maxMtime = rootStat.mtimeMs;
+  // Remember the root mtime separately from the sampled subdir max: comparing
+  // the combined max against the current root mtime never matches once any
+  // subdir outgrows the root (the normal NTFS steady state), defeating the cache.
+  let subMaxMtimeMs = 0;
   try {
     for (const dirent of readDirectorySyncRuntime(sessionsRoot, { withFileTypes: true })) {
       if (!dirent.isDirectory()) continue;
-      maxMtime = Math.max(maxMtime, statSync(path.join(sessionsRoot, dirent.name)).mtimeMs);
+      subMaxMtimeMs = Math.max(subMaxMtimeMs, statSync(path.join(sessionsRoot, dirent.name)).mtimeMs);
     }
   } catch {}
-  cache.set(sessionsRoot, { mtimeMs: maxMtime, files });
+  cache.set(sessionsRoot, { rootMtimeMs: rootStat.mtimeMs, subMaxMtimeMs, files });
   return files;
 }
 

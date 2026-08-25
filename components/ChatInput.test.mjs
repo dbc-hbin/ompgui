@@ -272,6 +272,25 @@ test("renders idle send button with disabled state and accessible label", () => 
   assert.match(html, /<span class="composer-primary-label">(Send|chatInput\.send)<\/span>/);
 });
 
+test("keeps an existing session composer read-only until runtime state is ready", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(ChatInput, {
+      onSend: noop,
+      onAbort: noop,
+      onModelChange: noop,
+      runtimeReady: false,
+      isStreaming: false,
+      model: { provider: "test", modelId: "model" },
+      modelList: [{ provider: "test", modelId: "model", id: "model", name: "Test model" }],
+    }),
+  );
+
+  assert.match(html, /<textarea[^>]*readOnly/);
+  assert.match(html, /<input[^>]*type="file"[^>]*disabled/);
+  assert.match(html, /<button[^>]*class="[^"]*composer-model-button[^"]*"[^>]*disabled/);
+  assert.match(html, /<button[^>]*class="[^"]*composer-primary-action[^"]*"[^>]*disabled/);
+});
+
 test("renders active stop button when agent is streaming", () => {
   const html = renderToStaticMarkup(
     React.createElement(ChatInput, {

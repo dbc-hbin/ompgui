@@ -209,6 +209,7 @@ interface CommittedTranscriptProps {
   messageRefs: React.RefObject<(HTMLDivElement | null)[]>;
   isStreaming: boolean;
   sessionBusy: boolean;
+  runtimeReady: boolean;
   isNew: boolean;
   forkingEntryId: string | null;
   handleFork: (entryId: string) => void;
@@ -236,7 +237,7 @@ interface CommittedTranscriptProps {
  * grouping/splitting work at display-frame cadence.
  */
 const CommittedTranscript = memo(function CommittedTranscript({
-  messages, entryIds, conversationMeta, messageRefs, isStreaming, sessionBusy, isNew, forkingEntryId,
+  messages, entryIds, conversationMeta, messageRefs, isStreaming, sessionBusy, runtimeReady, isNew, forkingEntryId,
   handleFork, handleNavigate, handleEditContent, modelNames, messageCwd, onOpenFile, sessionId,
   toolCallsDefaultCollapsed, visibleCount, nearBottom, sentinelRef, handleLoadMoreClick,
 }: CommittedTranscriptProps) {
@@ -279,11 +280,11 @@ const CommittedTranscript = memo(function CommittedTranscript({
         cwd={messageCwd}
         onOpenFile={onOpenFile}
         entryId={entryIds[idx]}
-        onFork={sessionBusy || isNew || (idx === 0 && msg.role === "user") ? undefined : handleFork}
+        onFork={!runtimeReady || sessionBusy || isNew || (idx === 0 && msg.role === "user") ? undefined : handleFork}
         forking={forkingEntryId === entryIds[idx]}
-        onNavigate={sessionBusy ? undefined : handleNavigate}
-        prevAssistantEntryId={sessionBusy ? undefined : prevAssistantEntryId}
-        onEditContent={handleEditContent}
+        onNavigate={!runtimeReady || sessionBusy ? undefined : handleNavigate}
+        prevAssistantEntryId={!runtimeReady || sessionBusy ? undefined : prevAssistantEntryId}
+        onEditContent={runtimeReady ? handleEditContent : undefined}
         showTimestamp={showTimestamp}
         prevTimestamp={idx > 0 ? (messages[idx - 1] as AgentMessage & { timestamp?: number }).timestamp : undefined}
         sessionId={sessionId}
@@ -438,6 +439,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
 
   const {
     loading, error, messages, entryIds, streamState,
+    sessionReadiness, runtimeError, runtimeReady, retryRuntimeState,
     agentRunning, bashRunning, pendingBash, modelNames, modelList, modelsLoading, modelError, modelThinkingLevels, modelThinkingLevelMaps, thinkingLevel, fastModeEnabled, fastModeActive,
     liveModelMeta,
     retryInfo, contextUsage, forkingEntryId,
@@ -637,9 +639,9 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
   useEffect(() => () => { onContextUsageChange?.(null); }, [onContextUsageChange]);
 
   const onDrop = useCallback((files: File[]) => {
-    if (sessionBusy) return;
+    if (sessionBusy || !runtimeReady) return;
     chatInputRef?.current?.addFiles(files);
-  }, [sessionBusy, chatInputRef]);
+  }, [runtimeReady, sessionBusy, chatInputRef]);
 
   const { isDragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = useDragDrop(onDrop);
 
@@ -717,9 +719,10 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
       ref={chatInputRef}
       onSend={handleSend}
       onAbort={handleAbort}
-      onSteer={agentRunning ? handleSteer : undefined}
-      onFollowUp={agentRunning ? handleFollowUp : undefined}
-      onPromptWithStreamingBehavior={agentRunning ? handlePromptWithStreamingBehavior : undefined}
+      runtimeReady={runtimeReady}
+      onSteer={runtimeReady && agentRunning ? handleSteer : undefined}
+      onFollowUp={runtimeReady && agentRunning ? handleFollowUp : undefined}
+      onPromptWithStreamingBehavior={runtimeReady && agentRunning ? handlePromptWithStreamingBehavior : undefined}
       isStreaming={sessionBusy}
       model={displayModelValue}
       isAutoModelSelection={isAutoModelSelection}
@@ -727,17 +730,17 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
       modelList={modelList}
       modelsLoading={modelsLoading}
       modelError={modelError}
-      onModelChange={handleModelChange}
-      onAbortCompaction={handleAbortCompaction}
+      onModelChange={runtimeReady ? handleModelChange : undefined}
+      onAbortCompaction={runtimeReady ? handleAbortCompaction : undefined}
       isCompacting={isCompacting}
       compactResult={compactResult}
       thinkingLevel={thinkingLevel}
-      onThinkingLevelChange={session || isNew ? handleThinkingLevelChange : undefined}
+      onThinkingLevelChange={runtimeReady && (session || isNew) ? handleThinkingLevelChange : undefined}
       fastModeEnabled={fastModeEnabled}
       fastModeActive={fastModeActive}
       fastModeSupported={Boolean(displayModelValue && modelList.some((entry) => entry.provider === displayModelValue.provider && entry.id === displayModelValue.modelId && entry.supportsFastMode))}
-      onFastModeChange={session || isNew ? handleFastModeChange : undefined}
-      onAbortRetry={session ? handleAbortRetry : undefined}
+      onFastModeChange={runtimeReady && (session || isNew) ? handleFastModeChange : undefined}
+      onAbortRetry={runtimeReady && session ? handleAbortRetry : undefined}
       availableThinkingLevels={availableThinkingLevels}
       thinkingLevelMap={currentThinkingLevelMap}
       modelNameOverride={liveModelMeta?.name ?? null}
@@ -752,8 +755,8 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
       onPromoteQueuedToSteer={promoteQueuedToSteer}
       slashCommands={slashCommands}
       slashCommandsLoading={slashCommandsLoading}
-      onLoadSlashCommands={loadSlashCommands}
-      onBuiltinCommand={handleBuiltinSlashCommand}
+      onLoadSlashCommands={runtimeReady ? loadSlashCommands : undefined}
+      onBuiltinCommand={runtimeReady ? handleBuiltinSlashCommand : undefined}
       onAudioUnlock={unlockAudio}
       draftKey={session?.id ?? (newSessionCwd ? `new:${newSessionCwd}` : undefined)}
       cwd={session?.cwd ?? newSessionCwd}
@@ -779,6 +782,41 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
     );
   }
 
+  const runtimeUnavailable = !isNew && sessionReadiness.runtime !== "ready";
+  const runtimeBanner = runtimeUnavailable ? (
+    <div
+      role={sessionReadiness.runtime === "error" ? "alert" : "status"}
+      aria-live="polite"
+      style={{
+        display: "flex", alignItems: "center", gap: 10,
+        margin: "0 auto var(--space-3)", maxWidth: CHAT_COLUMN_MAX_WIDTH,
+        padding: "8px 10px", border: "1px solid color-mix(in srgb, var(--status-warning) 35%, var(--border))",
+        borderRadius: "var(--radius-control)", background: "color-mix(in srgb, var(--status-warning) 8%, var(--bg-panel))",
+        color: "var(--text-muted)", fontSize: "var(--text-sm)",
+      }}
+    >
+      <span style={{ minWidth: 0, flex: 1, overflowWrap: "anywhere" }}>
+        {sessionReadiness.runtime === "error"
+          ? runtimeError
+            ? t("chatWindow.runtimeUnavailableDetail", { error: runtimeError })
+            : t("chatWindow.runtimeUnavailable")
+          : t("chatWindow.runtimePreparing")}
+      </span>
+      {sessionReadiness.runtime === "error" && (
+        <button
+          type="button"
+          onClick={() => void retryRuntimeState()}
+          style={{
+            flexShrink: 0, padding: "4px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)",
+            background: "var(--bg)", color: "var(--text)", cursor: "pointer", fontSize: "var(--text-sm)",
+          }}
+        >
+          {t("chatWindow.runtimeRetry")}
+        </button>
+      )}
+    </div>
+  ) : null;
+
   return (
     <div
       className="relative flex h-full flex-col overflow-hidden"
@@ -787,7 +825,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {isDragOver && !sessionBusy && (
+      {isDragOver && runtimeReady && !sessionBusy && (
         <div className="drop-zone-overlay pointer-events-none absolute inset-0 flex items-center justify-center backdrop-blur-[1px]" style={{ zIndex: "var(--z-dropdown)" }}>
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             {[0, 0.8, 1.6].map((delay) => (
@@ -875,6 +913,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
         </div>
       ) : (
       <>
+      {runtimeBanner}
       <div className="relative flex flex-1 overflow-hidden">
         <div
           style={{
@@ -912,6 +951,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
               messageRefs={messageRefs}
               isStreaming={streamState.isStreaming}
               sessionBusy={sessionBusy}
+              runtimeReady={runtimeReady}
               isNew={isNew}
               forkingEntryId={forkingEntryId}
               handleFork={handleFork}
