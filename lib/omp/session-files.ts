@@ -1261,14 +1261,20 @@ export function archiveSessionFileWithArtifacts(filePath: string, roots: Session
     if (artifactsMoved) {
       try { renameSync(destinationArtifacts, sourceArtifacts); } catch { /* preserve original error */ }
     }
+    // Once the source has been removed, the compressed archive is the only
+    // durable copy until restoration succeeds. Never delete that last copy
+    // merely because restoration was attempted.
+    let restored = true;
     if (sourceRemoved && destinationCreated) {
+      restored = false;
       try {
         writeFileSync(tempRestore, gunzipSync(readFileSync(destination)));
         mkdirSync(path.dirname(source), { recursive: true });
         renameSync(tempRestore, source);
+        restored = true;
       } catch { /* preserve original error; archive remains recoverable */ }
     }
-    if (destinationCreated) {
+    if (destinationCreated && restored) {
       try { unlinkSync(destination); } catch { /* preserve original error */ }
     }
     throw error;
