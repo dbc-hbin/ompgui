@@ -4,6 +4,8 @@ import android.net.Uri
 import android.os.Bundle
 import android.webkit.WebSettings
 import android.webkit.WebView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.getcapacitor.BridgeActivity
 
 /** Thin Capacitor host for the shared remote ompgui web application. */
@@ -36,6 +38,19 @@ class MainActivity : BridgeActivity() {
             setSupportMultipleWindows(false)
             safeBrowsingEnabled = true
         }
+        ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
+            val systemInsets = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
+            )
+            view.setPadding(
+                systemInsets.left,
+                systemInsets.top,
+                systemInsets.right,
+                systemInsets.bottom,
+            )
+            insets
+        }
+        ViewCompat.requestApplyInsets(webView)
     }
 
     internal fun loadConfiguredOrigin() {
