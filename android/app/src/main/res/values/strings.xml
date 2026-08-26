@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ompgui Remote</string>
+    <string name="title_activity_main">ompgui Remote</string>
+    <string name="package_name">com.dbchbin.ompgui.remote</string>
+    <string name="custom_url_scheme">com.dbchbin.ompgui.remote</string>
+</resources>

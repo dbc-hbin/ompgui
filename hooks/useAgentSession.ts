@@ -31,6 +31,7 @@ import { expandWebSlashCommand } from "@/lib/web-slash-commands";
 import { createActiveGoal, parseActiveGoal, type ActiveGoal, type ActivePlan } from "@/lib/web-mode-state";
 import { deriveContextUsage, mergeContextUsage, resolveContextWindow } from "@/lib/context-usage";
 import { matchesStateLoadFence } from "@/lib/session-load-fence";
+import { getRemoteReplicaOrigin, persistRemoteReplicaSnapshot, projectRemoteReplica } from "@/lib/remote-replica";
 import type { HostToolDefinition, HostUriSchemeDefinition, RpcAvailableSlashCommand, SessionStatsInfo, TodoPhase } from "@/lib/pi-types";
 import { isRecord } from "@/lib/type-guards";
 import {
@@ -3240,6 +3241,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadSession, restoreRuntimeFromState]);
+
+  // Keep the bounded browser/native replica in sync only after this existing
+  // session's authoritative history request succeeds. The replica is never
+  // read into live state here, so cached data cannot grant runtime authority.
+  useEffect(() => {
+    if (isNew || !session || sessionIdRef.current !== session.id || sessionReadinessRef.current.history !== "ready") return;
+    const origin = getRemoteReplicaOrigin();
+    if (!origin) return;
+    const snapshot = projectRemoteReplica({
+      origin,
+      session: { id: session.id, title: session.name, cwd: session.cwd },
+      leafId: activeLeafId,
+      messages,
+    });
+    if (snapshot) persistRemoteReplicaSnapshot(snapshot);
+  }, [activeLeafId, isNew, messages, session, sessionReadiness.history]);
 
   useEffect(() => {
     onSystemPromptChange?.(systemPrompt);
