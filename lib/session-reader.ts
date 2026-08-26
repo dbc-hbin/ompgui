@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "fs";
+import { existsSync, realpathSync, statSync } from "fs";
 import { normalize as normalizePath } from "path";
 import { getAgentDir } from "./omp/paths";
 import {
@@ -6,6 +6,7 @@ import {
   listAllSessionInfos,
   loadSessionFile,
   readSessionHeaderSync,
+  type LoadedSession,
   type OmpSessionInfo,
 } from "./omp/session-files";
 import type {
@@ -147,10 +148,11 @@ export function invalidateSessionListCache(): void {
   // not change when a file is added inside an existing project subdirectory
   // (Windows/NTFS). Clear it too so new sessions appear immediately.
   invalidateSessionFileListCache();
-  // Drop cached entry parses so a mutation preserving size+mtime (rare) can
-  // never serve stale entries; the (size, mtimeMs) key already invalidates
-  // the common case, this closes the remaining window.
+  // Raw documents are identity-keyed for ordinary writes; explicit mutation
+  // and watcher events clear them to close same-signature edge cases.
+  globalThis.__ompSessionDocumentCache?.clear();
   globalThis.__ompSessionEntriesCache?.clear();
+  globalThis.__ompSessionEntriesCache = undefined;
 }
 
 function getPathCache(): Map<string, string> {
@@ -246,61 +248,141 @@ export function readSessionHeader(filePath: string): SessionHeader | null {
   return readSessionHeaderSync(filePath);
 }
 
-/** Full-file entry parse memoized on (path, size, mtimeMs). Read-only scans
- * (subagent history, file-reference checks, thinking routes) re-parse MB-scale
- * session files on every 15s reconcile poll and again at run end; the memo
- * turns each UNCHANGED file's parse into a single stat — the same convention
- * as scanSessionInfoCached. Stored on globalThis for hot-reload safety and
- * LRU-bounded. Entries are SHARED across cache hits: callers must treat them
- * as immutable (all current callers only read). */
-interface SessionEntriesCacheEntry {
+interface SessionDocumentIdentity {
+  dev: number;
+  ino: number;
   size: number;
   mtimeMs: number;
-  entries: SessionEntry[];
+  ctimeMs: number;
 }
+
+/** Full raw document memoized by canonical path and file identity. The loaded
+ * header and entries are SHARED across cache hits and must remain immutable:
+ * response-specific blob resolution happens on selective copies. Stored on
+ * globalThis for hot-reload safety and bounded by both entry count and source
+ * bytes so a run of large sessions cannot retain unbounded parsed objects. */
+interface SessionDocumentCacheEntry {
+  identity: SessionDocumentIdentity;
+  sourceBytes: number;
+  document: SessionDocument;
+}
+
+export type SessionDocument = Omit<LoadedSession, "header" | "entries" | "titleSlot"> & {
+  readonly header: Readonly<SessionHeader> | null;
+  readonly entries: readonly SessionEntry[];
+  readonly titleSlot: Readonly<NonNullable<LoadedSession["titleSlot"]>> | undefined;
+};
 
 declare global {
-  var __ompSessionEntriesCache: Map<string, SessionEntriesCacheEntry> | undefined;
+  var __ompSessionDocumentCache: Map<string, SessionDocumentCacheEntry> | undefined;
+  var __ompSessionEntriesCache: Map<string, unknown> | undefined;
 }
 
-const MAX_SESSION_ENTRIES_CACHE_ENTRIES = 32;
+const MAX_SESSION_DOCUMENT_CACHE_ENTRIES = 32;
+const MAX_SESSION_DOCUMENT_CACHE_SOURCE_BYTES = 64 * 1024 * 1024;
 
-function getSessionEntriesCache(): Map<string, SessionEntriesCacheEntry> {
-  if (!globalThis.__ompSessionEntriesCache) globalThis.__ompSessionEntriesCache = new Map();
-  return globalThis.__ompSessionEntriesCache;
+function getSessionDocumentCache(): Map<string, SessionDocumentCacheEntry> {
+  // A dev-server hot reload can retain the superseded entries-only cache.
+  // Drop its references once during cutover rather than keeping both stores.
+  globalThis.__ompSessionEntriesCache?.clear();
+  globalThis.__ompSessionEntriesCache = undefined;
+  if (!globalThis.__ompSessionDocumentCache) globalThis.__ompSessionDocumentCache = new Map();
+  return globalThis.__ompSessionDocumentCache;
 }
 
-function loadSessionEntriesCached(filePath: string): SessionEntry[] {
-  let size: number;
-  let mtimeMs: number;
+function sessionDocumentIdentity(filePath: string): SessionDocumentIdentity | null {
   try {
     const stat = statSync(filePath);
-    size = stat.size;
-    mtimeMs = stat.mtimeMs;
+    return {
+      dev: stat.dev,
+      ino: stat.ino,
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      ctimeMs: stat.ctimeMs,
+    };
   } catch {
-    // Missing/unreadable file — mirror loadSessionFile's lenient empty result.
-    return loadSessionFile(filePath).entries;
+    return null;
   }
-  const cache = getSessionEntriesCache();
-  const cached = cache.get(filePath);
-  if (cached && cached.size === size && cached.mtimeMs === mtimeMs) {
-    cache.delete(filePath);
-    cache.set(filePath, cached);
-    return cached.entries;
-  }
-  const entries = loadSessionFile(filePath).entries;
-  cache.set(filePath, { size, mtimeMs, entries });
-  while (cache.size > MAX_SESSION_ENTRIES_CACHE_ENTRIES) {
+}
+
+function sameSessionDocumentIdentity(a: SessionDocumentIdentity, b: SessionDocumentIdentity): boolean {
+  return (
+    a.dev === b.dev &&
+    a.ino === b.ino &&
+    a.size === b.size &&
+    a.mtimeMs === b.mtimeMs &&
+    a.ctimeMs === b.ctimeMs
+  );
+}
+
+function trimSessionDocumentCache(cache: Map<string, SessionDocumentCacheEntry>): void {
+  let sourceBytes = 0;
+  for (const entry of cache.values()) sourceBytes += entry.sourceBytes;
+  while (
+    cache.size > MAX_SESSION_DOCUMENT_CACHE_ENTRIES ||
+    sourceBytes > MAX_SESSION_DOCUMENT_CACHE_SOURCE_BYTES
+  ) {
     const oldestKey = cache.keys().next().value;
     if (oldestKey === undefined) break;
+    const oldest = cache.get(oldestKey);
     cache.delete(oldestKey);
+    sourceBytes -= oldest?.sourceBytes ?? 0;
   }
-  return entries;
+}
+
+function freezeSessionDocument(document: LoadedSession): SessionDocument {
+  const pending: object[] = [document];
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (!value || Object.isFrozen(value)) continue;
+    for (const child of Object.values(value)) {
+      if (typeof child === "object" && child !== null && !Object.isFrozen(child)) {
+        pending.push(child);
+      }
+    }
+    Object.freeze(value);
+  }
+  return document;
+}
+
+/** Shared raw session document. Callers must not mutate the returned header or
+ * entries. File identity is checked both before and after parsing so a write
+ * racing the read is returned for that request but never retained as a stable
+ * cache generation. */
+export function getSessionDocument(filePath: string): SessionDocument {
+  let canonicalPath: string;
+  try {
+    canonicalPath = realpathSync.native(filePath);
+  } catch {
+    return freezeSessionDocument(loadSessionFile(filePath));
+  }
+  const before = sessionDocumentIdentity(canonicalPath);
+  if (!before) return freezeSessionDocument(loadSessionFile(canonicalPath));
+
+  const cache = getSessionDocumentCache();
+  const cached = cache.get(canonicalPath);
+  if (cached && sameSessionDocumentIdentity(cached.identity, before)) {
+    cache.delete(canonicalPath);
+    cache.set(canonicalPath, cached);
+    return cached.document;
+  }
+
+  const document = freezeSessionDocument(loadSessionFile(canonicalPath));
+  const after = sessionDocumentIdentity(canonicalPath);
+  if (
+    after &&
+    sameSessionDocumentIdentity(before, after) &&
+    after.size <= MAX_SESSION_DOCUMENT_CACHE_SOURCE_BYTES
+  ) {
+    cache.set(canonicalPath, { identity: after, sourceBytes: after.size, document });
+    trimSessionDocumentCache(cache);
+  }
+  return document;
 }
 
 /** Session entries without blob resolution (fine for reference/thinking scans). */
-export function getSessionEntries(filePath: string): SessionEntry[] {
-  return loadSessionEntriesCached(filePath);
+export function getSessionEntries(filePath: string): readonly SessionEntry[] {
+  return getSessionDocument(filePath).entries;
 }
 
 /**
@@ -351,7 +433,7 @@ function parseTodoPhases(value: unknown): TodoPhase[] | null {
 }
 
 /** Latest valid todo snapshot on the selected branch, without exposing tool metadata to the client. */
-export function getTodoPhasesFromEntries(entries: SessionEntry[], leafId?: string | null): TodoPhase[] {
+export function getTodoPhasesFromEntries(entries: readonly SessionEntry[], leafId?: string | null): TodoPhase[] {
   if (leafId === null || entries.length === 0) return [];
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
   let entry = leafId ? byId.get(leafId) : entries[entries.length - 1];
@@ -392,7 +474,7 @@ const SUPERSEDED_COMPACTION_SUMMARY = "[Superseded compaction summary elided aft
  * (the collapsed view the pi-web UI is built around).
  */
 export function buildSessionContext(
-  entries: SessionEntry[],
+  entries: readonly SessionEntry[],
   leafId?: string | null,
   options: { deferThinking?: boolean; deferToolResultImages?: boolean } = {},
 ): SessionContext {

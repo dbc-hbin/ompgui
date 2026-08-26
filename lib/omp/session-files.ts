@@ -365,6 +365,32 @@ export function resolveBlobRefsInEntries(entries: SessionEntry[], options: Resol
   }
 }
 
+/**
+ * Build a response-owned entry array from a shared raw document. Blob-free
+ * entries are reused because every response projection is read-only; entries
+ * that need blob resolution are cloned before the mutating resolver runs.
+ * This keeps cached blob refs immutable without copying an entire large
+ * session on every open.
+ */
+export function materializeSessionEntries(
+  entries: readonly SessionEntry[],
+  options: ResolveBlobOptions = {},
+): SessionEntry[] {
+  return entries.map((entry) => {
+    if (
+      options.skipToolResultImages &&
+      entry.type === "message" &&
+      (entry.message as { role?: string }).role === "toolResult"
+    ) {
+      return entry;
+    }
+    if (!containsBlobRef(entry)) return entry;
+    const copy = structuredClone(entry);
+    resolveBlobsInValue(copy, undefined);
+    return copy;
+  });
+}
+
 // ============================================================================
 // Session file loading
 // ============================================================================
@@ -585,7 +611,7 @@ export function readSessionHeaderSync(filePath: string): SessionHeader | null {
  * (broken parent chain) become extra roots. Labels come from label entries in
  * append order (a later label overrides; an empty label clears).
  */
-export function buildSessionTree(entries: SessionEntry[]): SessionTreeNode[] {
+export function buildSessionTree(entries: readonly SessionEntry[]): SessionTreeNode[] {
   const labels = new Map<string, string>();
   for (const entry of entries) {
     if (entry.type !== "label") continue;
@@ -621,7 +647,7 @@ export function buildSessionTree(entries: SessionEntry[]): SessionTreeNode[] {
 }
 
 /** The persisted leaf: the last appended entry (matches omp's loaded-session leaf). */
-export function getLeafEntryId(entries: SessionEntry[]): string | null {
+export function getLeafEntryId(entries: readonly SessionEntry[]): string | null {
   return entries.length > 0 ? entries[entries.length - 1].id : null;
 }
 

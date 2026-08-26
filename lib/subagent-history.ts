@@ -85,7 +85,7 @@ function resultStatus(value: Record<string, unknown>): SubagentHistoryEntry["sta
  * (settled per-subagent telemetry), then resolves sibling transcript files.
  */
 export function extractSubagentHistory(sessionFilePath: string): SubagentHistoryEntry[] {
-  let entries: SessionEntry[];
+  let entries: readonly SessionEntry[];
   try {
     entries = getSessionEntries(sessionFilePath);
   } catch {

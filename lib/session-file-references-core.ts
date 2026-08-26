@@ -64,7 +64,7 @@ function collectStrings(value: unknown, out: string[]): void {
   for (const item of Object.values(value)) collectStrings(item, out);
 }
 
-export function isFilePathReferencedByEntries(filePath: string, entries: SessionEntry[]): boolean {
+export function isFilePathReferencedByEntries(filePath: string, entries: readonly SessionEntry[]): boolean {
   for (const entry of entries) {
     const strings: string[] = [];
     collectStrings(entry, strings);
@@ -73,7 +73,7 @@ export function isFilePathReferencedByEntries(filePath: string, entries: Session
   return false;
 }
 
-export function isBashOutputPathReferencedByEntries(filePath: string, entries: SessionEntry[]): boolean {
+export function isBashOutputPathReferencedByEntries(filePath: string, entries: readonly SessionEntry[]): boolean {
   return entries.some((entry) => (
     entry.type === "message"
     && entry.message.role === "bashExecution"

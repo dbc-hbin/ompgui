@@ -6,7 +6,7 @@ import {
   buildSessionTree,
   deleteSessionFileWithArtifacts,
   getLeafEntryId,
-  loadSessionFile,
+  materializeSessionEntries,
   MAX_SESSION_LOAD_BYTES,
   parseTitleSlotLine,
   setSessionTitle,
@@ -19,6 +19,7 @@ import {
   invalidateSessionPathCache,
   invalidateSessionListCache,
   buildSessionContext,
+  getSessionDocument,
   readSessionHeader,
 } from "@/lib/session-reader";
 import { apiErrorResponse, resolveSessionPathOr404 } from "@/lib/api-utils";
@@ -160,10 +161,7 @@ export async function GET(
     const deferToolResultImages = searchParams.has("deferMedia");
     const includeState = searchParams.has("includeState");
 
-    const { header, entries, error: loadError } = loadSessionFile(filePath, {
-      resolveBlobs: true,
-      skipToolResultImages: deferToolResultImages,
-    });
+    const { header, entries: rawEntries, error: loadError } = getSessionDocument(filePath);
     if (loadError === "too_large") {
       return NextResponse.json(
         { error: "Session file is too large to open in ompgui", code: "session_file_too_large" },
@@ -173,6 +171,9 @@ export async function GET(
     if (!header) {
       return NextResponse.json({ error: "Session file is missing or malformed", code: "session_file_malformed" }, { status: 404 });
     }
+    const entries = materializeSessionEntries(rawEntries, {
+      skipToolResultImages: deferToolResultImages,
+    });
     const leafId = getLeafEntryId(entries);
     const tree = projectTreeForResponse(buildSessionTree(entries));
     const context = buildSessionContext(entries, leafId, { deferThinking, deferToolResultImages });
