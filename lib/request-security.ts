@@ -8,8 +8,11 @@ function canonicalOrigin(value: string): string | null {
 
 function getRequestOrigin(request: Request): string | null {
   const requestUrl = new URL(request.url);
-  const host = request.headers.get("host");
-  return host ? canonicalOrigin(`${requestUrl.protocol}//${host}`) : requestUrl.origin;
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0].trim();
+  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0].trim();
+  const host = forwardedHost ?? request.headers.get("host");
+  const protocol = forwardedProto ? `${forwardedProto}:` : requestUrl.protocol;
+  return host ? canonicalOrigin(`${protocol}//${host}`) : requestUrl.origin;
 }
 
 /** Reject browser cross-site API requests while preserving non-browser clients. */

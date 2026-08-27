@@ -690,6 +690,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const reconnectActionsRef = useRef<((sid: string) => void) | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
+  // This is the session selected by the latest render. Unlike sessionIdRef,
+  // it stays null while a new session is acquiring its real id, so cleanup can
+  // distinguish a true switch from the same-id new -> existing promotion.
+  const selectedSessionIdRef = useRef<string | null>(session?.id ?? null);
+  selectedSessionIdRef.current = session?.id ?? null;
   // Every transcript/runtime load gets a new generation. Responses from an
   // older load must not mutate this hook, even when the session id is the same
   // (for example, two reloads started back-to-back).
@@ -3209,38 +3214,65 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     completionScrollAllowedRef.current = end.getBoundingClientRect().bottom - container.getBoundingClientRect().bottom <= 24;
   }, []);
 
-  // Load session on mount
+  const disposeSessionResources = useCallback(() => {
+    bashRecoveryIdRef.current += 1;
+    eventCoalescerRef.current?.reset();
+    const source = eventSourceRef.current;
+    eventConnectionManager.invalidate();
+    if (source && source.readyState !== EventSource.CLOSED) source.close();
+    eventSourceRef.current = null;
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    if (rosterRefreshTimerRef.current) {
+      clearTimeout(rosterRefreshTimerRef.current);
+      rosterRefreshTimerRef.current = null;
+    }
+    if (subagentVersionFlushFrameRef.current !== null) {
+      cancelAnimationFrame(subagentVersionFlushFrameRef.current);
+      subagentVersionFlushFrameRef.current = null;
+    }
+    subagentVersionFlushRef.current = null;
+    subagentActivityFlushRef.current = null;
+  }, [eventConnectionManager]);
+
+  // Keep callback identities out of this lifecycle boundary. In particular,
+  // promoteNewSession changes isNew, which necessarily changes loadSession and
+  // restoreRuntimeFromState while the real session id stays the same.
+  const loadSessionRef = useRef(loadSession);
+  loadSessionRef.current = loadSession;
+  const restoreRuntimeFromStateRef = useRef(restoreRuntimeFromState);
+  restoreRuntimeFromStateRef.current = restoreRuntimeFromState;
+
+  // Load a selected session and own its stream by real session id. A null -> id
+  // transition is the same-session new -> existing promotion once
+  // sessionIdRef already holds that id, so its cleanup must leave the current
+  // EventSource/connection record intact.
   useEffect(() => {
-    if (session) {
-      sessionIdRef.current = session.id;
-      loadSession(session.id, true, true).then((agentState) => {
-        if (agentState) restoreRuntimeFromState(session.id, agentState);
+    const sid = session?.id ?? null;
+    if (sid) {
+      sessionIdRef.current = sid;
+      const load = loadSessionRef.current;
+      const restore = restoreRuntimeFromStateRef.current;
+      void load(sid, true, true).then((agentState) => {
+        if (agentState) restore(sid, agentState);
       });
+    } else {
+      sessionIdRef.current = null;
     }
     return () => {
-      bashRecoveryIdRef.current += 1;
-      eventCoalescerRef.current?.reset();
-      const source = eventSourceRef.current;
-      eventConnectionManager.invalidate();
-      if (source && source.readyState !== EventSource.CLOSED) source.close();
-      eventSourceRef.current = null;
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = null;
-      }
-      if (rosterRefreshTimerRef.current) {
-        clearTimeout(rosterRefreshTimerRef.current);
-        rosterRefreshTimerRef.current = null;
-      }
-      if (subagentVersionFlushFrameRef.current !== null) {
-        cancelAnimationFrame(subagentVersionFlushFrameRef.current);
-        subagentVersionFlushFrameRef.current = null;
-      }
-      subagentVersionFlushRef.current = null;
-      subagentActivityFlushRef.current = null;
+      // The transient new-session render may be replaced by an existing
+      // session object after ensure_session has already assigned this id. That
+      // null -> id promotion must preserve the current EventSource/manager
+      // record; only a different id or an unmount disposes session resources.
+      const sameSession = sessionIdRef.current !== null
+        && sessionIdRef.current === selectedSessionIdRef.current;
+      if (sameSession) return;
+      disposeSessionResources();
+      sessionIdRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadSession, restoreRuntimeFromState]);
+  }, [session?.id, disposeSessionResources]);
 
   // Keep the bounded browser/native replica in sync only after this existing
   // session's authoritative history request succeeds. The replica is never
@@ -3346,10 +3378,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [messages, streamState, agentRunning, agentPhase, extensionWidgets, isCompacting, retryInfo, activeSubagentCount, todoPhases, scrollToBottom, loading]);
 
-  useEffect(() => () => {
-    hookAliveRef.current = false;
-    if (followScrollFrameRef.current !== null) cancelAnimationFrame(followScrollFrameRef.current);
-  }, []);
+  // Session changes are handled by the id-scoped effect above; this effect
+  // owns the final unmount so an unchanged selected id cannot skip disposal.
+  useEffect(() => {
+    hookAliveRef.current = true;
+    return () => {
+      hookAliveRef.current = false;
+      disposeSessionResources();
+      if (followScrollFrameRef.current !== null) cancelAnimationFrame(followScrollFrameRef.current);
+    };
+  }, [disposeSessionResources]);
 
   // Load model list
   useEffect(() => {
