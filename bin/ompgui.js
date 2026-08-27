@@ -6,14 +6,26 @@ const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const { parseLaunchOptions } = require("./ompgui-options");
+const pkgDir = path.join(__dirname, "..");
+const options = parseLaunchOptions();
+if (options.help || options.version) process.exit(0);
+if (options.command) {
+  if (options.command !== "update" || options.extraPositionals.length) {
+    console.error(`Unknown ompgui command: ${[options.command, ...options.extraPositionals].join(" ")}`);
+    process.exit(1);
+  }
+  const { updateOmpGui } = require("./ompgui-update");
+  updateOmpGui({ packageDir: pkgDir }).catch((error) => {
+    console.error(`Could not update ompgui: ${error.message}`);
+    process.exitCode = 1;
+  });
+  return;
+}
 const { isPortAvailable } = require("./port-availability");
 const { wireChildProcessLifecycle } = require("./process-lifecycle");
-const pkgDir = path.join(__dirname, "..");
 const nextDir = path.join(pkgDir, ".next");
 let nextBin;
 try { nextBin = require.resolve("next/dist/bin/next", { paths:[pkgDir] }); } catch { try { nextBin = path.join(path.dirname(require.resolve("next/package.json", {paths:[pkgDir]})), "dist", "bin", "next"); } catch { nextBin = path.join(pkgDir,"node_modules/next/dist/bin/next"); } }
-const options = parseLaunchOptions();
-if (options.help || options.version) process.exit(0);
 const { port, hostname, password, openBrowser } = options;
 if (password) { process.env.OMPGUI_PASSWORD = password; process.env.OMP_WEB_PASSWORD = password; }
 const loopback = new Set(["127.0.0.1","localhost","::1","[::1]"]);

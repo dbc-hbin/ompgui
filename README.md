@@ -35,6 +35,8 @@ npm install -g ompgui
 ompgui
 ```
 
+Update a global installation with `ompgui update`.
+
 Then open [http://127.0.0.1:30177](http://127.0.0.1:30177). The CLI will try to open the browser automatically after the server is ready. ompgui listens on `127.0.0.1` by default.
 
 **Options:**

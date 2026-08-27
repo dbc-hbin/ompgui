@@ -33,6 +33,8 @@ npm install -g ompgui
 ompgui
 ```
 
+可使用 `ompgui update` 更新全局安装。
+
 然后打开 [http://127.0.0.1:30177](http://127.0.0.1:30177)。服务器就绪后，CLI 会尝试自动打开浏览器。ompgui 默认监听 `127.0.0.1`。
 
 **选项：**

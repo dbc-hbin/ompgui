@@ -21,6 +21,7 @@
   },
   "files": [
     "bin/ompgui.js",
+    "bin/ompgui-update.js",
     "bin/omp-web.js",
     "bin/ompgui-options.js",
     "bin/omp-web-options.js",
