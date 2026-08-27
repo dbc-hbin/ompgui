@@ -271,6 +271,7 @@
   "chatWindow.subagentState.aborted": "中止",
   "chatWindow.subagentState.completed": "完了",
   "chatWindow.subagentState.failed": "失敗",
+  "chatWindow.subagentState.lost": "切断",
   "chatWindow.subagentState.started": "実行中",
   "chatWindow.subagentSummary": "{running} 実行中 · {total} 件",
   "chatWindow.subagentsPanel": "サブエージェント",

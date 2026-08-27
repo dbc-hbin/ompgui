@@ -4,6 +4,12 @@ export type SubagentHubFilter = "all" | "active" | "completed" | "failed";
 export type SubagentFreshness = "live" | "stale" | "history";
 
 export const SUBAGENT_STALE_AFTER_MS = 15_000;
+/** Cadence for successful authoritative get_subagents reconciliations. */
+export const SUBAGENT_RECONCILE_INTERVAL_MS = 5_000;
+/** Grace period after the missing-snapshot threshold before marking a row lost. */
+export const SUBAGENT_LOST_GRACE_MS = 30_000;
+/** Successful authoritative snapshots that must omit a row before grace applies. */
+export const SUBAGENT_MISSING_SNAPSHOTS_REQUIRED = 2;
 
 /**
  * The parent fields that can accompany a progress snapshot on the wire. The
@@ -20,6 +26,24 @@ export interface SubagentProgressRecoveryPayload {
   parentToolCallId?: string;
   sessionFile?: string;
   detached?: boolean;
+}
+
+/** Map a progress-frame status to the internal roster status shape. */
+export function progressStatusToSubagentStatus(
+  status: unknown,
+  fallback: SubagentInfo["status"],
+): SubagentInfo["status"] {
+  switch (status) {
+    case "pending":
+    case "running":
+      return "started";
+    case "completed":
+    case "failed":
+    case "aborted":
+      return status;
+    default:
+      return fallback;
+  }
 }
 
 /**
@@ -41,13 +65,7 @@ export function createSubagentFromProgress(
     ? payloadIndex
     : (typeof progressIndex === "number" && Number.isFinite(progressIndex) && progressIndex >= 0 ? progressIndex : 0);
 
-  const status: SubagentInfo["status"] = progress.status === "pending" || progress.status === "running"
-    ? "started"
-    : progress.status === "failed"
-      ? "failed"
-      : progress.status === "aborted"
-        ? "aborted"
-        : "completed";
+  const status = progressStatusToSubagentStatus(progress.status, "started");
 
   const info: SubagentInfo = {
     id,
@@ -82,14 +100,24 @@ export function getSubagentFreshness(subagent: SubagentInfo, now = Date.now()): 
 }
 
 /** Apply the hub's status filter without changing row identity or order. */
-export function filterSubagentHubRows(subagents: SubagentInfo[], filter: SubagentHubFilter): SubagentInfo[] {
+export function filterSubagentHubRows(
+  subagents: SubagentInfo[],
+  filter: SubagentHubFilter,
+  now = Date.now(),
+): SubagentInfo[] {
   switch (filter) {
     case "active":
-      return subagents.filter((subagent) => subagent.source !== "history" && subagent.status === "started");
+      return subagents.filter(
+        (subagent) => subagent.source !== "history"
+          && subagent.status === "started"
+          && getSubagentFreshness(subagent, now) === "live",
+      );
     case "completed":
       return subagents.filter((subagent) => subagent.status === "completed");
     case "failed":
-      return subagents.filter((subagent) => subagent.status === "failed" || subagent.status === "aborted");
+      return subagents.filter(
+        (subagent) => subagent.status === "failed" || subagent.status === "aborted" || subagent.status === "lost",
+      );
     case "all":
     default:
       return subagents;
@@ -167,21 +195,60 @@ export function mergeSubagentRoster(
 }
 
 /**
- * Remove live rows absent from a point-in-time get_subagents snapshot. Rows
- * updated at or after the request fence survive because they are newer than
- * the snapshot, and history rows are never pruned by the live registry view.
+ * Reconcile a successful point-in-time get_subagents snapshot with the local
+ * roster. The registry removes a child as soon as its lifecycle settles, so a
+ * single absence cannot distinguish a missed frame from transport loss. Keep
+ * eligible live rows while two successful snapshots omit them, then require a
+ * further grace period before marking them internally lost.
+ *
+ * The request fence protects lifecycle/progress frames observed after this
+ * snapshot was requested. Terminal and history rows are never changed by the
+ * live registry view.
  */
-export function pruneSubagentRosterSnapshot(
+export function reconcileSubagentRosterSnapshot(
   prev: SubagentInfo[],
   liveIds: Set<string>,
   requestedAt: number,
+  now = Date.now(),
 ): SubagentInfo[] {
   let changed = false;
-  const next = prev.filter((subagent) => {
-    if (subagent.source === "history") return true;
-    const keep = liveIds.has(subagent.id) || (subagent.lastUpdate ?? 0) >= requestedAt;
-    if (!keep) changed = true;
-    return keep;
+  const next = prev.map((subagent) => {
+    // History and terminal rows are authoritative outside the live registry;
+    // an absent snapshot must not regress or erase an explicit outcome.
+    if (subagent.source === "history" || subagent.status !== "started") return subagent;
+
+    if (liveIds.has(subagent.id)) {
+      // Presence is authoritative and resets only the internal absence state.
+      if (subagent.missingSnapshots === undefined && subagent.missingSince === undefined) return subagent;
+      const present = { ...subagent };
+      delete present.missingSnapshots;
+      delete present.missingSince;
+      changed = true;
+      return present;
+    }
+
+    // A frame observed at/after the request fence is newer than this snapshot,
+    // so an absent id cannot be considered missing yet.
+    if ((subagent.lastUpdate ?? 0) >= requestedAt) return subagent;
+
+    const previousMissing = typeof subagent.missingSnapshots === "number"
+      && Number.isFinite(subagent.missingSnapshots)
+      && subagent.missingSnapshots >= 0
+      ? Math.floor(subagent.missingSnapshots)
+      : 0;
+    const missingSnapshots = previousMissing + 1;
+    const missingSince = typeof subagent.missingSince === "number" && Number.isFinite(subagent.missingSince)
+      ? subagent.missingSince
+      : now;
+    const lost = missingSnapshots >= SUBAGENT_MISSING_SNAPSHOTS_REQUIRED
+      && now - missingSince >= SUBAGENT_LOST_GRACE_MS;
+    changed = true;
+    return {
+      ...subagent,
+      missingSnapshots,
+      missingSince,
+      ...(lost ? { status: "lost" as const } : {}),
+    };
   });
   return changed ? next : prev;
 }

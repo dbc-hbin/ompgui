@@ -272,6 +272,7 @@
   "chatWindow.subagentState.aborted": "已中止",
   "chatWindow.subagentState.completed": "已完成",
   "chatWindow.subagentState.failed": "失败",
+  "chatWindow.subagentState.lost": "已断开",
   "chatWindow.subagentState.started": "运行中",
   "chatWindow.subagentSummary": "{running} 运行中 · 共 {total} 个",
   "chatWindow.subagentsPanel": "子代理",

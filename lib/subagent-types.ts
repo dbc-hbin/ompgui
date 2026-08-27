@@ -314,7 +314,11 @@ export interface SubagentInfo {
   agent: string;
   agentSource?: SubagentAgentSource;
   description?: string;
-  status: "started" | "completed" | "failed" | "aborted";
+  status: "started" | "completed" | "failed" | "aborted" | "lost";
+  /** Number of successful authoritative snapshots that omitted this live row. */
+  missingSnapshots?: number;
+  /** Timestamp of the first successful authoritative snapshot that omitted this row. */
+  missingSince?: number;
   task?: string;
   assignment?: string;
   sessionFile?: string;

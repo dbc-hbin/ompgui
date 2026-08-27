@@ -76,6 +76,9 @@ function resultStatus(value: Record<string, unknown>): SubagentHistoryEntry["sta
   if (value.aborted === true) return "aborted";
   if (typeof value.error === "string" && value.error) return "failed";
   if (typeof value.exitCode === "number") return value.exitCode === 0 ? "completed" : "failed";
+  if (value.status === "completed") return "completed";
+  if (value.status === "failed") return "failed";
+  if (value.status === "aborted") return "aborted";
   return "started";
 }
 

@@ -271,6 +271,7 @@
   "chatWindow.subagentState.aborted": "중단됨",
   "chatWindow.subagentState.completed": "완료",
   "chatWindow.subagentState.failed": "실패",
+  "chatWindow.subagentState.lost": "연결 끊김",
   "chatWindow.subagentState.started": "실행 중",
   "chatWindow.subagentSummary": "{running}개 실행 중 · 총 {total}개",
   "chatWindow.subagentsPanel": "서브에이전트",

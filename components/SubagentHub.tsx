@@ -40,6 +40,7 @@ const SUBAGENT_STATE_KEYS: Record<SubagentInfo["status"], string> = {
   completed: "chatWindow.subagentState.completed",
   failed: "chatWindow.subagentState.failed",
   aborted: "chatWindow.subagentState.aborted",
+  lost: "chatWindow.subagentState.lost",
 };
 
 const SUBAGENT_HUB_FILTERS: Array<{ value: SubagentHubFilter; key: string }> = [
@@ -438,28 +439,28 @@ export function SubagentHub({
   const [collapsed, setCollapsed] = useState(!defaultExpanded);
   const [filter, setFilter] = useState<SubagentHubFilter>("all");
   const [clockNow, setClockNow] = useState<number | null>(null);
-  const runningCount = subagents.filter((subagent) => subagent.source !== "history" && subagent.status === "started").length;
   const hasLiveStartedSubagent = subagents.some(
     (subagent) => subagent.source !== "history" && subagent.status === "started",
   );
   useEffect(() => {
-    if (now !== undefined || collapsed || !hasLiveStartedSubagent) return;
+    if (now !== undefined || !hasLiveStartedSubagent) return;
     const updateClock = () => setClockNow(Date.now());
     updateClock();
     const interval = window.setInterval(updateClock, 5_000);
     return () => window.clearInterval(interval);
-  }, [collapsed, hasLiveStartedSubagent, now]);
+  }, [hasLiveStartedSubagent, now]);
   const freshnessNow = now ?? clockNow ?? 0;
   const freshnessReady = now !== undefined || clockNow !== null;
   const filterCounts = useMemo<Record<SubagentHubFilter, number>>(() => ({
     all: subagents.length,
-    active: filterSubagentHubRows(subagents, "active").length,
-    completed: filterSubagentHubRows(subagents, "completed").length,
-    failed: filterSubagentHubRows(subagents, "failed").length,
-  }), [subagents]);
+    active: filterSubagentHubRows(subagents, "active", freshnessNow).length,
+    completed: filterSubagentHubRows(subagents, "completed", freshnessNow).length,
+    failed: filterSubagentHubRows(subagents, "failed", freshnessNow).length,
+  }), [subagents, freshnessNow]);
+  const runningCount = filterCounts.active;
   const visibleSubagents = useMemo(
-    () => filterSubagentHubRows(subagents, filter),
-    [subagents, filter],
+    () => filterSubagentHubRows(subagents, filter, freshnessNow),
+    [subagents, filter, freshnessNow],
   );
   const treeItems = useMemo(() => buildSubagentHubTree(visibleSubagents), [visibleSubagents]);
 

@@ -272,6 +272,7 @@
   "chatWindow.subagentState.aborted": "Aborted",
   "chatWindow.subagentState.completed": "Done",
   "chatWindow.subagentState.failed": "Failed",
+  "chatWindow.subagentState.lost": "Lost",
   "chatWindow.subagentState.started": "Running",
   "chatWindow.subagentSummary": "{running} running · {total} total",
   "chatWindow.subagentsPanel": "Subagents",

@@ -23,10 +23,11 @@ function escapeRegExp(value) {
 }
 
 const mixedRoster = [
-  { id: "running", agent: "scout", status: "started", index: 0, task: "Inspect the tree" },
+  { id: "running", agent: "scout", status: "started", index: 0, task: "Inspect the tree", lastUpdate: Date.now() },
   { id: "done", agent: "worker", status: "completed", index: 1, task: "Write the patch" },
   { id: "failed", agent: "reviewer", status: "failed", index: 2, task: "Check the tests" },
   { id: "aborted", agent: "helper", status: "aborted", index: 3, task: "Wait for input" },
+  { id: "lost", agent: "watchdog", status: "lost", index: 4, task: "Connection lost" },
 ];
 
 /**
@@ -172,9 +173,30 @@ test("mixed-status rows expose status badges and stay collapsed by default", () 
   // lucide status icons rather than a generic activity marker.
   assert.match(expandedHtml, /class="live-status-dot live-pulse/);
   assert.ok(
-    (expandedHtml.match(/<svg[^>]*width="12"[^>]*height="12"/g) ?? []).length >= 3,
+    (expandedHtml.match(/<svg[^>]*width="12"[^>]*height="12"/g) ?? []).length >= 4,
     "terminal rows should render status icons",
   );
+});
+
+test("SubagentStatusIcon renders distinct status icons and distinguishes lost from aborted", async () => {
+  const { SubagentStatusIcon } = await jiti.import("./SubagentStatusIcon.tsx");
+  const completedHtml = renderToStaticMarkup(React.createElement(SubagentStatusIcon, { status: "completed" }));
+  const failedHtml = renderToStaticMarkup(React.createElement(SubagentStatusIcon, { status: "failed" }));
+  const abortedHtml = renderToStaticMarkup(React.createElement(SubagentStatusIcon, { status: "aborted" }));
+  const lostHtml = renderToStaticMarkup(React.createElement(SubagentStatusIcon, { status: "lost" }));
+  const liveStartedHtml = renderToStaticMarkup(React.createElement(SubagentStatusIcon, { status: "started", live: true }));
+  const historyStartedHtml = renderToStaticMarkup(React.createElement(SubagentStatusIcon, { status: "started", live: false }));
+
+  assert.match(completedHtml, /lucide-check-circle-2|<svg/);
+  assert.match(failedHtml, /lucide-circle-alert|<svg/);
+  assert.match(abortedHtml, /lucide-ban|<svg/);
+  assert.match(lostHtml, /lucide-radio-off|<svg/);
+  assert.match(liveStartedHtml, /live-status-dot live-pulse/);
+  assert.match(historyStartedHtml, /lucide-circle|<svg/);
+
+  // Lost icon is structurally distinct from aborted icon
+  assert.notEqual(lostHtml, abortedHtml);
+  assert.notEqual(lostHtml, failedHtml);
 });
 
 test("hierarchy builder is deterministic and preserves parent ordering", () => {
@@ -342,4 +364,112 @@ test("expanded hub includes the observation-only capability notice", () => {
     html,
     new RegExp(escapeRegExp(translate("chatWindow.subagentHub.observeOnlyHint", undefined, "en"))),
   );
+});
+
+test("expanded and collapsed hub counts exclude stale and lost rows from running count and active filter", () => {
+  const now = 1_700_000_000_000;
+  const staleTime = now - SUBAGENT_STALE_AFTER_MS * 3;
+  const testRoster = [
+    { id: "active-live", agent: "scout", status: "started", index: 0, task: "Live active task", lastUpdate: now },
+    { id: "active-stale", agent: "worker", status: "started", index: 1, task: "Stale task", lastUpdate: staleTime },
+    { id: "lost-agent", agent: "guard", status: "lost", index: 2, task: "Lost task", lastUpdate: now },
+    { id: "failed-agent", agent: "reviewer", status: "failed", index: 3, task: "Failed task", lastUpdate: now },
+    { id: "aborted-agent", agent: "helper", status: "aborted", index: 4, task: "Aborted task", lastUpdate: now },
+    { id: "done-agent", agent: "writer", status: "completed", index: 5, task: "Done task", lastUpdate: now },
+  ];
+
+  // 1. Collapsed state: summary should strictly show 1 running (only the fresh live row, not stale or lost)
+  const collapsedHtml = renderHub({
+    subagents: testRoster,
+    onSelectSubagent: noop,
+    defaultExpanded: false,
+    now,
+  });
+  assert.match(collapsedHtml, /aria-label="1 running · 6 total"/);
+  assert.match(collapsedHtml, /<span>1<\/span>\s*<span[^>]*>\/<\/span>\s*<span>6<\/span>/);
+
+  // 2. Expanded state: summary and filter pill counts
+  const expandedHtml = renderHub({
+    subagents: testRoster,
+    onSelectSubagent: noop,
+    defaultExpanded: true,
+    now,
+  });
+  assert.match(expandedHtml, /aria-label="1 running · 6 total"/);
+
+  // 3. Interactive filtering: active, failed (includes failed, aborted, lost), completed
+  const element = React.createElement(SubagentHub, {
+    subagents: testRoster,
+    onSelectSubagent: noop,
+    defaultExpanded: true,
+    now,
+  });
+
+  withInteractiveHooks("en", (rerender) => {
+    const initialTree = rerender(element);
+
+    // Check filter counts on pills
+    const allPill = findHostElements(initialTree, (t, p) => t === "button" && p["data-subagent-filter"] === "all");
+    const activePill = findHostElements(initialTree, (t, p) => t === "button" && p["data-subagent-filter"] === "active");
+    const completedPill = findHostElements(initialTree, (t, p) => t === "button" && p["data-subagent-filter"] === "completed");
+    const failedPill = findHostElements(initialTree, (t, p) => t === "button" && p["data-subagent-filter"] === "failed");
+
+    assert.equal(allPill.length, 1);
+    assert.equal(activePill.length, 1);
+    assert.equal(completedPill.length, 1);
+    assert.equal(failedPill.length, 1);
+
+    assert.match(textContent(allPill[0]), /All6/);
+    assert.match(textContent(activePill[0]), /Active1/);
+    assert.match(textContent(completedPill[0]), /Completed1/);
+    assert.match(textContent(failedPill[0]), /Failed3/);
+
+    // Click Active filter -> only the fresh live started row is visible
+    activePill[0].props.onClick();
+    const activeTree = rerender(element);
+    const activeText = textContent(activeTree);
+    assert.match(activeText, /Live active task/);
+    assert.doesNotMatch(activeText, /Stale task/);
+    assert.doesNotMatch(activeText, /Lost task/);
+    assert.doesNotMatch(activeText, /Failed task/);
+    assert.doesNotMatch(activeText, /Aborted task/);
+    assert.doesNotMatch(activeText, /Done task/);
+
+    // Click Failed filter -> failed, aborted, AND lost rows are visible
+    failedPill[0].props.onClick();
+    const failedTree = rerender(element);
+    const failedText = textContent(failedTree);
+    assert.match(failedText, /Lost task/);
+    assert.match(failedText, /Failed task/);
+    assert.match(failedText, /Aborted task/);
+    assert.doesNotMatch(failedText, /Live active task/);
+    assert.doesNotMatch(failedText, /Stale task/);
+    assert.doesNotMatch(failedText, /Done task/);
+  });
+});
+
+test("Korean hub copy translates lost status to 연결 끊김", () => {
+  const now = Date.now();
+  const lostRoster = [
+    { id: "lost-1", agent: "scout", status: "lost", index: 0, task: "Network disconnected", lastUpdate: now },
+  ];
+  const tree = withResolvedHooks("ko", () => resolveElementTree(React.createElement(SubagentHub, {
+    subagents: lostRoster,
+    onSelectSubagent: noop,
+    defaultExpanded: true,
+    now,
+  })));
+  const text = textContent(tree);
+
+  assert.match(
+    text,
+    new RegExp(escapeRegExp(translate("chatWindow.subagentState.lost", undefined, "ko"))),
+  );
+  assert.match(text, /연결 끊김/);
+
+  const row = findHostElements(
+    tree,
+    (type, props) => type === "button" && props["aria-label"]?.includes("연결 끊김"),
+  );
+  assert.equal(row.length, 1);
 });
