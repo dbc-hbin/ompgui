@@ -24,7 +24,7 @@ test("attaches todo plan and subagent roster with live states", () => {
   const html = renderToStaticMarkup(React.createElement(ComposerPanels, {
     todoPhases: [{ name: "Implementation", tasks: [{ content: "Wire panels", status: "in_progress" }] }],
     subagents: [
-      { id: "s1", agent: "scout", status: "started", task: "Map the surface", index: 0 },
+      { id: "s1", agent: "scout", status: "started", task: "Map the surface", index: 0, lastUpdate: 0 },
       { id: "s2", agent: "worker", status: "completed", task: "Write the code", index: 1 },
     ],
     onSelectSubagent: noop,
@@ -44,7 +44,7 @@ test("attaches todo plan and subagent roster with live states", () => {
 test("panels start collapsed with live summary in their headers", () => {
   const html = renderToStaticMarkup(React.createElement(ComposerPanels, {
     todoPhases: [{ name: "Implementation", tasks: [{ content: "Wire panels", status: "in_progress" }] }],
-    subagents: [{ id: "s1", agent: "scout", status: "started", task: "Map the surface", index: 0 }],
+    subagents: [{ id: "s1", agent: "scout", status: "started", task: "Map the surface", index: 0, lastUpdate: 0 }],
     onSelectSubagent: noop,
   }));
   // Headers (with live counts) are visible...
