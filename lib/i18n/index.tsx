@@ -5,6 +5,7 @@ import en from "./locales/en.json";
 import ja from "./locales/ja.json";
 import zhCN from "./locales/zh-CN.json";
 import ko from "./locales/ko.json";
+import { migrateStorageValue } from "@/lib/storage-migration";
 
 export type Locale = "en" | "zh-CN" | "ja" | "ko";
 
@@ -16,6 +17,7 @@ export const LOCALES: Array<{ value: Locale; label: string }> = [
 ];
 
 const STORAGE_KEY = "ompgui-lang";
+const LEGACY_STORAGE_KEY = "omp-lang";
 
 const dictionaries: Record<Locale, Record<string, string>> = {
   en: en as Record<string, string>,
@@ -41,7 +43,12 @@ const listeners = state.listeners;
 
 function detectLocale(): Locale {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY) || localStorage.getItem("omp-lang");
+    const stored = migrateStorageValue(
+      localStorage,
+      STORAGE_KEY,
+      LEGACY_STORAGE_KEY,
+      (value) => value === "en" || value === "zh-CN" || value === "ja" || value === "ko",
+    );
     if (stored === "en" || stored === "zh-CN" || stored === "ja" || stored === "ko") return stored;
   } catch {
     // storage unavailable (private mode etc.)

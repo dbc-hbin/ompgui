@@ -11,6 +11,7 @@ import { ArchivedSessionsDialog } from "./ArchivedSessionsDialog";
 import { Tooltip } from "./ui/primitives";
 import { toast } from "./ui/toast";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { migrateStorageValue } from "@/lib/storage-migration";
 import { clearLastOpenSession, setLastOpenSession, workspaceKeyOf } from "@/lib/workspace-memory";
 import { groupSessionsByProject, projectActivityCounts, sortManagedProjects } from "@/lib/project-ordering";
 import { comparableProjectPath } from "@/lib/comparable-path";
@@ -126,18 +127,28 @@ const LEGACY_EXPANDED_PROJECTS_STORAGE_KEY = "omp-web:expanded-projects";
 /** Shared empty set for the no-stored-expansion default (never mutated). */
 const EMPTY_PROJECT_SET: ReadonlySet<string> = new Set();
 
+function isExpandedProjectsValue(raw: string): boolean {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) && parsed.every((path) => typeof path === "string" && path.length > 0);
+  } catch {
+    return false;
+  }
+}
+
 /** Persisted expanded-project paths. Returns null when nothing was stored —
  *  the sidebar then defaults to expanding only the active project. */
 function loadExpandedProjects(): Set<string> | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(EXPANDED_PROJECTS_STORAGE_KEY) || window.localStorage.getItem(LEGACY_EXPANDED_PROJECTS_STORAGE_KEY);
+    const raw = migrateStorageValue(
+      window.localStorage,
+      EXPANDED_PROJECTS_STORAGE_KEY,
+      LEGACY_EXPANDED_PROJECTS_STORAGE_KEY,
+      isExpandedProjectsValue,
+    );
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    if (Array.isArray(parsed)) {
-      return new Set(parsed.filter((path): path is string => typeof path === "string" && path.length > 0));
-    }
-    return null;
+    return new Set(JSON.parse(raw) as string[]);
   } catch {
     return null;
   }

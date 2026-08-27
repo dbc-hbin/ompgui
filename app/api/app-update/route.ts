@@ -10,10 +10,3 @@ export async function GET(request: Request) {
     headers: { "Cache-Control": "no-store" },
   });
 }
-
-export async function POST() {
-  return NextResponse.json(
-    { error: "Automatic self-updating is disabled. Run the update command manually in your terminal.", code: "update_disabled" },
-    { status: 400 }
-  );
-}

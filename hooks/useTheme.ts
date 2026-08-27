@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { migrateStorageValue } from "@/lib/storage-migration";
 
 export type ThemePreference = "light" | "dark" | "system";
 export type ThemePalette = "warm" | "omp";
 type Theme = "light" | "dark";
 
 const STORAGE_KEY = "ompgui-theme";
+const LEGACY_STORAGE_KEY = "omp-theme";
 const PALETTE_STORAGE_KEY = "ompgui-palette";
 const listeners = new Set<() => void>();
 
@@ -18,7 +20,12 @@ function subscribe(cb: () => void): () => void {
 function storedPreference(): ThemePreference {
   if (typeof window === "undefined") return "system";
   try {
-    const value = localStorage.getItem(STORAGE_KEY) || localStorage.getItem("omp-theme");
+    const value = migrateStorageValue(
+      localStorage,
+      STORAGE_KEY,
+      LEGACY_STORAGE_KEY,
+      (stored) => stored === "light" || stored === "dark" || stored === "system",
+    );
     return value === "light" || value === "dark" || value === "system" ? value : "system";
   } catch {
     return "system";

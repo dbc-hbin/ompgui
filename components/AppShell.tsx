@@ -303,7 +303,7 @@ export function AppShell() {
         .then((data: { currentVersion?: string; availableVersion?: string | null; updateAvailable?: boolean; updateCommand?: string } | null) => {
         setAppUpdateAvailable(Boolean(data?.updateAvailable));
         if (!data?.updateAvailable || !data.availableVersion) return;
-        const cmd = data.updateCommand || "npm install -g ompgui";
+        const cmd = data.updateCommand || "ompgui update";
         toast.info(
           translate("appShell.appUpdateAvailable"),
           <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", marginTop: "var(--space-2)" }}>
