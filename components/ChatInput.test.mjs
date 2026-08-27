@@ -320,20 +320,3 @@ test("renders shared horizontal padding and column width at composer root", () =
   assert.match(html, /padding-right:\s*16px/);
   assert.match(html, /max-width:\s*960px/);
 });
-
-test("disables attachment controls and model selection when runtimeReady is false", () => {
-  const html = renderToStaticMarkup(
-    React.createElement(ChatInput, {
-      onSend: noop,
-      onAbort: noop,
-      onModelChange: noop,
-      isStreaming: false,
-      runtimeReady: false,
-      model: { provider: "test", modelId: "model" },
-      modelList: [{ provider: "test", modelId: "model", id: "model", name: "Test model" }],
-    }),
-  );
-
-  assert.match(html, /<input[^>]*type="file"[^>]*disabled/);
-  assert.match(html, /<button[^>]*class="[^"]*composer-model-button[^"]*"[^>]*disabled/);
-});

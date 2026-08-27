@@ -22,7 +22,6 @@ export interface TabItem {
   label: string;
   description: string;
   Icon: ComponentType<{ size?: number; className?: string; "aria-hidden"?: boolean | "true" | "false"; style?: CSSProperties }>;
-  needsWorkspace?: boolean;
 }
 
 export const SETTINGS_CATEGORIES: TabItem[] = [
@@ -52,30 +51,27 @@ export const getNormalizedActive = (tab: SettingsTab): SettingsTab => {
 export function SettingsTabs({
   active,
   onSelect,
-  workspaceReady = true,
   layout = "vertical",
 }: {
   active: SettingsTab;
   onSelect: (tab: SettingsTab) => void;
-  workspaceReady?: boolean;
   layout?: "horizontal" | "vertical";
 }) {
   const { t } = useI18n();
   const currentActive = getNormalizedActive(active);
 
   const onKeyDown = (event: React.KeyboardEvent, id: SettingsTab) => {
-    const enabled = SETTINGS_CATEGORIES.filter((tab) => !(tab.needsWorkspace && !workspaceReady));
-    const currentIndex = enabled.findIndex((tab) => tab.id === id);
-    if (currentIndex < 0 || enabled.length === 0) return;
+    const currentIndex = SETTINGS_CATEGORIES.findIndex((tab) => tab.id === id);
+    if (currentIndex < 0 || SETTINGS_CATEGORIES.length === 0) return;
 
     let nextIndex: number | null = null;
-    if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (currentIndex + 1) % enabled.length;
-    if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (currentIndex - 1 + enabled.length) % enabled.length;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (currentIndex + 1) % SETTINGS_CATEGORIES.length;
+    if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (currentIndex - 1 + SETTINGS_CATEGORIES.length) % SETTINGS_CATEGORIES.length;
     if (event.key === "Home") nextIndex = 0;
-    if (event.key === "End") nextIndex = enabled.length - 1;
+    if (event.key === "End") nextIndex = SETTINGS_CATEGORIES.length - 1;
     if (nextIndex !== null) {
       event.preventDefault();
-      onSelect(enabled[nextIndex].id);
+      onSelect(SETTINGS_CATEGORIES[nextIndex].id);
     }
   };
 
@@ -97,9 +93,8 @@ export function SettingsTabs({
           overflowY: "auto",
         }}
       >
-        {SETTINGS_CATEGORIES.map(({ id, label, description, Icon, needsWorkspace }) => {
+        {SETTINGS_CATEGORIES.map(({ id, label, description, Icon }) => {
           const selected = id === currentActive;
-          const disabled = Boolean(needsWorkspace && !workspaceReady);
           const localizedLabel = t(`settingsTabs.${id}`) || label;
           const localizedDesc = t(`settingsTabs.${id}Desc`) || description;
           return (
@@ -111,7 +106,6 @@ export function SettingsTabs({
               aria-selected={selected}
               aria-controls={`settings-panel-${id}`}
               tabIndex={selected ? 0 : -1}
-              disabled={disabled}
               onClick={() => onSelect(id)}
               onKeyDown={(event) => onKeyDown(event, id)}
               style={{
@@ -122,9 +116,8 @@ export function SettingsTabs({
                 border: "none",
                 borderRadius: "var(--radius-control)",
                 background: selected ? "var(--bg-selected)" : "transparent",
-                color: selected ? "var(--text)" : disabled ? "var(--text-dim)" : "var(--text-muted)",
-                cursor: disabled ? "not-allowed" : "pointer",
-                opacity: disabled ? 0.5 : 1,
+                color: selected ? "var(--text)" : "var(--text-muted)",
+                cursor: "pointer",
                 textAlign: "left",
                 transition: "background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm)",
                 width: "100%",
@@ -161,9 +154,8 @@ export function SettingsTabs({
         WebkitOverflowScrolling: "touch",
       }}
     >
-      {SETTINGS_CATEGORIES.map(({ id, label, description, Icon, needsWorkspace }) => {
+      {SETTINGS_CATEGORIES.map(({ id, label, description, Icon }) => {
         const selected = id === currentActive;
-        const disabled = Boolean(needsWorkspace && !workspaceReady);
         const localizedLabel = t(`settingsTabs.${id}`) || label;
         const localizedDesc = t(`settingsTabs.${id}Desc`) || description;
         return (
@@ -177,7 +169,6 @@ export function SettingsTabs({
             aria-label={`${localizedLabel}: ${localizedDesc}`}
             title={localizedDesc}
             tabIndex={selected ? 0 : -1}
-            disabled={disabled}
             onClick={() => onSelect(id)}
             onKeyDown={(event) => onKeyDown(event, id)}
             style={{
@@ -188,10 +179,9 @@ export function SettingsTabs({
               border: selected ? "1px solid var(--accent)" : "1px solid var(--border)",
               borderRadius: "var(--radius-control)",
               background: selected ? "color-mix(in srgb, var(--accent) 12%, var(--bg-selected))" : "var(--bg)",
-              color: selected ? "var(--text)" : disabled ? "var(--text-dim)" : "var(--text-muted)",
+              color: selected ? "var(--text)" : "var(--text-muted)",
               fontWeight: selected ? 600 : 500,
-              cursor: disabled ? "not-allowed" : "pointer",
-              opacity: disabled ? 0.45 : 1,
+              cursor: "pointer",
               fontSize: 12,
               whiteSpace: "nowrap",
               textAlign: "left",

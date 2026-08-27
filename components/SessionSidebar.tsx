@@ -33,7 +33,7 @@ interface Props {
   optimisticSession?: SessionInfo | null;
   onSelectSession: (session: SessionInfo, isRestore?: boolean) => void;
   onSessionIntent?: () => void;
-  onNewSession?: (sessionId: string, cwd: string) => void;
+  onNewSession?: (cwd: string) => void;
   initialSessionId?: string | null;
   skipInitialProjectSelection?: boolean;
   onInitialRestoreDone?: () => void;
@@ -1377,12 +1377,7 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
 
   const handleNewSession = useCallback(() => {
     if (!selectedCwd) return;
-    // Generate a temporary UUID client-side — no backend call needed.
-    // Pi will be spawned lazily when the user sends the first message.
-    const tempId = typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-    onNewSession?.(tempId, selectedCwd);
+    onNewSession?.(selectedCwd);
   }, [selectedCwd, onNewSession]);
 
   const [importing, setImporting] = useState(false);

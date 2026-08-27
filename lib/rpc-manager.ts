@@ -146,17 +146,6 @@ function toImageContents(value: unknown): Array<{ type: "image"; data: string; m
 }
 
 /**
- * Pick a spawn cwd that actually exists. A session records the directory it was
- * created in, but that directory may have been deleted since: spawn() would
- * fail with ENOENT and `omp --cwd <missing>` throws in setProjectDir. omp's own
- * resume path skips the chdir when the recorded project dir is gone and keeps
- * the launch cwd (main.ts), so hand it a live directory and let it decide.
- */
-export function resolveSpawnCwd(recordedCwd?: string | null): string {
-  return resolveSpawnCwdResult(recordedCwd).cwd;
-}
-
-/**
  * Resolve a spawn cwd and report whether it differs from the session's recorded
  * directory. Callers that surface a UI (the SSE resume paths) use the result to
  * emit a notice so the user knows the agent is running somewhere other than the
@@ -277,8 +266,8 @@ export class AgentSessionWrapper {
     this.applyIdentity(state);
     // Warn when the spawn cwd differs from the session's recorded directory.
     // This happens when the recorded cwd was deleted (removed worktree, moved
-    // repo, different machine): resolveSpawnCwd silently substituted a live
-    // directory so omp can spawn, but without a notice the user would see the
+    // repo, different machine): the spawn-cwd resolver silently substituted a
+    // live directory so omp can spawn, but without a notice the user would see the
     // sidebar/header still advertise the (gone) recorded path while file tool
     // calls operate on a different tree.
     if (this.recordedCwd && this.recordedCwd !== this.cwd) {

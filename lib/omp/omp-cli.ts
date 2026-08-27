@@ -21,14 +21,6 @@ const ANSI_RE = /\x1B\[[0-9;]*m/g;
 // keep the UI reporting a missing binary until restart.
 const MISS_TTL_MS = 30_000;
 
-/** Clear probes after an explicit `omp update` so the next request rechecks it. */
-export function invalidateOmpCliCache(): void {
-  cachedBin = null;
-  binMissAt = 0;
-  cachedVersion = null;
-  versionMissAt = 0;
-}
-
 function probeOmpBin(): string | null {
   const override = process.env.OMPGUI_OMP_BIN ?? process.env.OMP_WEB_OMP_BIN;
   if (override) return existsSync(override) ? override : null;

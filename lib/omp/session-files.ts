@@ -142,7 +142,7 @@ export function parseTitleSlotLine(line: string): SessionTitleSlot | undefined {
 }
 
 /** Serialize the title slot to exactly 256 UTF-8 bytes including the newline. */
-export function serializeTitleSlot(update: SessionTitleUpdate): string {
+function serializeTitleSlot(update: SessionTitleUpdate): string {
   const title = truncateTitleForSlot(update.title ?? "", update.source, update.updatedAt);
   const unpadded = titleSlotLine(title, update.source, update.updatedAt, "");
   const padBytes = SESSION_TITLE_SLOT_BYTES - Buffer.byteLength(unpadded, "utf8");
@@ -351,7 +351,7 @@ export interface ResolveBlobOptions {
 }
 
 /** Resolve blob references in loaded entries back to inline base64. Mutates in place. */
-export function resolveBlobRefsInEntries(entries: SessionEntry[], options: ResolveBlobOptions = {}): void {
+function resolveBlobRefsInEntries(entries: SessionEntry[], options: ResolveBlobOptions = {}): void {
   for (const entry of entries) {
     if (
       options.skipToolResultImages &&
@@ -1128,7 +1128,7 @@ function collectSessionFiles(sessionsRoot: string): string[] {
 // ============================================================================
 
 /** Strip control characters and collapse runs of spaces (omp's #cleanTitle). */
-export function cleanSessionTitle(raw: string): string {
+function cleanSessionTitle(raw: string): string {
   return raw
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
     .replace(/ +/g, " ")

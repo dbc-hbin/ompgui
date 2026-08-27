@@ -151,8 +151,6 @@ export function invalidateSessionListCache(): void {
   // Raw documents are identity-keyed for ordinary writes; explicit mutation
   // and watcher events clear them to close same-signature edge cases.
   globalThis.__ompSessionDocumentCache?.clear();
-  globalThis.__ompSessionEntriesCache?.clear();
-  globalThis.__ompSessionEntriesCache = undefined;
 }
 
 function getPathCache(): Map<string, string> {
@@ -275,17 +273,12 @@ export type SessionDocument = Omit<LoadedSession, "header" | "entries" | "titleS
 
 declare global {
   var __ompSessionDocumentCache: Map<string, SessionDocumentCacheEntry> | undefined;
-  var __ompSessionEntriesCache: Map<string, unknown> | undefined;
 }
 
 const MAX_SESSION_DOCUMENT_CACHE_ENTRIES = 32;
 const MAX_SESSION_DOCUMENT_CACHE_SOURCE_BYTES = 64 * 1024 * 1024;
 
 function getSessionDocumentCache(): Map<string, SessionDocumentCacheEntry> {
-  // A dev-server hot reload can retain the superseded entries-only cache.
-  // Drop its references once during cutover rather than keeping both stores.
-  globalThis.__ompSessionEntriesCache?.clear();
-  globalThis.__ompSessionEntriesCache = undefined;
   if (!globalThis.__ompSessionDocumentCache) globalThis.__ompSessionDocumentCache = new Map();
   return globalThis.__ompSessionDocumentCache;
 }

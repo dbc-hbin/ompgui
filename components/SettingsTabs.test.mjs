@@ -22,6 +22,19 @@ test("horizontal settings tabs expose every category description", () => {
   }
 });
 
+test("settings tabs remain enabled and expose one keyboard-focusable active tab", () => {
+  const html = renderToStaticMarkup(React.createElement(SettingsTabs, {
+    active: "providers",
+    onSelect: () => {},
+    layout: "horizontal",
+  }));
+
+  assert.equal((html.match(/role="tab"/g) ?? []).length, SETTINGS_CATEGORIES.length);
+  assert.doesNotMatch(html, /\sdisabled(?:=|\s|>)/);
+  assert.equal((html.match(/aria-selected="true"/g) ?? []).length, 1);
+  assert.match(html, /id="settings-tab-providers"[^>]*aria-selected="true"[^>]*tabindex="0"/);
+});
+
 test("extension deep links select the single Extensions & Tools category", () => {
   assert.equal(getNormalizedActive("mcp"), "extensions");
   assert.equal(getNormalizedActive("skills"), "extensions");

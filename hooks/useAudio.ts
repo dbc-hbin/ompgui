@@ -71,14 +71,6 @@ export function useAudio() {
     ctx.resume().catch(() => {});
   }, [getCtx]);
 
-  const toggle = useCallback(() => {
-    const next = !enabledRef.current;
-    if (next) unlockAudio(true);
-    enabledRef.current = next;
-    localStorage.setItem("omp-sound-enabled", String(next));
-    setEnabled(next);
-  }, [unlockAudio]);
-
   const playDone = useCallback(() => {
     if (!enabledRef.current) return;
     const ctx = getCtx();
@@ -97,5 +89,5 @@ export function useAudio() {
     play();
   }, [getCtx]);
 
-  return { soundEnabled: enabled, onSoundToggle: toggle, playDoneSound: playDone, unlockAudio, soundEnabledRef: enabledRef };
+  return { playDoneSound: playDone, unlockAudio };
 }

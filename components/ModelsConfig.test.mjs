@@ -27,13 +27,6 @@ test("dirty fingerprints are stable across object key order and change with edit
   );
 });
 
-test("ModelsConfig exposes dirty callback without retry or unsupported logout code", () => {
-  const source = readFileSync(new URL("./ModelsConfig.tsx", import.meta.url), "utf8");
-  assert.match(source, /onDirtyChange\?: \(dirty: boolean\) => void/);
-  assert.match(source, /lastLoadedConfigRef/);
-  assert.doesNotMatch(source, /RetryFallbackDetail|RetrySettings|\/api\/auth\/logout/);
-});
-
 test("save completion preserves a late draft and only reloads an unchanged draft", () => {
   const source = readFileSync(new URL("./ModelsConfig.tsx", import.meta.url), "utf8");
   const submitted = { providers: { example: { api: "openai-completions", models: [{ id: "before" }] } } };

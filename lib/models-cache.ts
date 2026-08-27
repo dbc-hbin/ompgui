@@ -40,10 +40,6 @@ export function invalidateModelsCache(): void {
   state.inFlight.clear();
 }
 
-export function withModelRuntimeError(data: ModelsData, modelError: string | undefined): ModelsData {
-  return modelError ? { ...data, modelError } : data;
-}
-
 export function withSafeModelLoadFailure(data: ModelsData): ModelsData {
   return { ...data, modelError: SAFE_MODEL_LOAD_FAILURE_MESSAGE };
 }

@@ -745,7 +745,7 @@ export function AppShell() {
     }
   }, [handleSessionIntent, router, isMobile]);
 
-  const handleNewSession = useCallback((_sessionId: string, cwd: string) => {
+  const handleNewSession = useCallback((cwd: string) => {
     handleSessionIntent();
     setSelectedSession(null);
     setNewSessionCwd(cwd);
@@ -762,7 +762,7 @@ export function AppShell() {
 
   // Global keyboard shortcuts (handles Esc, Ctrl+Alt+N etc.)
   useGlobalKeyboardShortcuts({
-    onNewSession: (cwd: string) => handleNewSession(`kb-${Date.now()}`, cwd),
+    onNewSession: handleNewSession,
     activeCwd,
   });
 
@@ -959,8 +959,7 @@ export function AppShell() {
     <>
       <CommandPalette
         onSelectSession={handleSelectSession}
-        onNewSession={() => handleNewSession(`palette-${Date.now()}`, activeCwd ?? "")}
-        currentModel={null}
+        onNewSession={() => handleNewSession(activeCwd ?? "")}
       />
       <SessionSidebar
         selectedSessionId={selectedSession?.id ?? null}

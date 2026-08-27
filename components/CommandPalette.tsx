@@ -11,7 +11,6 @@ import { useTheme } from "@/hooks/useTheme";
 type Props = {
   onSelectSession: (session: SessionInfo) => void;
   onNewSession: () => void;
-  currentModel?: string | null;
 };
 
 function relativeTime(value: string, locale: string): string {
@@ -24,7 +23,7 @@ function relativeTime(value: string, locale: string): string {
   return new Intl.RelativeTimeFormat(locale, { numeric: "always" }).format(-Math.floor(hours / 24), "day");
 }
 
-export function CommandPalette({ onSelectSession, onNewSession, currentModel }: Props) {
+export function CommandPalette({ onSelectSession, onNewSession }: Props) {
   const { t, locale } = useI18n();
   const { isDark, toggleTheme } = useTheme();
   const [open, setOpen] = useState(false);
@@ -73,9 +72,6 @@ export function CommandPalette({ onSelectSession, onNewSession, currentModel }: 
           <Command.Group heading={t("commandPalette.actions")}>
             <Command.Item value={t("commandPalette.newSession")} onSelect={() => choose(onNewSession)} style={{ display: "flex", gap: 10, padding: "9px 10px", borderRadius: "var(--radius-control)", color: "var(--text)", cursor: "pointer" }}><Plus size={15} color="var(--accent)" />{t("commandPalette.newSession")}</Command.Item>
             <Command.Item value={t("commandPalette.toggleTheme")} onSelect={() => choose(toggleTheme)} style={{ display: "flex", gap: 10, padding: "9px 10px", borderRadius: "var(--radius-control)", color: "var(--text)", cursor: "pointer" }}>{isDark ? <Sun size={15} color="var(--accent)" /> : <Moon size={15} color="var(--accent)" />}{t("commandPalette.toggleTheme")}</Command.Item>
-          </Command.Group>
-          <Command.Group heading={t("commandPalette.models")}>
-            <Command.Item value={currentModel ?? t("commandPalette.currentModel")} disabled style={{ padding: "9px 10px", color: "var(--text-muted)", fontSize: "var(--text-base)" }}>{t("commandPalette.currentModel")}: {currentModel ?? t("commandPalette.notAvailable")}</Command.Item>
           </Command.Group>
         </Command.List>
         <div style={{ borderTop: "1px solid var(--border)", padding: "var(--space-4) 14px", color: "var(--text-dim)", fontSize: "var(--text-sm)" }}>{t("commandPalette.hints")}</div>

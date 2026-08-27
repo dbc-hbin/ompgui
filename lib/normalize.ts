@@ -1,11 +1,8 @@
 import type { AgentMessage, AssistantMessage, ToolCallContent } from "./types";
-
-function isObject(val: unknown): val is Record<string, unknown> {
-  return typeof val === "object" && val !== null && !Array.isArray(val);
-}
+import { isRecord } from "./type-guards";
 
 function normalizeToolCallBlock(block: unknown): ToolCallContent | null {
-  if (!isObject(block) || block.type !== "toolCall") return null;
+  if (!isRecord(block) || block.type !== "toolCall") return null;
   return {
     type: "toolCall",
     toolCallId: typeof block.toolCallId === "string" ? block.toolCallId : (typeof block.id === "string" ? block.id : ""),

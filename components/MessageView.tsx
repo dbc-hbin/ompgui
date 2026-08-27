@@ -8,6 +8,7 @@ import { translate, useI18n, type Locale } from "@/lib/i18n";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
 import { isEmptyThinkingBlock } from "@/lib/message-display";
 import { parseUnifiedPatch, type SplitDiffCell } from "@/lib/patch";
+import { isRecord } from "@/lib/type-guards";
 import { Tooltip, Collapsible, CollapsibleTrigger, CollapsiblePanel } from "./ui/primitives";
 import { useCopyFeedback } from "@/hooks/useCopyFeedback";
 import { SubagentStatusIcon } from "./SubagentStatusIcon";
@@ -886,10 +887,6 @@ function taskRowStatus(row: TaskResultRowLike): "started" | "completed" | "faile
   return "started";
 }
 
-function TaskResultStatusIcon({ status }: { status: "started" | "completed" | "failed" | "aborted" }) {
-  return <SubagentStatusIcon status={status} />;
-}
-
 /**
  * Compact per-subagent summary rendered inside an expanded `task` tool call.
  * Feeds off the size-bounded task details allowlisted by the session reader
@@ -960,7 +957,7 @@ export function TaskResultPanel({ details }: { details: unknown }) {
             aria-label={`${typeof row.agent === "string" ? row.agent : "subagent"}: ${t(`chatWindow.subagentState.${status}`)}${task ? ` — ${task}` : ""}`}
             style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", minWidth: 0, fontSize: 11.5 }}
           >
-            <TaskResultStatusIcon status={status} />
+            <SubagentStatusIcon status={status} />
             <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 10.5, color: "var(--accent)", flexShrink: 0 }}>
               {typeof row.agent === "string" ? row.agent : "subagent"}
             </span>
@@ -1217,10 +1214,6 @@ function isEditToolName(toolName: string): boolean {
     name.endsWith("_edit") ||
     name.includes("str_replace") ||
     name.includes("replace_editor");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function PairedResult({ text, isEmpty, isError }: {

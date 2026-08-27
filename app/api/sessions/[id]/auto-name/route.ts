@@ -32,7 +32,7 @@ export async function POST(
         const liveTitle = sanitizeSessionTitle(state?.sessionName);
         if (liveTitle) {
           invalidateSessionListCache();
-          return NextResponse.json({ title: liveTitle, usage: null });
+          return NextResponse.json({ title: liveTitle });
         }
       } catch {
         // Fall through to the on-disk title.
@@ -46,7 +46,7 @@ export async function POST(
     const info = scanSessionInfo(filePath, false);
     const storedTitle = sanitizeSessionTitle(info?.title);
     if (storedTitle) {
-      return NextResponse.json({ title: storedTitle, usage: null });
+      return NextResponse.json({ title: storedTitle });
     }
 
     const derived = deriveSessionTitleFromFirstMessage(info?.firstMessage);
@@ -63,7 +63,7 @@ export async function POST(
       setSessionTitle(filePath, derived, "auto");
     }
     invalidateSessionListCache();
-    return NextResponse.json({ title: derived, usage: null });
+    return NextResponse.json({ title: derived });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },

@@ -326,7 +326,6 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
   const isMobile = useIsMobile();
   const { t } = useI18n();
   const { preference, setTheme, palette, setPalette } = useTheme();
-  const workspaceReady = cwd !== null;
   const [searchQuery, setSearchQuery] = useState("");
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [submitBehavior, setSubmitBehavior] = useState<SubmitDuringRunBehavior>(() => getSubmitDuringRunBehavior());
@@ -636,9 +635,9 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
           ) : (
             <SettingsHighlightContext.Provider value={highlightId}>
               {isMobile ? (
-                <SettingsTabs active={currentTab} onSelect={requestCategoryChange} workspaceReady={workspaceReady} layout="horizontal" />
+                <SettingsTabs active={currentTab} onSelect={requestCategoryChange} layout="horizontal" />
               ) : (
-                <SettingsTabs active={currentTab} onSelect={requestCategoryChange} workspaceReady={workspaceReady} layout="vertical" />
+                <SettingsTabs active={currentTab} onSelect={requestCategoryChange} layout="vertical" />
               )}
 
               <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflowY: "auto", background: "var(--bg)" }}>
@@ -884,7 +883,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
             )}
 
             {/* AI MODEL DEFAULTS TAB */}
-            {(activeTab === "models" || currentTab === "models") && (
+            {currentTab === "models" && (
               <div role="tabpanel" id="settings-panel-models" aria-labelledby="settings-tab-models" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
                 <div>
                   <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{t("settingsConfig.modelsTitle")}</h3>
@@ -942,7 +941,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
 
             {/* API KEYS & PROVIDERS TAB */}
             {(visitedTabs.has("providers") || visitedTabs.has("models")) && (
-              <div role="tabpanel" id="settings-panel-providers" aria-labelledby="settings-tab-providers" style={{ display: (currentTab === "providers" || activeTab === "providers") ? "flex" : "none", height: "100%", minHeight: 0, flexDirection: "column" }}>
+              <div role="tabpanel" id="settings-panel-providers" aria-labelledby="settings-tab-providers" style={{ display: currentTab === "providers" ? "flex" : "none", height: "100%", minHeight: 0, flexDirection: "column" }}>
                 <ModelsConfig embedded key={modelsEditorKey} onClose={requestClose} onSaved={() => { setModelsDirty(false); onModelsSaved(); }} onDirtyChange={setModelsDirty} />
               </div>
             )}

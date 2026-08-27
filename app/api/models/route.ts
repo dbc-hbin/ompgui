@@ -1,5 +1,5 @@
 import { statSync } from "fs";
-import { invalidateModelsCache, loadModelsWithCache, withModelRuntimeError, withSafeModelLoadFailure, type ModelsData } from "@/lib/models-cache";
+import { invalidateModelsCache, loadModelsWithCache, withSafeModelLoadFailure, type ModelsData } from "@/lib/models-cache";
 import { disposeUtilityRpc, runUtilityCommand, type OmpModel } from "@/lib/omp/rpc-utility";
 import { getModelsConfigPath } from "@/lib/omp/paths";
 import { readDisabledProviders } from "@/lib/omp/model-roles";
@@ -131,10 +131,7 @@ async function loadModels(): Promise<ModelsData> {
     // Default model is cosmetic — the models list is still useful without it.
   }
 
-  return withModelRuntimeError(
-    { models: Object.fromEntries(nameMap), modelList, defaultModel, thinkingLevels, connectedProviders },
-    undefined,
-  );
+  return { models: Object.fromEntries(nameMap), modelList, defaultModel, thinkingLevels, connectedProviders };
 }
 
 const EMPTY_MODELS: ModelsData = {
