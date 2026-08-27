@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { invalidateModelsCache } from "@/lib/models-cache";
 import { disposeUtilityRpc, runUtilityCommand, type OmpModel } from "@/lib/omp/rpc-utility";
-import { readNativeSettings, writeNativeSettings, type NativeSettings } from "@/lib/omp/settings-config";
+import { mergeNativeSettings, readNativeSettings, writeNativeSettings, type NativeSettings } from "@/lib/omp/settings-config";
 import { assertNoAmbiguousModelScopes } from "@/lib/model-scope";
 
 export const dynamic = "force-dynamic";
@@ -16,8 +16,8 @@ export function GET() {
 
 export async function PUT(request: Request) {
   try {
-    const body = await request.json() as { settings?: NativeSettings };
-    if (!body.settings || typeof body.settings !== "object" || Array.isArray(body.settings)) {
+    const body = await request.json() as { settings?: NativeSettings } | null;
+    if (!body || !body.settings || typeof body.settings !== "object" || Array.isArray(body.settings)) {
       return NextResponse.json({ error: "settings must be an object" }, { status: 400 });
     }
     if (body.settings.enabledModels !== undefined) {
@@ -37,12 +37,24 @@ export async function PUT(request: Request) {
         if (error instanceof Error && error.message.startsWith("Ambiguous enabledModels entry")) throw error;
       }
     }
-    writeNativeSettings(body.settings);
-    if (body.settings.enabledModels !== undefined || body.settings.disabledProviders !== undefined || body.settings.modelProviderOrder !== undefined) {
+    const current = readNativeSettings();
+    const next = mergeNativeSettings(current.settings, body.settings);
+    writeNativeSettings(next);
+    const registryInvalidated = body.settings.enabledModels !== undefined
+      || body.settings.disabledProviders !== undefined
+      || body.settings.modelProviderOrder !== undefined;
+    if (registryInvalidated) {
       invalidateModelsCache();
       disposeUtilityRpc();
     }
-    return NextResponse.json({ success: true, settings: readNativeSettings().settings });
+    return NextResponse.json({
+      success: true,
+      settings: readNativeSettings().settings,
+      application: {
+        mode: registryInvalidated ? "runtime-refresh" : "new-session",
+        restartRequired: false,
+      },
+    });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 400 });
   }

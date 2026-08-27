@@ -22,10 +22,10 @@ import {
   ConfirmDialog,
   useFieldValidation,
 } from "@/components/ui/field";
-import { Plus, Trash2, RefreshCw, AlertCircle, Cpu, Settings, Sparkles, Check as CheckIcon, ArrowDown, ArrowUp, Layers, RotateCcw, SlidersHorizontal, BookOpen } from "lucide-react";
+import { Plus, Trash2, RefreshCw, AlertCircle, Cpu, Settings, Sparkles, Check as CheckIcon, ArrowDown, ArrowUp, Layers, SlidersHorizontal, BookOpen } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 import { SettingsTabs, type SettingsTab } from "./SettingsTabs";
-import { ModelCatalogPicker } from "./ModelCatalogPicker";
+import { ModelCatalogPicker, type CatalogPickedModel } from "./ModelCatalogPicker";
 // Color icons (have their own fill colors — no background needed)
 import AnthropicIcon from "@lobehub/icons/es/Anthropic/components/Mono";
 import OpenAIIcon from "@lobehub/icons/es/OpenAI/components/Mono";
@@ -140,34 +140,62 @@ interface ThinkingConfig {
   efforts?: string[];
   defaultLevel?: string;
   effortMap?: Record<string, string>;
+  [key: string]: unknown;
 }
 
 interface ModelEntry {
   id: string;
+  /** Stable server-owned identity retained while the visible id is edited. */
+  originalId?: string;
   name?: string;
   api?: string;
+  baseUrl?: string;
   reasoning?: boolean;
   thinking?: ThinkingConfig;
   input?: string[];
   contextWindow?: number;
   maxTokens?: number;
+  headers?: Record<string, string> | null;
   cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
   compat?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+function normalizeCatalogModel(model: CatalogPickedModel): ModelEntry {
+  // Keep the catalog's represented fields (including any future fields carried
+  // by the picker) while materializing an object compatible with models.yml.
+  const normalized = {
+    ...model,
+    id: model.id,
+    ...(model.cost !== undefined ? { cost: { ...model.cost } } : {}),
+  } as ModelEntry;
+  // Catalog rows are new models, not edits to a server-provided model. A
+  // reserved identity must never be accepted from a catalog payload.
+  delete normalized.originalId;
+  return normalized;
 }
 
 interface ProviderEntry {
+  /** Stable server-owned identity retained while the visible name is edited. */
+  originalName?: string;
   baseUrl?: string;
   api?: string;
-  apiKey?: string;
+  /** Omitted means preserve the redacted on-disk key; null explicitly clears it. */
+  apiKey?: string | null;
   auth?: "apiKey" | "none" | "oauth";
-  headers?: Record<string, string>;
+  /** Omitted means preserve the redacted on-disk headers; null explicitly clears them. */
+  headers?: Record<string, string> | null;
+  apiKeyConfigured?: boolean;
+  headersConfigured?: boolean;
   compat?: Record<string, unknown>;
   models?: ModelEntry[];
   modelOverrides?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 interface ModelsFileData {
   providers?: Record<string, ProviderEntry>;
+  [key: string]: unknown;
 }
 
 type ModelTestState =
@@ -183,8 +211,7 @@ type Selection =
   | { type: "apikey"; providerId: string }
   | { type: "roles" }
   | { type: "picker" }
-  | { type: "registry" }
-  | { type: "fallbacks" };
+  | { type: "registry" };
 
 function ModelsConfigSurface({ embedded, isMobile, onClose, children }: { embedded: boolean; isMobile: boolean; onClose: () => void; children: React.ReactNode }) {
   if (embedded) return <>{children}</>;
@@ -228,93 +255,6 @@ type NativeRegistrySettings = {
   modelProviderOrder?: string[];
   registryHasScopedEntries?: boolean;
 };
-
-type RetrySettings = {
-  retry?: { enabled?: boolean; maxRetries?: number; modelFallback?: boolean; fallbackRevertPolicy?: "cooldown-expiry" | "never"; fallbackChains?: Record<string, string[]> };
-};
-
-function RetryFallbackDetail({ models }: { models: RuntimeModelEntry[] }) {
-  const [settings, setSettings] = useState<RetrySettings | null>(null);
-  const [role, setRole] = useState("default");
-  const [candidate, setCandidate] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch("/api/omp-settings")
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
-      .then((data: { settings?: RetrySettings }) => setSettings(data.settings ?? {}))
-      .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
-  }, []);
-
-  // Serialize full-snapshot saves: each call writes the whole settings object,
-  // so overlapping PUTs can land out of order and clobber newer changes. Keep
-  // the latest snapshot and drain a single serialized save always writing the
-  // most recent state (fixes rapid fallback-chain edits scheduling stale writes).
-  const latestRef = useRef<RetrySettings | null>(null);
-  const drainingRef = useRef(false);
-  const save = (next: RetrySettings) => {
-    setSettings(next);
-    setError(null);
-    latestRef.current = next;
-    if (drainingRef.current) return;
-    drainingRef.current = true;
-    void (async () => {
-      try {
-        while (latestRef.current !== null) {
-          const snapshot = latestRef.current;
-          latestRef.current = null;
-          try {
-            const response = await fetch("/api/omp-settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings: snapshot }) });
-            const data = await response.json() as { settings?: RetrySettings; error?: string };
-            if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
-            if (latestRef.current === null) setSettings(data.settings ?? snapshot);
-          } catch (reason) {
-            setError(reason instanceof Error ? reason.message : String(reason));
-            break;
-          }
-        }
-      } finally {
-        drainingRef.current = false;
-      }
-    })();
-  };
-
-  if (!settings) return <div style={{ color: "var(--text-muted)", fontSize: "var(--text-md)" }}>Loading native OMP retry settings...</div>;
-  const retry = settings.retry ?? {};
-  const chain = retry.fallbackChains?.[role] ?? [];
-  const modelOptions = models.map((model) => `${model.provider}/${model.id}`);
-  const updateChain = (next: string[]) => void save({ ...settings, retry: { ...retry, fallbackChains: { ...(retry.fallbackChains ?? {}), [role]: next } } });
-
-  return <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-    <div><SectionTitle>Native OMP Retry & Fallback</SectionTitle><p style={{ margin: "4px 0 0", color: "var(--text-muted)", fontSize: "var(--text-md)", lineHeight: 1.5 }}>OMP switches through these ordered model chains when a provider is rate-limited or unavailable.</p></div>
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 9 }}>
-      <label style={{ padding: "10px 12px", border: "1px solid var(--border)", borderRadius: "var(--radius-card)", background: "var(--bg-panel)", fontSize: "var(--text-md)", color: "var(--text)" }}><input type="checkbox" checked={retry.enabled ?? true} onChange={(event) => void save({ ...settings, retry: { ...retry, enabled: event.target.checked } })} /> Retry transient provider errors</label>
-      <label style={{ padding: "10px 12px", border: "1px solid var(--border)", borderRadius: "var(--radius-card)", background: "var(--bg-panel)", fontSize: "var(--text-md)", color: "var(--text)" }}><input type="checkbox" checked={retry.modelFallback ?? true} onChange={(event) => void save({ ...settings, retry: { ...retry, modelFallback: event.target.checked } })} /> Allow model fallback</label>
-      <label style={{ padding: "10px 12px", border: "1px solid var(--border)", borderRadius: "var(--radius-card)", background: "var(--bg-panel)", color: "var(--text)", fontSize: "var(--text-md)" }}>Retry attempts <select value={retry.maxRetries ?? 10} onChange={(event) => void save({ ...settings, retry: { ...retry, maxRetries: Number(event.target.value) } })} style={{ marginLeft: 8, padding: "4px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg)", color: "var(--text)" }}>{[0, 1, 2, 3, 5, 10, 15, 20].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
-      <label style={{ padding: "10px 12px", border: "1px solid var(--border)", borderRadius: "var(--radius-card)", background: "var(--bg-panel)", color: "var(--text)", fontSize: "var(--text-md)" }}>Return to primary <select value={retry.fallbackRevertPolicy ?? "cooldown-expiry"} onChange={(event) => void save({ ...settings, retry: { ...retry, fallbackRevertPolicy: event.target.value as "cooldown-expiry" | "never" } })} style={{ marginLeft: 8, padding: "4px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg)", color: "var(--text)" }}><option value="cooldown-expiry">After cooldown</option><option value="never">Never</option></select></label>
-    </div>
-    <section style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-card)", overflow: "hidden" }}>
-      <div style={{ padding: "10px 12px", background: "var(--bg-panel)", display: "flex", alignItems: "center", gap: "var(--space-4)" }}><span style={{ color: "var(--text)", fontSize: "var(--text-md)", fontWeight: 600 }}>Fallback chain for</span><select aria-label="Fallback chain role" value={role} onChange={(event) => setRole(event.target.value)} style={{ padding: "4px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg)", color: "var(--text)" }}>{NATIVE_MODEL_ROLES.map((value) => <option key={value} value={value}>{value}</option>)}</select></div>
-      <div style={{ padding: "var(--space-5)", display: "flex", gap: "var(--space-4)" }}><select aria-label="Select a fallback model" value={candidate} onChange={(event) => setCandidate(event.target.value)} style={{ flex: 1, minWidth: 0, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg)", color: "var(--text)" }}><option value="">Select a fallback model</option>{modelOptions.filter((value) => !chain.includes(value)).map((value) => <option key={value} value={value}>{value}</option>)}</select><button type="button" disabled={!candidate} onClick={() => { updateChain([...chain, candidate]); setCandidate(""); }} style={{ padding: "6px 10px", border: "none", borderRadius: "var(--radius-control)", background: "var(--accent)", color: "var(--on-accent)", cursor: candidate ? "pointer" : "default" }}>Add</button></div>
-      {chain.length === 0 ? (
-        <div style={{ padding: "0 12px 12px", color: "var(--text-dim)", fontSize: "var(--text-md)" }}>No explicit chain. OMP uses the <code>default</code> chain when available.</div>
-      ) : (
-        <div style={{ borderTop: "1px solid var(--border)" }}>
-          {chain.map((selector, index) => (
-            <div key={selector} style={{ display: "flex", alignItems: "center", gap: "var(--space-4)", padding: "7px 12px", color: "var(--text-muted)", fontSize: "var(--text-md)" }}>
-              <span style={{ width: 18, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>{index + 1}</span>
-              <code style={{ flex: 1 }}>{selector}</code>
-              <button type="button" aria-label={`Move ${selector} up`} title={`Move ${selector} up`} disabled={index === 0} onClick={() => { const next = [...chain]; const previous = next[index - 1]; next[index - 1] = next[index]; next[index] = previous; updateChain(next); }} className="ui-focus-ring" style={{ width: 24, height: 24, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "none", borderRadius: 4, background: "transparent", color: "var(--text-muted)", cursor: index === 0 ? "default" : "pointer" }}><ArrowUp size={14} /></button>
-              <button type="button" aria-label={`Move ${selector} down`} title={`Move ${selector} down`} disabled={index === chain.length - 1} onClick={() => { const next = [...chain]; const following = next[index + 1]; next[index + 1] = next[index]; next[index] = following; updateChain(next); }} className="ui-focus-ring" style={{ width: 24, height: 24, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "none", borderRadius: 4, background: "transparent", color: "var(--text-muted)", cursor: index === chain.length - 1 ? "default" : "pointer" }}><ArrowDown size={14} /></button>
-              <button type="button" aria-label={`Remove ${selector} from chain`} title={`Remove ${selector}`} onClick={() => updateChain(chain.filter((value) => value !== selector))} className="ui-focus-ring" style={{ width: 24, height: 24, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "none", borderRadius: 4, background: "transparent", color: "var(--text-muted)", cursor: "pointer" }}><Trash2 size={14} /></button>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-    {error && <div role="alert" style={{ color: "var(--status-error)", fontSize: "var(--text-md)" }}>{error}</div>}
-  </div>;
-}
 
 function NativeRegistryDetail({ models, connectedProviders, onChanged }: { models: RuntimeModelEntry[]; connectedProviders: ConnectedProvider[]; onChanged: () => Promise<void> }) {
   const [settings, setSettings] = useState<NativeRegistrySettings | null>(null);
@@ -576,11 +516,6 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete }: {
   useEffect(() => setEditingName(name), [name]);
   const set = <K extends keyof ProviderEntry>(k: K, v: ProviderEntry[K]) => onChange({ ...provider, [k]: v });
 
-  useEffect(() => {
-    if (!provider.api) onChange({ ...provider, api: "openai-completions" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provider.api]);
-
   const renameValidate = () => {
     if (!editingName.trim()) return t("modelsConfig.errorNameRequired");
     return null;
@@ -600,9 +535,12 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete }: {
   };
   const baseUrlV = useFieldValidation(baseUrlValidate);
 
+  const hasStoredApiKey = provider.apiKeyConfigured === true;
+  const apiKeyConfigured = hasStoredApiKey && provider.apiKey === undefined;
   const apiKeyValidate = () => {
-    if (provider.auth === "none") return null;
-    if (!provider.apiKey || !provider.apiKey.trim()) return t("modelsConfig.errorApiKeyRequired");
+    if (provider.auth === "none" || provider.auth === "oauth" || !(provider.models?.length ?? 0)) return null;
+    if (apiKeyConfigured) return null;
+    if (typeof provider.apiKey !== "string" || !provider.apiKey.trim()) return t("modelsConfig.errorApiKeyRequired");
     return null;
   };
   const apiKeyV = useFieldValidation(apiKeyValidate);
@@ -639,9 +577,13 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete }: {
               <span style={{ fontSize: "var(--text-xs)", padding: "2px 7px", borderRadius: 4, background: "var(--bg-subtle)", color: "var(--text-muted)", fontWeight: 500 }}>
                 Auth: None
               </span>
-            ) : provider.apiKey ? (
+            ) : apiKeyConfigured || (typeof provider.apiKey === "string" && provider.apiKey.length > 0) ? (
               <span style={{ fontSize: "var(--text-xs)", padding: "2px 7px", borderRadius: 4, background: "color-mix(in srgb, var(--accent) 15%, transparent)", color: "var(--accent)", fontWeight: 600 }}>
                 Key Set
+              </span>
+            ) : provider.apiKey === null ? (
+              <span style={{ fontSize: "var(--text-xs)", padding: "2px 7px", borderRadius: 4, background: "color-mix(in srgb, var(--status-warning) 15%, transparent)", color: "var(--status-warning)", fontWeight: 600 }}>
+                Key Will Clear
               </span>
             ) : (
               <span style={{ fontSize: "var(--text-xs)", padding: "2px 7px", borderRadius: 4, background: "color-mix(in srgb, var(--status-error) 15%, transparent)", color: "var(--status-error)", fontWeight: 600 }}>
@@ -726,12 +668,12 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete }: {
 
         <FormField
           label={t("modelsConfig.apiKey")}
-          hint={<CodeText text={t("modelsConfig.apiKeyHint")} />}
+          hint={<span><CodeText text={t("modelsConfig.apiKeyHint")} />{apiKeyConfigured && <><br />A configured key is retained unless you replace it or explicitly clear it.</>}</span>}
           error={apiKeyV.error}
         >
           <SecretInput
-            value={provider.apiKey ?? ""}
-            onChange={(v) => { set("apiKey", v || undefined); apiKeyV.onChange(); }}
+            value={typeof provider.apiKey === "string" ? provider.apiKey : ""}
+            onChange={(v) => { set("apiKey", v || (hasStoredApiKey ? null : undefined)); apiKeyV.onChange(); }}
             placeholder={t("modelsConfig.apiKeyPlaceholder")}
             invalid={Boolean(apiKeyV.error)}
             error={apiKeyV.error}
@@ -739,6 +681,15 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete }: {
             showLabel={t("modelsConfig.showApiKey")}
             hideLabel={t("modelsConfig.hideApiKey")}
           />
+          {hasStoredApiKey && (
+            <button
+              type="button"
+              onClick={() => { set("apiKey", null); apiKeyV.onChange(); apiKeyV.onBlur(); }}
+              style={{ alignSelf: "flex-start", padding: "4px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "var(--text-sm)" }}
+            >
+              Clear stored API key
+            </button>
+          )}
         </FormField>
 
         <FormCheck
@@ -755,7 +706,7 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete }: {
           <FormSelect
             value={provider.api ?? "openai-completions"}
             onChange={(v) => set("api", v)}
-            options={API_OPTIONS}
+            options={provider.api && !(API_OPTIONS as readonly string[]).includes(provider.api) ? [provider.api, ...API_OPTIONS] : API_OPTIONS}
             required
             placeholder={t("modelsConfig.inheritNone")}
           />
@@ -1090,7 +1041,7 @@ function ModelDetail({
           <FormSelect
             value={model.api ?? ""}
             onChange={(v) => set("api", v || undefined)}
-            options={API_OPTIONS}
+            options={model.api && !(API_OPTIONS as readonly string[]).includes(model.api) ? [model.api, ...API_OPTIONS] : API_OPTIONS}
             placeholder={t("modelsConfig.inheritNone")}
           />
         </FormField>
@@ -1372,22 +1323,6 @@ function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefre
     };
   }, [provider.id, onRefresh, t]);
 
-  const handleLogout = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/auth/logout/${encodeURIComponent(provider.id)}`, { method: "POST" });
-      const d = await res.json().catch(() => ({})) as { error?: string; code?: string };
-      if (!res.ok || d.error) {
-        // omp has no logout RPC/CLI surface; the route returns 501 with guidance.
-        setLoginState({ phase: "error", message: d.error || d.code ? formatApiError(d) : `HTTP ${res.status}` });
-        return;
-      }
-      setLoginState({ phase: "idle" });
-      onRefresh();
-    } catch (e) {
-      setLoginState({ phase: "error", message: e instanceof Error ? e.message : String(e) });
-    }
-  }, [provider.id, onRefresh]);
-
   const submitCode = useCallback(async (token: string, code: string) => {
     if (!code.trim()) return;
     setLoginState({ phase: "progress", message: t("modelsConfig.verifying") });
@@ -1548,12 +1483,17 @@ function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefre
               {provider.loggedIn ? t("modelsConfig.relogin") : t("modelsConfig.login")}
             </button>
             {provider.loggedIn && (
-              <button
-                onClick={handleLogout}
-                style={{ padding: "5px 12px", background: "none", border: "1px solid color-mix(in srgb, var(--status-error) 30%, transparent)", borderRadius: "var(--radius-control)", color: "var(--status-error)", cursor: "pointer", fontSize: "var(--text-md)" }}
-              >
-                {t("modelsConfig.disconnect")}
-              </button>
+              <>
+                <button
+                  type="button"
+                  disabled
+                  title="Disconnect this OMP account from the OMP terminal"
+                  style={{ padding: "5px 12px", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", color: "var(--text-dim)", cursor: "not-allowed", fontSize: "var(--text-md)", opacity: 0.7 }}
+                >
+                  {t("modelsConfig.disconnect")}
+                </button>
+                <span style={{ alignSelf: "center", color: "var(--text-dim)", fontSize: "var(--text-sm)" }}>Use the OMP terminal to disconnect this account.</span>
+              </>
             )}
           </>
         )}
@@ -1783,13 +1723,38 @@ function AddProviderPicker({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }: { onClose: () => void; onSelectTab?: (tab: SettingsTab) => void; onSaved?: () => void; embedded?: boolean }) {
+/** Deterministic comparison for drafts. Sorting object keys means a server or
+ * YAML serializer reordering fields does not create a false dirty state. */
+export function modelsConfigFingerprint(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(modelsConfigFingerprint).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${modelsConfigFingerprint(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "undefined";
+}
+
+export function ModelsConfig({ onClose, onSelectTab, onSaved, onDirtyChange, embedded = false }: { onClose: () => void; onSelectTab?: (tab: SettingsTab) => void; onSaved?: () => void; onDirtyChange?: (dirty: boolean) => void; embedded?: boolean }) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
-  const [config, setConfig] = useState<ModelsFileData>({ providers: {} });
+  const [config, setConfigState] = useState<ModelsFileData>({ providers: {} });
+  // Async save/load callbacks must consult the latest draft rather than the
+  // render-time config captured when the callback was created. Resolve updates
+  // against the ref synchronously so an edit queued during an in-flight save
+  // is visible before that request can complete.
+  const currentConfigRef = useRef(config);
+  const setConfig = useCallback((next: ModelsFileData | ((previous: ModelsFileData) => ModelsFileData)) => {
+    const previous = currentConfigRef.current;
+    const resolved = typeof next === "function" ? next(previous) : next;
+    if (resolved === previous) return;
+    currentConfigRef.current = resolved;
+    setConfigState(resolved);
+  }, []);
+  const lastLoadedConfigRef = useRef<string>(modelsConfigFingerprint({ providers: {} }));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [validationIssues, setValidationIssues] = useState<Array<{ path: string; message: string }>>([]);
   const [savedOk, setSavedOk] = useState(false);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
@@ -1839,33 +1804,48 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }
     }
   }, []);
 
-  const loadConfig = useCallback(() => {
+  const loadConfig = useCallback(async (expectedFingerprint = modelsConfigFingerprint(currentConfigRef.current)) => {
     setLoading(true);
-    fetch("/api/models-config")
-      .then((r) => r.json())
-      .then((d: ModelsFileData & { parseError?: string; code?: string; path?: string }) => {
-        if (d.parseError) {
-          setParseError({ message: d.parseError, path: d.path });
-          setConfig({ providers: {} });
-          setSelection(null);
-          return;
-        }
-        setParseError(null);
-        const normalized = d.providers ? d : { ...d, providers: {} };
-        setConfig(normalized);
-        const keys = Object.keys(normalized.providers ?? {});
-        if (keys.length > 0) setSelection({ type: "provider", name: keys[0] });
-      })
-      .catch(() => setConfig({ providers: {} }))
-      .finally(() => setLoading(false));
-  }, []);
+    try {
+      const response = await fetch("/api/models-config");
+      const d = await response.json() as ModelsFileData & { parseError?: string; code?: string; path?: string };
+      // A GET started for an older draft must not replace a newer local edit.
+      if (modelsConfigFingerprint(currentConfigRef.current) !== expectedFingerprint) return;
+      if (d.parseError) {
+        setParseError({ message: d.parseError, path: d.path });
+        const emptyConfig = { providers: {} };
+        setConfig(emptyConfig);
+        setSelection(null);
+        return;
+      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      setParseError(null);
+      setSaveError(null);
+      setValidationIssues([]);
+      const normalized = d.providers ? d : { ...d, providers: {} };
+      lastLoadedConfigRef.current = modelsConfigFingerprint(normalized);
+      setConfig(normalized);
+      const keys = Object.keys(normalized.providers ?? {});
+      if (keys.length > 0) setSelection({ type: "provider", name: keys[0] });
+      else setSelection(null);
+    } catch {
+      // Keep the last known draft when a refresh request fails; a transient
+      // network error must not turn it into an empty dirty document.
+    } finally {
+      setLoading(false);
+    }
+  }, [setConfig]);
 
   useEffect(() => {
-    loadConfig();
+    void loadConfig();
     loadOAuthProviders();
     loadApiKeyProviders();
     loadRuntimeModels();
   }, [loadConfig, loadOAuthProviders, loadApiKeyProviders, loadRuntimeModels]);
+
+  useEffect(() => {
+    onDirtyChange?.(lastLoadedConfigRef.current !== modelsConfigFingerprint(config));
+  }, [config, onDirtyChange]);
 
   useEffect(() => {
     try {
@@ -1914,11 +1894,11 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }
     while (config.providers?.[finalName]) finalName = `new-provider-${n++}`;
     setConfig((prev) => ({ ...prev, providers: { ...(prev.providers ?? {}), [finalName]: { api: "openai-completions" } } }));
     setSelection({ type: "provider", name: finalName });
-  }, [config.providers]);
+  }, [config.providers, setConfig]);
 
   const updateProvider = useCallback((name: string, p: ProviderEntry) => {
     setConfig((prev) => ({ ...prev, providers: { ...(prev.providers ?? {}), [name]: p } }));
-  }, []);
+  }, [setConfig]);
 
   const renameProvider = useCallback((oldName: string, newName: string) => {
     setConfig((prev) => {
@@ -1934,7 +1914,7 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }
       if (prev.type === "model" && prev.providerName === oldName) return { ...prev, providerName: newName };
       return prev;
     });
-  }, []);
+  }, [setConfig]);
 
   const deleteProvider = useCallback((name: string) => {
     setConfig((prev) => {
@@ -1947,7 +1927,7 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }
       setSelection(remaining.length > 0 ? { type: "provider", name: remaining[0] } : null);
       return prev;
     });
-  }, []);
+  }, [setConfig]);
 
   const addModel = useCallback((providerName: string) => {
     setConfig((prev) => {
@@ -1960,9 +1940,10 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }
       setSelection({ type: "model", providerName, index: idx });
       return prev;
     });
-  }, []);
+  }, [setConfig]);
 
-  const addModelFromCatalog = useCallback((providerName: string, model: ModelEntry, baseUrl?: string) => {
+  const addModelFromCatalog = useCallback((providerName: string, pickedModel: CatalogPickedModel, baseUrl?: string) => {
+    const model = normalizeCatalogModel(pickedModel);
     setConfig((prev) => {
       const provider = prev.providers?.[providerName] ?? {};
       const models = [...(provider.models ?? []), model];
@@ -1976,7 +1957,7 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }
       return prev;
     });
     setCatalogPicker(null);
-  }, []);
+  }, [setConfig]);
 
   const updateModel = useCallback((providerName: string, index: number, m: ModelEntry) => {
     setConfig((prev) => {
@@ -1985,7 +1966,7 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }
       models[index] = m;
       return { ...prev, providers: { ...(prev.providers ?? {}), [providerName]: { ...provider, models } } };
     });
-  }, []);
+  }, [setConfig]);
 
   const removeModel = useCallback((providerName: string, index: number) => {
     setConfig((prev) => {
@@ -1995,34 +1976,56 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }
       return { ...prev, providers: { ...(prev.providers ?? {}), [providerName]: { ...provider, models: models.length ? models : undefined } } };
     });
     setSelection({ type: "provider", name: providerName });
-  }, []);
+  }, [setConfig]);
 
   const handleSave = useCallback(async () => {
     if (parseError) return;
+    const submittedDraft = currentConfigRef.current;
+    const saveableConfig = omitUntouchedModelDrafts(submittedDraft);
+    const submittedDraftFingerprint = modelsConfigFingerprint(submittedDraft);
+    const submittedFingerprint = modelsConfigFingerprint(saveableConfig);
     setSaving(true);
     setSaveError(null);
+    setValidationIssues([]);
     setSavedOk(false);
     try {
-      const saveableConfig = omitUntouchedModelDrafts(config);
-      const res = await fetch("/api/models-config", {
+      const res = await fetch("/api/models-config?mode=full", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(saveableConfig),
       });
-      const d = await res.json() as { success?: boolean; error?: string; code?: string };
+      const d = await res.json() as { success?: boolean; error?: string; code?: string; issues?: Array<{ path?: string; message?: string }> };
       if (!res.ok || d.error) {
+        const issues = Array.isArray(d.issues)
+          ? d.issues.filter((issue): issue is { path: string; message: string } => typeof issue.path === "string" && typeof issue.message === "string")
+          : [];
+        const issueText = issues.map((issue) => issue.path ? `${issue.path}: ${issue.message}` : issue.message).join("; ");
+        setValidationIssues(issues);
         const msg = d.error || d.code ? formatApiError(d) : `HTTP ${res.status}`;
         setSaveError(msg);
-        toast.error(t("modelsConfig.saveErrorTitle"), msg);
+        toast.error(t("modelsConfig.saveErrorTitle"), issueText ? `${msg}: ${issueText}` : msg);
         // The file became unparseable after it was loaded — the server refused
         // the write, so switch the editor into the same blocked state.
         if (d.code === "models_config_unparseable") setParseError({ message: d.error ?? formatApiError(d) });
       } else {
-        // Drop a transient empty model row after its provider edit is persisted.
-        loadConfig();
+        // Always advance the persisted baseline to exactly what this PUT
+        // submitted, even when a newer local draft arrived while it was in flight.
+        lastLoadedConfigRef.current = submittedFingerprint;
+        const liveDraftChanged = modelsConfigFingerprint(currentConfigRef.current) !== submittedDraftFingerprint;
+        if (liveDraftChanged) onDirtyChange?.(true);
+        if (!liveDraftChanged) {
+          // No local edit raced the PUT. It is safe to drop transient rows and
+          // replace the draft with the redacted server DTO from a guarded GET.
+          setConfig(saveableConfig);
+          onDirtyChange?.(false);
+          await loadConfig(submittedFingerprint);
+        }
         await loadRuntimeModels();
         loadApiKeyProviders();
         onSaved?.();
+        // The parent callback may reset its persisted-save indicator; restore
+        // dirty state after it when this save raced with a newer local draft.
+        if (liveDraftChanged) onDirtyChange?.(true);
         setSavedOk(true);
         setTimeout(() => setSavedOk(false), 2000);
         toast.success(t("modelsConfig.saveSuccessTitle"));
@@ -2034,7 +2037,7 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }
     } finally {
       setSaving(false);
     }
-  }, [config, loadApiKeyProviders, loadConfig, loadRuntimeModels, onSaved, parseError, t]);
+  }, [loadApiKeyProviders, loadConfig, loadRuntimeModels, onDirtyChange, onSaved, parseError, setConfig, t]);
 
   const providers = Object.entries(config.providers ?? {});
   const activeOAuth = oauthProviders.filter((p) => p.loggedIn);
@@ -2059,7 +2062,6 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }
     }
     if (selection.type === "roles") return <ModelRolesDetail models={runtimeModels} />;
     if (selection.type === "registry") return <NativeRegistryDetail models={runtimeModels} connectedProviders={connectedProviders} onChanged={loadRuntimeModels} />;
-    if (selection.type === "fallbacks") return <RetryFallbackDetail models={runtimeModels} />;
     if (selection.type === "picker") return (
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "var(--space-5)" }}>
@@ -2156,7 +2158,7 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }
               borderRadius: "var(--radius-control)", color: "var(--text-muted)", fontSize: "var(--text-sm)", fontFamily: "var(--font-mono)",
               whiteSpace: "pre-wrap", wordBreak: "break-word", overflowX: "auto",
             }}>{parseError.message}</pre>
-            <button onClick={loadConfig} disabled={loading}
+            <button onClick={() => { void loadConfig(); }} disabled={loading}
               style={{ alignSelf: "flex-start", padding: "5px 12px", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", color: "var(--text-muted)", cursor: loading ? "default" : "pointer", fontSize: "var(--text-md)" }}>
               {loading ? t("modelsConfig.loading") : t("modelsConfig.reload")}
             </button>
@@ -2174,7 +2176,6 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }
           }}>
             <div style={{ flex: 1, overflowY: "auto", padding: "8px 6px" }}>
               <TreeNavButton icon={Layers} label="Native OMP registry" selected={selection?.type === "registry"} onClick={() => setSelection({ type: "registry" })} />
-              <TreeNavButton icon={RotateCcw} label="Retry & fallback" selected={selection?.type === "fallbacks"} onClick={() => setSelection({ type: "fallbacks" })} />
               <TreeNavButton icon={BookOpen} label="Composer model picker" selected={selection?.type === "picker"} onClick={() => setSelection({ type: "picker" })} />
               <TreeNavButton icon={SlidersHorizontal} label="OMP model roles" selected={selection?.type === "roles"} onClick={() => setSelection({ type: "roles" })} />
 
@@ -2339,7 +2340,12 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }
 
         {/* Footer */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, padding: "10px 18px", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
-          {saveError && <span style={{ fontSize: "var(--text-md)", color: "var(--status-error)", flex: 1 }}>{saveError}</span>}
+          {(saveError || validationIssues.length > 0) && (
+            <div role="alert" style={{ fontSize: "var(--text-md)", color: "var(--status-error)", flex: 1, minWidth: 0 }}>
+              {saveError}
+              {validationIssues.length > 0 && <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>{validationIssues.map((issue, index) => <li key={`${issue.path}-${index}`}>{issue.path ? `${issue.path}: ` : ""}{issue.message}</li>)}</ul>}
+            </div>
+          )}
           <button onClick={onClose} style={{ padding: "6px 14px", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", color: "var(--text-muted)", cursor: "pointer", fontSize: "var(--text-base)" }}>
             {t("modelsConfig.cancel")}
           </button>

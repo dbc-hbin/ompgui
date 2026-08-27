@@ -32,12 +32,20 @@ export const SETTINGS_CATEGORIES: TabItem[] = [
   { id: "providers", label: "API Keys & Providers", description: "Connected OAuth accounts, API keys, and model registry", Icon: KeyRound },
   { id: "intelligence", label: "Agent & Intelligence", description: "Advisor, memory, autolearn, compaction and retry", Icon: Sparkles },
   { id: "agents", label: "Agents & Subagents", description: "Configured subagents, model routing, prewalk, and advisor", Icon: Bot },
-  { id: "mcp", label: "Extensions & Tools", description: "MCP servers, managed skills, and OMP plugins", Icon: Cable },
+  { id: "extensions", label: "Extensions & Tools", description: "MCP servers, managed skills, and OMP plugins", Icon: Cable },
   { id: "system", label: "System & Updates", description: "App updates, runtime version, and active session restart", Icon: RefreshCw },
 ];
 
+export type ExtensionsTab = "mcp" | "skills" | "plugins";
+
+export const EXTENSION_TABS: Array<{ id: ExtensionsTab; label: string; description: string }> = [
+  { id: "mcp", label: "MCP Servers", description: "Configure global and project MCP servers" },
+  { id: "skills", label: "Skills", description: "Manage reusable workspace skills" },
+  { id: "plugins", label: "Plugins", description: "Manage OMP plugins for this workspace" },
+];
+
 export const getNormalizedActive = (tab: SettingsTab): SettingsTab => {
-  if (tab === "skills" || tab === "plugins" || tab === "extensions") return "mcp";
+  if (tab === "mcp" || tab === "skills" || tab === "plugins" || tab === "extensions") return "extensions";
   return tab;
 };
 
@@ -55,17 +63,19 @@ export function SettingsTabs({
   const { t } = useI18n();
   const currentActive = getNormalizedActive(active);
 
-  const onKeyDown = (event: React.KeyboardEvent, index: number) => {
+  const onKeyDown = (event: React.KeyboardEvent, id: SettingsTab) => {
     const enabled = SETTINGS_CATEGORIES.filter((tab) => !(tab.needsWorkspace && !workspaceReady));
+    const currentIndex = enabled.findIndex((tab) => tab.id === id);
+    if (currentIndex < 0 || enabled.length === 0) return;
+
     let nextIndex: number | null = null;
-    if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = index + 1;
-    if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = index - 1;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (currentIndex + 1) % enabled.length;
+    if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (currentIndex - 1 + enabled.length) % enabled.length;
     if (event.key === "Home") nextIndex = 0;
     if (event.key === "End") nextIndex = enabled.length - 1;
     if (nextIndex !== null) {
       event.preventDefault();
-      const next = enabled[nextIndex] ?? enabled[index];
-      if (next) onSelect(next.id);
+      onSelect(enabled[nextIndex].id);
     }
   };
 
@@ -87,7 +97,7 @@ export function SettingsTabs({
           overflowY: "auto",
         }}
       >
-        {SETTINGS_CATEGORIES.map(({ id, label, description, Icon, needsWorkspace }, index) => {
+        {SETTINGS_CATEGORIES.map(({ id, label, description, Icon, needsWorkspace }) => {
           const selected = id === currentActive;
           const disabled = Boolean(needsWorkspace && !workspaceReady);
           const localizedLabel = t(`settingsTabs.${id}`) || label;
@@ -103,7 +113,7 @@ export function SettingsTabs({
               tabIndex={selected ? 0 : -1}
               disabled={disabled}
               onClick={() => onSelect(id)}
-              onKeyDown={(event) => onKeyDown(event, index)}
+              onKeyDown={(event) => onKeyDown(event, id)}
               style={{
                 display: "flex",
                 alignItems: "flex-start",
@@ -151,7 +161,7 @@ export function SettingsTabs({
         WebkitOverflowScrolling: "touch",
       }}
     >
-      {SETTINGS_CATEGORIES.map(({ id, label, description, Icon, needsWorkspace }, index) => {
+      {SETTINGS_CATEGORIES.map(({ id, label, description, Icon, needsWorkspace }) => {
         const selected = id === currentActive;
         const disabled = Boolean(needsWorkspace && !workspaceReady);
         const localizedLabel = t(`settingsTabs.${id}`) || label;
@@ -169,7 +179,7 @@ export function SettingsTabs({
             tabIndex={selected ? 0 : -1}
             disabled={disabled}
             onClick={() => onSelect(id)}
-            onKeyDown={(event) => onKeyDown(event, index)}
+            onKeyDown={(event) => onKeyDown(event, id)}
             style={{
               display: "inline-flex",
               alignItems: "flex-start",
@@ -198,5 +208,54 @@ export function SettingsTabs({
         );
       })}
     </nav>
+  );
+}
+
+export function ExtensionsTabs({ active, onSelect }: { active: ExtensionsTab; onSelect: (tab: ExtensionsTab) => void }) {
+  const { t } = useI18n();
+  const selectedIndex = Math.max(0, EXTENSION_TABS.findIndex((tab) => tab.id === active));
+
+  const onKeyDown = (event: React.KeyboardEvent) => {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (selectedIndex + 1) % EXTENSION_TABS.length;
+    if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (selectedIndex - 1 + EXTENSION_TABS.length) % EXTENSION_TABS.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = EXTENSION_TABS.length - 1;
+    if (nextIndex !== null) {
+      event.preventDefault();
+      onSelect(EXTENSION_TABS[nextIndex].id);
+    }
+  };
+
+  return (
+    <div
+      role="tablist"
+      aria-label={t("settingsConfig.extensionsTabsAria")}
+      aria-orientation="horizontal"
+      style={{ display: "flex", gap: 4, padding: 4, border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", alignSelf: "flex-start", maxWidth: "100%", overflowX: "auto" }}
+    >
+      {EXTENSION_TABS.map((tab) => {
+        const selected = tab.id === active;
+        const label = t(`settingsConfig.extensionsTab.${tab.id}`) || tab.label;
+        const description = t(`settingsConfig.extensionsTab.${tab.id}Desc`) || tab.description;
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            id={`settings-extension-tab-${tab.id}`}
+            aria-selected={selected}
+            aria-controls={`settings-extension-panel-${tab.id}`}
+            aria-label={`${label}: ${description}`}
+            tabIndex={selected ? 0 : -1}
+            onClick={() => onSelect(tab.id)}
+            onKeyDown={onKeyDown}
+            style={{ padding: "6px 10px", border: selected ? "1px solid var(--accent)" : "1px solid transparent", borderRadius: "calc(var(--radius-control) - 1px)", background: selected ? "var(--bg-selected)" : "transparent", color: selected ? "var(--text)" : "var(--text-muted)", fontSize: 12, fontWeight: selected ? 600 : 500, cursor: "pointer", whiteSpace: "nowrap" }}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
 import { dirname } from "path";
-import { isMap, parseDocument, stringify } from "yaml";
+import { isMap, parseDocument } from "yaml";
 import { getSettingsPath } from "./paths";
 import { isRecord } from "../type-guards";
 
@@ -69,6 +69,122 @@ function assertOptionalRecord(value: unknown, name: string): asserts value is Re
 
 function assertOptionalBoolean(value: unknown, name: string): void {
   if (value !== undefined && typeof value !== "boolean") throw new Error(`${name} must be a boolean`);
+}
+
+function hasDefined(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key) && record[key] !== undefined;
+}
+
+/** Keep only fields that this editor is allowed to persist. Unknown request
+ * fields must not become new OMP config, while unknown YAML already on disk is
+ * left untouched by the document writer below. Malformed recognized values are
+ * intentionally retained so the normal validator can reject them. */
+function filterKnownObject(value: unknown, keys: readonly string[]): unknown {
+  if (!isRecord(value)) return value;
+  const output: Record<string, unknown> = {};
+  for (const key of keys) if (hasDefined(value, key)) output[key] = value[key];
+  return output;
+}
+
+function filterKnownSection(
+  source: Record<string, unknown>,
+  sectionName: string,
+  keys: readonly string[],
+  nested: Record<string, readonly string[]> = {},
+): unknown {
+  if (!hasDefined(source, sectionName)) return undefined;
+  const value = source[sectionName];
+  if (!isRecord(value)) return value;
+  const output: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (!hasDefined(value, key)) continue;
+    const childKeys = nested[key];
+    if (!childKeys || !isRecord(value[key])) {
+      output[key] = value[key];
+      continue;
+    }
+    const child = filterKnownObject(value[key], childKeys);
+    // An explicitly empty child object is meaningful (it clears that map),
+    // whereas an object containing only unknown keys must be a no-op.
+    if (Object.keys(value[key] as Record<string, unknown>).length === 0 || Object.keys(child as Record<string, unknown>).length > 0) {
+      output[key] = child;
+    }
+  }
+  return output;
+}
+
+/** Return a reviewed, runtime-safe settings subset without changing values.
+ * This is exported for the API route so it can merge a patch before writing. */
+export function filterNativeSettings(settings: NativeSettings): NativeSettings {
+  if (!isRecord(settings)) throw new Error("Settings must be an object");
+  const source = settings as unknown as Record<string, unknown>;
+  const output: Record<string, unknown> = {};
+  for (const key of [
+    "defaultThinkingLevel", "hideThinkingBlock", "externalThinking", "textVerbosity", "personality",
+    "enabledModels", "disabledProviders", "modelProviderOrder",
+  ]) if (hasDefined(source, key)) output[key] = source[key];
+  const sections: Array<[string, readonly string[], Record<string, readonly string[]> | undefined]> = [
+    ["advisor", ["enabled", "subagents", "syncBacklog", "immuneTurns"], undefined],
+    ["tools", ["approvalMode", "approval"], { approval: ["bash", "extension"] }],
+    ["retry", ["enabled", "maxRetries", "modelFallback", "fallbackRevertPolicy", "fallbackChains"], undefined],
+    ["compaction", ["enabled", "midTurnEnabled", "strategy", "autoContinue", "remoteEnabled", "keepRecentTokens"], undefined],
+    ["memory", ["backend"], undefined],
+    ["autolearn", ["enabled", "autoContinue", "minToolCalls"], undefined],
+    ["mnemopi", ["scoping", "autoRecall", "autoRetain", "noEmbeddings"], undefined],
+    ["mcp", ["enableProjectConfig", "renderMarkdownResults", "notifications", "notificationDebounceMs"], undefined],
+    ["task", ["eager", "prewalk", "agentModelOverrides", "agentPrewalk", "agentAdvisor", "disabledAgents"], undefined],
+  ];
+  for (const [section, keys, nested] of sections) {
+    const filtered = filterKnownSection(source, section, keys, nested);
+    if (filtered === undefined) continue;
+    const original = source[section];
+    if (!isRecord(original) || Object.keys(original).length === 0 || Object.keys(filtered as Record<string, unknown>).length > 0) {
+      output[section] = filtered;
+    }
+  }
+  // registryHasScopedEntries is derived read-only metadata, never a write
+  // target. In particular, do not let a client spoof it into the YAML file.
+  return output as NativeSettings;
+}
+
+const OBJECT_SETTINGS_SECTIONS: Record<string, true> = {
+  advisor: true,
+  tools: true,
+  retry: true,
+  compaction: true,
+  memory: true,
+  autolearn: true,
+  mnemopi: true,
+  mcp: true,
+  task: true,
+};
+
+/** Merge a reviewed partial editor update onto the latest persisted snapshot.
+ * Arrays and scalar leaves replace; object-valued sections merge so omitted
+ * siblings survive. tools.approval is the one nested section edited directly
+ * by the UI and therefore receives the same merge treatment. */
+export function mergeNativeSettings(current: NativeSettings, patch: NativeSettings): NativeSettings {
+  const existing = isRecord(current) ? current as unknown as Record<string, unknown> : {};
+  const incoming = filterNativeSettings(patch) as unknown as Record<string, unknown>;
+  const output: Record<string, unknown> = { ...existing };
+  for (const [key, value] of Object.entries(incoming)) {
+    if (value === undefined) continue;
+    if (OBJECT_SETTINGS_SECTIONS[key] && isRecord(value)) {
+      const previous = isRecord(output[key]) ? output[key] as Record<string, unknown> : {};
+      const section: Record<string, unknown> = { ...previous, ...value };
+      if (key === "tools" && isRecord(value.approval)) {
+        const previousApproval = isRecord(previous.approval) ? previous.approval : {};
+        section.approval = Object.keys(value.approval).length === 0
+          ? {}
+          : { ...previousApproval, ...value.approval };
+      }
+      output[key] = section;
+    } else {
+      output[key] = value;
+    }
+  }
+  delete output.registryHasScopedEntries;
+  return output as NativeSettings;
 }
 
 function readDocument() {
@@ -177,12 +293,16 @@ export function writeNativeSettings(settings: NativeSettings): void {
   assertOptionalRecord(settings.tools, "tools");
   assertOptionalRecord(settings.tools?.approval, "tools.approval");
   assertOptionalRecord(settings.retry, "retry");
+  assertOptionalRecord(settings.retry?.fallbackChains, "retry.fallbackChains");
   assertOptionalRecord(settings.compaction, "compaction");
   assertOptionalRecord(settings.memory, "memory");
   assertOptionalRecord(settings.autolearn, "autolearn");
   assertOptionalRecord(settings.mnemopi, "mnemopi");
   assertOptionalRecord(settings.mcp, "mcp");
   assertOptionalRecord(settings.task, "task");
+  assertOptionalRecord(settings.task?.agentModelOverrides, "task.agentModelOverrides");
+  assertOptionalRecord(settings.task?.agentPrewalk, "task.agentPrewalk");
+  assertOptionalRecord(settings.task?.agentAdvisor, "task.agentAdvisor");
   for (const [name, value] of Object.entries({
     hideThinkingBlock: settings.hideThinkingBlock,
     externalThinking: settings.externalThinking,
@@ -241,38 +361,47 @@ export function writeNativeSettings(settings: NativeSettings): void {
     if (values !== undefined && (!Array.isArray(values) || values.some((value) => typeof value !== "string" || !value.trim()))) throw new Error(`${key} must contain non-empty strings`);
   }
 
+  const reviewed = filterNativeSettings(settings);
   const { path, doc } = readDocument();
   mkdirSync(dirname(path), { recursive: true });
   if (doc.contents === null) {
+    // Keep document-level comments when turning a new or comment-only file
+    // into a mapping, just as we do for an existing mapping below.
+    doc.contents = doc.createNode(reviewed) as unknown as typeof doc.contents;
     const temp = `${path}.tmp-${process.pid}-${Date.now()}`;
-    try { writeFileSync(temp, stringify(settings), "utf8"); renameSync(temp, path); } catch (error) { try { if (existsSync(temp)) unlinkSync(temp); } catch {} throw error; }
+    try { writeFileSync(temp, doc.toString(), "utf8"); renameSync(temp, path); } catch (error) { try { if (existsSync(temp)) unlinkSync(temp); } catch {} throw error; }
     return;
   }
   if (!isMap(doc.contents)) throw new Error(`${path} must contain a YAML mapping`);
-  if (settings.defaultThinkingLevel !== undefined) doc.set("defaultThinkingLevel", settings.defaultThinkingLevel);
-  if (settings.hideThinkingBlock !== undefined) doc.set("hideThinkingBlock", settings.hideThinkingBlock);
-  if (settings.externalThinking !== undefined) doc.set("externalThinking", settings.externalThinking);
-  if (settings.textVerbosity !== undefined) doc.set("textVerbosity", settings.textVerbosity);
-  if (settings.personality !== undefined) doc.set("personality", settings.personality);
-  for (const [key, value] of Object.entries(settings.advisor ?? {})) doc.setIn(["advisor", key], value);
-  if (settings.tools?.approvalMode !== undefined) doc.setIn(["tools", "approvalMode"], settings.tools.approvalMode);
-  if (settings.tools?.approval?.bash !== undefined) doc.setIn(["tools", "approval", "bash"], settings.tools.approval.bash);
-  if (settings.tools?.approval?.extension !== undefined) doc.setIn(["tools", "approval", "extension"], settings.tools.approval.extension);
-  if (settings.enabledModels !== undefined) doc.set("enabledModels", settings.enabledModels);
-  if (settings.disabledProviders !== undefined) doc.set("disabledProviders", settings.disabledProviders);
-  if (settings.modelProviderOrder !== undefined) doc.set("modelProviderOrder", settings.modelProviderOrder);
-  for (const [key, value] of Object.entries(settings.retry ?? {})) doc.setIn(["retry", key], value);
-  for (const [key, value] of Object.entries(settings.compaction ?? {})) doc.setIn(["compaction", key], value);
-  for (const [key, value] of Object.entries(settings.memory ?? {})) doc.setIn(["memory", key], value);
-  for (const [key, value] of Object.entries(settings.autolearn ?? {})) doc.setIn(["autolearn", key], value);
-  for (const [key, value] of Object.entries(settings.mnemopi ?? {})) doc.setIn(["mnemopi", key], value);
-  for (const [key, value] of Object.entries(settings.mcp ?? {})) doc.setIn(["mcp", key], value);
-  if (settings.task?.eager !== undefined) doc.setIn(["task", "eager"], settings.task.eager);
-  if (settings.task?.prewalk !== undefined) doc.setIn(["task", "prewalk"], settings.task.prewalk);
-  if (settings.task?.agentModelOverrides !== undefined) doc.setIn(["task", "agentModelOverrides"], settings.task.agentModelOverrides);
-  if (settings.task?.agentPrewalk !== undefined) doc.setIn(["task", "agentPrewalk"], settings.task.agentPrewalk);
-  if (settings.task?.agentAdvisor !== undefined) doc.setIn(["task", "agentAdvisor"], settings.task.agentAdvisor);
-  if (settings.task?.disabledAgents !== undefined) doc.setIn(["task", "disabledAgents"], settings.task.disabledAgents);
+  if (reviewed.defaultThinkingLevel !== undefined) doc.set("defaultThinkingLevel", reviewed.defaultThinkingLevel);
+  if (reviewed.hideThinkingBlock !== undefined) doc.set("hideThinkingBlock", reviewed.hideThinkingBlock);
+  if (reviewed.externalThinking !== undefined) doc.set("externalThinking", reviewed.externalThinking);
+  if (reviewed.textVerbosity !== undefined) doc.set("textVerbosity", reviewed.textVerbosity);
+  if (reviewed.personality !== undefined) doc.set("personality", reviewed.personality);
+  for (const [key, value] of Object.entries(reviewed.advisor ?? {})) doc.setIn(["advisor", key], value);
+  if (reviewed.tools?.approvalMode !== undefined) doc.setIn(["tools", "approvalMode"], reviewed.tools.approvalMode);
+  if (reviewed.tools?.approval !== undefined) {
+    if (Object.keys(reviewed.tools.approval).length === 0) doc.setIn(["tools", "approval"], {});
+    else {
+      if (reviewed.tools.approval.bash !== undefined) doc.setIn(["tools", "approval", "bash"], reviewed.tools.approval.bash);
+      if (reviewed.tools.approval.extension !== undefined) doc.setIn(["tools", "approval", "extension"], reviewed.tools.approval.extension);
+    }
+  }
+  if (reviewed.enabledModels !== undefined) doc.set("enabledModels", reviewed.enabledModels);
+  if (reviewed.disabledProviders !== undefined) doc.set("disabledProviders", reviewed.disabledProviders);
+  if (reviewed.modelProviderOrder !== undefined) doc.set("modelProviderOrder", reviewed.modelProviderOrder);
+  for (const [key, value] of Object.entries(reviewed.retry ?? {})) doc.setIn(["retry", key], value);
+  for (const [key, value] of Object.entries(reviewed.compaction ?? {})) doc.setIn(["compaction", key], value);
+  for (const [key, value] of Object.entries(reviewed.memory ?? {})) doc.setIn(["memory", key], value);
+  for (const [key, value] of Object.entries(reviewed.autolearn ?? {})) doc.setIn(["autolearn", key], value);
+  for (const [key, value] of Object.entries(reviewed.mnemopi ?? {})) doc.setIn(["mnemopi", key], value);
+  for (const [key, value] of Object.entries(reviewed.mcp ?? {})) doc.setIn(["mcp", key], value);
+  if (reviewed.task?.eager !== undefined) doc.setIn(["task", "eager"], reviewed.task.eager);
+  if (reviewed.task?.prewalk !== undefined) doc.setIn(["task", "prewalk"], reviewed.task.prewalk);
+  if (reviewed.task?.agentModelOverrides !== undefined) doc.setIn(["task", "agentModelOverrides"], reviewed.task.agentModelOverrides);
+  if (reviewed.task?.agentPrewalk !== undefined) doc.setIn(["task", "agentPrewalk"], reviewed.task.agentPrewalk);
+  if (reviewed.task?.agentAdvisor !== undefined) doc.setIn(["task", "agentAdvisor"], reviewed.task.agentAdvisor);
+  if (reviewed.task?.disabledAgents !== undefined) doc.setIn(["task", "disabledAgents"], reviewed.task.disabledAgents);
   const temp = `${path}.tmp-${process.pid}-${Date.now()}`;
   try { writeFileSync(temp, doc.toString(), "utf8"); renameSync(temp, path); } catch (error) { try { if (existsSync(temp)) unlinkSync(temp); } catch {} throw error; }
 }
