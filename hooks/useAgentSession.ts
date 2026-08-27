@@ -761,17 +761,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const rosterRefreshTimerKindRef = useRef<"initial" | "reconcile" | null>(null);
   const rosterRefreshInFlightRef = useRef<Promise<boolean> | null>(null);
   const rosterRefreshRequestIdRef = useRef(0);
-  const refreshSubagentRosterRef = useRef<((sid: string, loadGeneration?: number) => Promise<boolean>) | null>(null);
+  const refreshSubagentRosterRef = useRef<((sid: string) => Promise<boolean>) | null>(null);
   const subagentsRef = useRef<SubagentInfo[]>([]);
   subagentsRef.current = subagents;
-  // Parent-terminal history hydration settles this run's unresolved live rows;
-  // a next prompt waits for it so it cannot race the terminal roster cleanup.
-  const terminalSubagentCleanupRef = useRef<Promise<void> | null>(null);
+  // This generation belongs to the selected session/roster, not to a parent
+  // prompt. Detached children remain in this roster after agent_end; it is
+  // bumped only when a session switch clears the roster.
   const promptRunIdRef = useRef(0);
-  // Bumped on every roster clear (run end): in-flight get_subagents/history
-  // responses from the finished run must not merge into the cleared (or next
-  // run's) roster. The prompt runId alone is not enough — it is not
-  // invalidated on terminal.
+  // In-flight roster/history responses and deferred child-event flushes are
+  // fenced by the selected session and this generation. Parent prompt turns do
+  // not advance it: detached children outlive agent_end.
   const subagentRosterGenerationRef = useRef(0);
   const optimisticUserMessageKeyRef = useRef<string | null>(null);
   // True once this mount has persisted a non-empty queue: gates removal so a
@@ -972,8 +971,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // Merge a batch of roster entries through the shared precedence/fence
   // implementation. `skipNewerThan` protects live frames observed after a
   // point-in-time get_subagents request.
-  const mergeSubagents = useCallback((incoming: SubagentInfo[], options?: { skipNewerThan?: number }) => {
+  const mergeSubagents = useCallback((incoming: SubagentInfo[], options?: {
+    skipNewerThan?: number;
+    sessionId?: string;
+    rosterGeneration?: number;
+  }) => {
     setSubagents((prev) => {
+      if (
+        options?.sessionId !== undefined
+        && (
+          !hookAliveRef.current
+          || sessionIdRef.current !== options.sessionId
+          || (options.rosterGeneration !== undefined && subagentRosterGenerationRef.current !== options.rosterGeneration)
+        )
+      ) return prev;
       const next = mergeSubagentRoster(prev, incoming, options);
       subagentsRef.current = next;
       return next;
@@ -996,7 +1007,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         || (loadGeneration !== undefined && sessionLoadGenerationRef.current !== loadGeneration)
       ) return false;
       const entries = (data.subagents ?? []).map(historyEntryToSubagentInfo);
-      mergeSubagents(entries);
+      mergeSubagents(entries, { sessionId: sid, rosterGeneration: generation });
       return true;
     } catch {
       // Best effort; live frames take precedence while a run is active.
@@ -1016,9 +1027,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     ) return;
     if (rosterRefreshTimerRef.current || rosterRefreshInFlightRef.current) return;
 
-    const runId = promptRunIdRef.current;
     const generation = subagentRosterGenerationRef.current;
-    const loadGeneration = sessionLoadGenerationRef.current;
     rosterRefreshTimerKindRef.current = "reconcile";
     rosterRefreshTimerRef.current = setTimeout(() => {
       rosterRefreshTimerRef.current = null;
@@ -1026,12 +1035,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (
         !hookAliveRef.current
         || sessionIdRef.current !== sid
-        || promptRunIdRef.current !== runId
         || subagentRosterGenerationRef.current !== generation
-        || sessionLoadGenerationRef.current !== loadGeneration
       ) return;
       if (hasSubagentRosterReconcileNeed(subagentsRef.current)) {
-        void refreshSubagentRosterRef.current?.(sid, loadGeneration);
+        void refreshSubagentRosterRef.current?.(sid);
       } else {
         scheduleSubagentRosterReconcile(sid);
       }
@@ -1041,27 +1048,25 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // Hydrate the LIVE roster from get_subagents. The registry only holds
   // currently-running subagents, so this fills gaps after an SSE reconnect or
   // a missed lifecycle frame; it never reports finished runs.
-  const refreshSubagentRoster = useCallback((sid: string, loadGeneration = sessionLoadGenerationRef.current): Promise<boolean> => {
+  const refreshSubagentRoster = useCallback((sid: string): Promise<boolean> => {
     if (!canMutateSession(sid)) return Promise.resolve(false);
     const inFlight = rosterRefreshInFlightRef.current;
     if (inFlight) return inFlight;
 
     const requestedAt = Date.now();
-    const runId = promptRunIdRef.current;
     const generation = subagentRosterGenerationRef.current;
     const requestId = ++rosterRefreshRequestIdRef.current;
     const requestPromise = (async () => {
       try {
         const result = await sendAgentCommand<{ subagents?: SubagentSnapshotLike[] }>(sid, { type: "get_subagents" });
-        // Fence: the request may resolve after the user switched sessions, the
-        // run ended and a new prompt started, or the roster was cleared — its
-        // snapshot belongs to a different roster generation and must not merge
-        // or reconcile the new one.
+        // Fence: the request may resolve after the user switched sessions or
+        // the roster was cleared. Parent prompts do not fence this snapshot:
+        // detached children and their registry remain authoritative after
+        // agent_end.
         if (
-          sessionIdRef.current !== sid
-          || promptRunIdRef.current !== runId
+          !hookAliveRef.current
+          || sessionIdRef.current !== sid
           || subagentRosterGenerationRef.current !== generation
-          || (loadGeneration !== undefined && sessionLoadGenerationRef.current !== loadGeneration)
         ) return false;
         const snapshots = (result?.subagents ?? [])
           .map(parseSubagentSnapshot)
@@ -1071,6 +1076,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const liveIds = new Set(snapshots.map((s) => s.id));
         const now = Date.now();
         setSubagents((prev) => {
+          if (
+            !hookAliveRef.current
+            || sessionIdRef.current !== sid
+            || subagentRosterGenerationRef.current !== generation
+          ) return prev;
           const merged = mergeSubagentRoster(prev, snapshots, { skipNewerThan: requestedAt });
           const next = reconcileSubagentRosterSnapshot(merged, liveIds, requestedAt, now);
           subagentsRef.current = next;
@@ -1079,7 +1089,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         // Mid-run disk history can gain completed task calls that live frames
         // missed (a child finishing before the subscription attached is deleted
         // from the registry) — re-check so such children appear before agent_end.
-        void refreshSubagentHistory(sid, loadGeneration);
+        void refreshSubagentHistory(sid);
         return true;
       } catch {
         // Request failures must not advance absence metadata; the next
@@ -1110,9 +1120,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [scheduleSubagentRosterReconcile, subagents]);
 
-  // Clear per-run activity state at run end. MUST also cancel the pending
-  // version-flush rAF: a queued subagent_event flush would otherwise repopulate
-  // the version map for dead subagent ids right after the clear.
+  // Activity is scoped to the selected session rather than a parent prompt.
+  // A detached child may continue emitting frames after agent_end, so only a
+  // session switch/unmount clears this bounded UI cache.
   const resetSubagentActivityState = useCallback(() => {
     if (subagentVersionFlushFrameRef.current !== null) {
       cancelAnimationFrame(subagentVersionFlushFrameRef.current);
@@ -1130,61 +1140,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     subagentRosterGenerationRef.current += 1;
     resetSubagentActivityState();
   }, [resetSubagentActivityState]);
-
-  // Once the parent turn ends, history is the durable authority. Keep the
-  // live rows until that history has been hydrated, then mark only unresolved
-  // live-started rows as internal lost; terminal history rows win the merge.
-  const settleSubagentRosterAfterTerminal = useCallback(async (sid: string, generation: number) => {
-    await refreshSubagentHistory(sid, undefined);
-    if (
-      !hookAliveRef.current
-      || sessionIdRef.current !== sid
-      || subagentRosterGenerationRef.current !== generation
-    ) return;
-    setSubagents((prev) => {
-      let changed = false;
-      const next = prev.map((subagent) => {
-        if (subagent.source === "history" || subagent.status !== "started") return subagent;
-        changed = true;
-        const lost: SubagentInfo = { ...subagent, status: "lost" };
-        delete lost.missingSnapshots;
-        delete lost.missingSince;
-        return lost;
-      });
-      subagentsRef.current = changed ? next : prev;
-      return changed ? next : prev;
-    });
-  }, [refreshSubagentHistory]);
-
-  const beginSubagentTerminalCleanup = useCallback((sid: string | null) => {
-    if (rosterRefreshTimerRef.current) {
-      clearTimeout(rosterRefreshTimerRef.current);
-      rosterRefreshTimerRef.current = null;
-    }
-    rosterRefreshTimerKindRef.current = null;
-    // Any registry request from the ended run is fenced by the new generation.
-    // It cannot be cancelled through sendAgentCommand, so leave its promise
-    // to settle without allowing it to schedule another refresh.
-    rosterRefreshInFlightRef.current = null;
-    rosterRefreshRequestIdRef.current += 1;
-    subagentRosterGenerationRef.current += 1;
-    const generation = subagentRosterGenerationRef.current;
-    resetSubagentActivityState();
-    if (!sid) {
-      terminalSubagentCleanupRef.current = null;
-      return;
-    }
-    const cleanup = settleSubagentRosterAfterTerminal(sid, generation);
-    terminalSubagentCleanupRef.current = cleanup;
-    void cleanup.then(
-      () => {
-        if (terminalSubagentCleanupRef.current === cleanup) terminalSubagentCleanupRef.current = null;
-      },
-      () => {
-        if (terminalSubagentCleanupRef.current === cleanup) terminalSubagentCleanupRef.current = null;
-      },
-    );
-  }, [resetSubagentActivityState, settleSubagentRosterAfterTerminal]);
 
   // Monotonic sequence for authoritative model syncs. Every async sync
   // (state fetch, model_changed GET) captures a token at START and only
@@ -1936,14 +1891,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentRunning(false);
       setAgentPhase(null);
       setRetryInfo(null);
-      // Bound per-run activity state: without this, subagentEvents and the
-      // transcript-version map retain one entry per subagent id forever. Keep
-      // roster rows until persisted history has settled them.
-      beginSubagentTerminalCleanup(sid);
+      // Parent completion does not end detached children. Refresh both live
+      // registry and durable history so children that outlive this prompt can
+      // still be discovered/settled without fabricating a lost state.
+      if (sid) {
+        void refreshSubagentRosterRef.current?.(sid);
+        void refreshSubagentHistory(sid);
+      }
       dispatch({ type: "end" });
       onAgentEnd?.();
     }
-  }, [beginSubagentTerminalCleanup, loadSession, onAgentEnd]);
+  }, [loadSession, onAgentEnd, refreshSubagentHistory]);
 
   const waitForPromptSettlement = useCallback(async (sid: string, runId?: number) => {
     await delay(PROMPT_SETTLE_INITIAL_DELAY_MS);
@@ -2224,10 +2182,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setAgentRunning(false);
         setAgentPhase(null);
         setRetryInfo(null);
-        beginSubagentTerminalCleanup(endedSid);
+        // agent_end terminates only the parent turn. Detached children keep
+        // their selected-session roster/activity alive and may settle later.
+        if (endedSid) void refreshSubagentRosterRef.current?.(endedSid);
         dispatch({ type: "end" });
         if (endedSid) {
           void loadSession(endedSid, false, false, endedRunId);
+          // Start this after loadSession advances its history generation so
+          // the detached-child history response is not mistaken for a stale
+          // pre-terminal load.
+          void refreshSubagentHistory(endedSid);
           const endLoadGeneration = runtimeLoadGenerationRef.current;
           const endToken = beginAuthoritativeModelSync();
           fetch(`/api/agent/${encodeURIComponent(endedSid)}`)
@@ -2435,15 +2399,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
         break;
       case "subagent_lifecycle": {
-        // Lifecycle frames buffered by SSE after a terminal event belong to
-        // the finished run; only accept them while this session is active.
-        if (!hookAliveRef.current || !sessionIdRef.current || !agentRunningRef.current) break;
+        // Child lifecycle frames are session-scoped, not parent-turn-scoped:
+        // detached children can settle after the parent's agent_end. Capture
+        // the selected-session roster generation so a queued frame from a
+        // previous session cannot repopulate a cleared roster.
+        const eventSessionId = sessionIdRef.current;
+        const eventRosterGeneration = subagentRosterGenerationRef.current;
+        if (!hookAliveRef.current || !eventSessionId) break;
         // Roster fed by omp's subagent_lifecycle frames. Payload mirrors
         // SubagentLifecyclePayload (oh-my-pi task/types.ts); defensive
         // parsing degrades to ignoring the frame, never breaking the run.
         const info = parseSubagentLifecycle(event.payload);
         if (!info) break;
-        mergeSubagents([info]);
+        mergeSubagents([info], { sessionId: eventSessionId, rosterGeneration: eventRosterGeneration });
         break;
       }
       case "host_tool_call": {
@@ -2465,9 +2433,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         break;
       }
       case "subagent_progress": {
-        // Progress frames buffered by SSE after a terminal event must not
-        // recreate rows cleared for the finished run.
-        if (!hookAliveRef.current || !sessionIdRef.current || !agentRunningRef.current) break;
+        // Progress frames are session-scoped, not parent-turn-scoped. Detached
+        // children can continue after agent_end, while this fence rejects a
+        // queued frame from a session/roster that has since been cleared.
+        const eventSessionId = sessionIdRef.current;
+        const eventRosterGeneration = subagentRosterGenerationRef.current;
+        if (!hookAliveRef.current || !eventSessionId) break;
         // Progress frames carry the full AgentProgress snapshot (throttled to
         // one per 150ms and flushed at terminal). The reliable key is
         // progress.id; parentToolCallId/index are fallbacks.
@@ -2493,6 +2464,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const assignment = typeof payload?.assignment === "string" ? payload.assignment : progress?.assignment;
         if (!progressId && !task && !parentToolCallId && index < 0) break;
         setSubagents((prev) => {
+          if (
+            !hookAliveRef.current
+            || sessionIdRef.current !== eventSessionId
+            || subagentRosterGenerationRef.current !== eventRosterGeneration
+          ) return prev;
           let target = -1;
           if (progressId) {
             // A valid progress frame names its subagent; if that id is gone,
@@ -2528,12 +2504,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           }
           if (target === -1) return prev;
           const current = prev[target];
+          // A delayed running/pending snapshot must not resurrect a child
+          // whose lifecycle/history already supplied a terminal outcome.
+          const nextStatus = progressStatusToSubagentStatus(progress?.status, current.status);
+          if (current.status !== "started" && nextStatus === "started") return prev;
           const nextEntry: SubagentInfo = {
             ...current,
             // Progress snapshots own lifecycle state once a row exists. A
             // frame without status is a partial update and must preserve the
             // current row status instead of fabricating a transition.
-            status: progressStatusToSubagentStatus(progress?.status, current.status),
+            status: nextStatus,
             agent: typeof payload?.agent === "string" ? payload.agent : current.agent,
             // The snapshot's agent-source literal lives in payload.agentSource,
             // not payload.agent (which holds the agent name).
@@ -2548,7 +2528,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             ...(assignment !== undefined ? { assignment } : {}),
             ...(progress ? { progress } : {}),
             lastUpdate: Date.now(),
-            source: "live",
+            source: current.source === "history" && current.status !== "started" ? "history" : "live",
           };
           // Progress frames arrive every ~150ms; skip rerender when no displayed field changed.
           // Avoid double JSON.stringify on hot path — field compare is cheaper than serializing whole entries.
@@ -2568,12 +2548,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         break;
       }
       case "subagent_event": {
-        // Child-session frames buffered by SSE after terminal must not
-        // repopulate activity/version state. Reconnect hydration still works
-        // because an active runtime is restored before its roster refresh.
-        if (!hookAliveRef.current || !sessionIdRef.current || !agentRunningRef.current) break;
+        // Child-session activity is session-scoped, not parent-turn-scoped.
+        // Keep collecting detached-child events after agent_end, while the
+        // selected-session roster generation fences queued flush callbacks.
         const eventSessionId = sessionIdRef.current;
-        const eventRunId = promptRunIdRef.current;
+        const eventRosterGeneration = subagentRosterGenerationRef.current;
+        if (!hookAliveRef.current || !eventSessionId) break;
         // An events-level subscription embeds raw child-session events here.
         // The transcript remains paged on the server; a per-child revision
         // tells an open dialog to fetch only the appended byte range. Also
@@ -2606,8 +2586,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               if (
                 !hookAliveRef.current
                 || sessionIdRef.current !== eventSessionId
-                || promptRunIdRef.current !== eventRunId
-                || !agentRunningRef.current
+                || subagentRosterGenerationRef.current !== eventRosterGeneration
               ) {
                 subagentVersionFlushRef.current = null;
                 subagentActivityFlushRef.current = null;
@@ -2655,7 +2634,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         handleExtensionUiRequest(event as unknown as IncomingExtensionUiRequest);
         break;
     }
-  }, [addNotice, beginSubagentTerminalCleanup, consumeQueuedMessage, finishPromptWithoutStream, handleExtensionUiRequest, handleHostToolCall, handleHostUriRequest, loadSession, mergeSubagents, onAgentEnd, reconcileAgentState, applyAuthoritativeModel, beginAuthoritativeModelSync, setContextUsage]);
+  }, [addNotice, consumeQueuedMessage, finishPromptWithoutStream, handleExtensionUiRequest, handleHostToolCall, handleHostUriRequest, loadSession, mergeSubagents, onAgentEnd, reconcileAgentState, applyAuthoritativeModel, beginAuthoritativeModelSync, refreshSubagentHistory, setContextUsage]);
   handleAgentEventRef.current = handleAgentEvent;
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]): Promise<boolean> => {
@@ -2663,11 +2642,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (!trimmedMessage && !images?.length) return false;
     if (!canMutateSession()) return false;
     if (agentRunningRef.current || bashRunningRef.current) return false;
-    const terminalCleanup = terminalSubagentCleanupRef.current;
-    if (terminalCleanup) {
-      await terminalCleanup;
-      if (!canMutateSession() || agentRunningRef.current || bashRunningRef.current) return false;
-    }
     const isSlashCommandPrompt = !images?.length && trimmedMessage.startsWith("/");
 
     const isBashCommand = !images?.length && trimmedMessage.startsWith("!");

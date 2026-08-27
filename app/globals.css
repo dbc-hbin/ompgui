@@ -3520,3 +3520,45 @@ html.dark .dropdown-surface :is(select, option) {
     transition: none;
   }
 }
+
+/* == SUBAGENT HUB RESPONSIVE SWEEP — mobile-only content reduction (≤640px) */
+@media (max-width: 640px) {
+  .subagent-hub-content {
+    gap: var(--space-2) !important;
+    padding: var(--space-3) var(--space-4) var(--space-4) !important;
+  }
+
+  /* Filters, hierarchy groups, freshness badges/age, activity telemetry, preview,
+     detached markers, and observation-only capability notice are hidden on mobile. */
+  .subagent-hub-filters,
+  [data-subagent-filter-row],
+  .subagent-hub-group-label,
+  [data-subagent-group-label],
+  .subagent-hub-freshness,
+  [data-subagent-freshness],
+  .subagent-hub-activity-line,
+  [data-subagent-activity-line],
+  .subagent-hub-activity-preview,
+  [data-subagent-activity-preview],
+  .subagent-hub-detached,
+  [data-subagent-detached],
+  .subagent-hub-observe-only,
+  [data-subagent-observe-only] {
+    display: none !important;
+  }
+
+  /* Flatten nested row margins, padding, and hierarchy borders on mobile. */
+  .subagent-hub-nested,
+  [data-subagent-row-wrap][data-subagent-depth]:not([data-subagent-depth="0"]) {
+    margin-left: 0 !important;
+    padding-left: 0 !important;
+    border-left: none !important;
+  }
+
+  /* Minimal single-line row card on mobile. */
+  .subagent-hub-row {
+    padding: var(--space-2) var(--space-4) !important;
+    gap: 0 !important;
+  }
+}
+

@@ -13,14 +13,14 @@ test("session promotion cleanup is owned by the real session id", () => {
     hookSource,
     /const sameSession = sessionIdRef\.current !== null\s+&& sessionIdRef\.current === selectedSessionIdRef\.current;\s+if \(sameSession\) return;/,
   );
-  assert.match(hookSource, /\}, \[session\?\.id, disposeSessionResources\]\);/);
+  assert.match(hookSource, /\}, \[session\?\.id, disposeSessionResources, resetSubagentRoster\]\);/);
   assert.doesNotMatch(hookSource, /\}, \[loadSession, restoreRuntimeFromState\]\);/);
 });
 
 test("session switches and unmounts retain the disposal path", () => {
   assert.match(
     hookSource,
-    /if \(sameSession\) return;\s+disposeSessionResources\(\);\s+sessionIdRef\.current = null;/,
+    /if \(sameSession\) return;\s+resetSubagentRoster\(\);\s+disposeSessionResources\(\);\s+sessionIdRef\.current = null;/,
   );
   assert.match(
     hookSource,

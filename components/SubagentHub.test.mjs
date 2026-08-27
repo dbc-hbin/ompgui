@@ -473,3 +473,239 @@ test("Korean hub copy translates lost status to 연결 끊김", () => {
   );
   assert.equal(row.length, 1);
 });
+
+test("mobile contract: semantic classes and data attributes are present for mobile omissions", () => {
+  const now = 1_700_000_000_000;
+  const richRoster = [
+    {
+      id: "parent-agent",
+      agent: "planner",
+      status: "started",
+      index: 0,
+      task: "Coordinate multi-file refactor",
+      detached: true,
+      lastUpdate: now,
+      progress: {
+        currentTool: "read",
+        lastIntent: "Inspecting codebase",
+        tokens: 12500,
+        cost: 0.045,
+        resolvedModel: "claude-3-7-sonnet-20250219",
+        durationMs: 15400,
+        nestedAgents: [{ id: "child-1" }],
+      },
+    },
+    {
+      id: "child-1",
+      parentToolCallId: "parent-agent",
+      agent: "worker",
+      status: "completed",
+      index: 1,
+      task: "Implement mobile CSS overrides",
+      lastUpdate: now,
+      progress: {
+        tokens: 3200,
+        cost: 0.012,
+        resolvedModel: "claude-3-7-sonnet-20250219",
+      },
+    },
+  ];
+
+  const events = {
+    "parent-agent": [
+      { id: "e1", label: "Reading components/SubagentHub.tsx" },
+      { id: "e2", label: "Editing app/globals.css" },
+    ],
+  };
+
+  const html = renderHub({
+    subagents: richRoster,
+    subagentEvents: events,
+    onSelectSubagent: noop,
+    defaultExpanded: true,
+    now,
+  });
+
+  // 1. Root and content containers have responsive semantic classes
+  assert.match(html, /class="[^"]*subagent-hub-root[^"]*"/);
+  assert.match(html, /class="[^"]*subagent-hub-header-trigger[^"]*"/);
+  assert.match(html, /class="[^"]*subagent-hub-content[^"]*"/);
+
+  // 2. Filters have both data attribute and semantic class for mobile hiding
+  assert.match(html, /data-subagent-filter-row/);
+  assert.match(html, /class="[^"]*subagent-hub-filters[^"]*"/);
+
+  // 3. Hierarchy group headers have data attribute and class for mobile hiding
+  assert.match(html, /data-subagent-group-label/);
+  assert.match(html, /class="[^"]*subagent-hub-group-label[^"]*"/);
+
+  // 4. Nested row wrap has depth data attribute and class for mobile indent flattening
+  assert.match(html, /data-subagent-row-wrap/);
+  assert.match(html, /data-subagent-depth="1"/);
+  assert.match(html, /class="[^"]*subagent-hub-nested[^"]*"/);
+
+  // 5. Freshness badges have data attribute and class for mobile hiding
+  assert.match(html, /data-subagent-freshness="live"/);
+  assert.match(html, /class="[^"]*subagent-hub-freshness[^"]*"/);
+
+  // 6. Detached marker has data attribute and class for mobile hiding
+  assert.match(html, /data-subagent-detached/);
+  assert.match(html, /class="[^"]*subagent-hub-detached[^"]*"/);
+
+  // 7. ActivityLine telemetry has data attribute and class for mobile hiding
+  assert.match(html, /data-subagent-activity-line/);
+  assert.match(html, /class="[^"]*subagent-hub-activity-line[^"]*"/);
+
+  // 8. ActivityPreview has data attribute and class for mobile hiding
+  assert.match(html, /data-subagent-activity-preview/);
+  assert.match(html, /class="[^"]*subagent-hub-activity-preview[^"]*"/);
+
+  // 9. Observation notice has data attribute and class for mobile hiding
+  assert.match(html, /data-subagent-observe-only/);
+  assert.match(html, /class="[^"]*subagent-hub-observe-only[^"]*"/);
+
+  // 10. Minimal selectable row container and components are properly classed
+  assert.match(html, /class="[^"]*subagent-hub-row[^"]*"/);
+  assert.match(html, /class="[^"]*subagent-hub-row-main[^"]*"/);
+  assert.match(html, /class="[^"]*subagent-hub-row-agent[^"]*"/);
+  assert.match(html, /class="[^"]*subagent-hub-row-task[^"]*"/);
+  assert.match(html, /class="[^"]*subagent-hub-row-state[^"]*"/);
+});
+
+test("mobile contract: globals.css defines media queries hiding omitted elements at mobile breakpoint <=640px", async () => {
+  const fs = await import("node:fs/promises");
+  const path = await import("node:path");
+  const cssPath = path.resolve(process.cwd(), "app/globals.css");
+  const css = await fs.readFile(cssPath, "utf-8");
+
+  // Check the @media (max-width: 640px) block for subagent hub
+  assert.match(css, /@media\s*\(max-width:\s*640px\)/);
+  assert.match(css, /\.subagent-hub-filters/);
+  assert.match(css, /\[data-subagent-filter-row\]/);
+  assert.match(css, /\.subagent-hub-group-label/);
+  assert.match(css, /\[data-subagent-group-label\]/);
+  assert.match(css, /\.subagent-hub-freshness/);
+  assert.match(css, /\[data-subagent-freshness\]/);
+  assert.match(css, /\.subagent-hub-activity-line/);
+  assert.match(css, /\[data-subagent-activity-line\]/);
+  assert.match(css, /\.subagent-hub-activity-preview/);
+  assert.match(css, /\[data-subagent-activity-preview\]/);
+  assert.match(css, /\.subagent-hub-detached/);
+  assert.match(css, /\[data-subagent-detached\]/);
+  assert.match(css, /\.subagent-hub-observe-only/);
+  assert.match(css, /\[data-subagent-observe-only\]/);
+  assert.match(css, /\.subagent-hub-nested/);
+});
+
+test("mobile minimal row contract: every subagent row maintains status icon, agent name, single-line task, and selection handler", () => {
+  const selected = [];
+  const testSubagents = [
+    { id: "s1", agent: "scout", status: "started", index: 0, task: "Investigate mobile layout" },
+    { id: "w1", agent: "worker", status: "completed", index: 1, task: "Apply compact styling" },
+    { id: "r1", agent: "reviewer", status: "failed", index: 2, task: "Verify no regressions" },
+  ];
+
+  const tree = withResolvedHooks("en", () => resolveElementTree(React.createElement(SubagentHub, {
+    subagents: testSubagents,
+    onSelectSubagent: (subagent) => selected.push(subagent),
+    defaultExpanded: true,
+  })));
+
+  const rows = findHostElements(
+    tree,
+    (type, props) => type === "button" && props.className?.includes("subagent-hub-row"),
+  );
+  assert.equal(rows.length, 3);
+
+  for (let i = 0; i < testSubagents.length; i++) {
+    const sub = testSubagents[i];
+    const row = rows[i];
+
+    // Main line contains agent name, task text, status
+    const rowText = textContent(row);
+    assert.match(rowText, new RegExp(escapeRegExp(sub.agent)));
+    assert.match(rowText, new RegExp(escapeRegExp(sub.task)));
+
+    // Interactive selection remains intact on every row
+    assert.equal(typeof row.props.onClick, "function");
+    row.props.onClick();
+    assert.equal(selected[i], sub);
+  }
+});
+
+test("desktop retention: full hub retains metrics, previews, freshness, hierarchy, and capability notice in rendered markup", () => {
+  const now = 1_700_000_000_000;
+  const richRoster = [
+    {
+      id: "root-1",
+      agent: "architect",
+      status: "started",
+      index: 0,
+      task: "Deconstruct responsive layout",
+      lastUpdate: now,
+      progress: {
+        tokens: 45000,
+        cost: 0.15,
+        resolvedModel: "claude-3-7-sonnet-20250219",
+        durationMs: 32000,
+      },
+    },
+    {
+      id: "nested-1",
+      parentToolCallId: "root-1",
+      agent: "coder",
+      status: "completed",
+      index: 1,
+      task: "Refactor compact classes",
+      lastUpdate: now,
+      progress: {
+        tokens: 8200,
+        cost: 0.028,
+        resolvedModel: "gpt-4o",
+      },
+    },
+  ];
+
+  const events = {
+    "root-1": [
+      { id: "e1", label: "Evaluating CSS tokens" },
+      { id: "e2", label: "Generating test cases" },
+    ],
+  };
+
+  const html = renderHub({
+    subagents: richRoster,
+    subagentEvents: events,
+    onSelectSubagent: noop,
+    defaultExpanded: true,
+    now,
+  });
+
+  // Telemetry metrics rendered
+  assert.match(html, /45k/);
+  assert.match(html, /\$0\.15/);
+  assert.match(html, /32s/);
+  assert.match(html, /sonnet/i);
+
+  // Activity preview rendered
+  assert.match(html, /Evaluating CSS tokens/);
+  assert.match(html, /Generating test cases/);
+
+  // Freshness badges rendered
+  assert.match(html, /data-subagent-freshness="live"/);
+
+  // Hierarchy rendered
+  assert.match(
+    html,
+    new RegExp(escapeRegExp(translate("chatWindow.subagentHub.group.roots", undefined, "en"))),
+  );
+  assert.match(
+    html,
+    new RegExp(escapeRegExp(translate("chatWindow.subagentHub.group.nested", { agent: "architect" }, "en"))),
+  );
+  assert.match(html, /architect/);
+
+  // Observation-only notice rendered
+  assert.match(html, /data-subagent-observe-only/);
+});
+

@@ -159,6 +159,11 @@ export function mergeSubagentRoster(
     const existingSource = rosterSource(existing);
     const incomingSource = rosterSource(entry);
 
+    // Once a child has a terminal outcome, a delayed started/running frame
+    // from the same session must not resurrect it. Completion may race the
+    // throttled progress stream, especially for detached children.
+    if (!isTerminal(entry) && isTerminal(existing)) continue;
+
     if (incomingSource === "history" && existingSource === "live") {
       // Non-terminal disk records are stale while a live row exists. A
       // terminal record, however, is the durable result after registry
@@ -180,10 +185,6 @@ export function mergeSubagentRoster(
       byId.set(entry.id, entry);
       continue;
     }
-
-    // A terminal disk result must not regress if a later history refresh is
-    // partial or still reports the original started state.
-    if (incomingSource === "history" && !isTerminal(entry) && isTerminal(existing)) continue;
 
     // Within one source, entries are delivered in observation order; incoming
     // fields are newer, while the spread preserves fields omitted by a

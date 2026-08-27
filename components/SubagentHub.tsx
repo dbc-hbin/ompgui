@@ -151,6 +151,8 @@ function ActivityLine({ subagent }: { subagent: SubagentInfo }) {
   if (parts.length === 0) return null;
   return (
     <span
+      data-subagent-activity-line
+      className="subagent-hub-activity-line"
       style={{
         display: "flex",
         minWidth: 0,
@@ -181,6 +183,8 @@ function ActivityPreview({ events }: { events: SubagentActivityEvent[] | undefin
   const label = `${t("chatWindow.subagentHub.preview")}: ${preview}`;
   return (
     <span
+      data-subagent-activity-preview
+      className="subagent-hub-activity-preview"
       title={label}
       aria-label={label}
       style={{
@@ -207,6 +211,8 @@ function ActivityPreview({ events }: { events: SubagentActivityEvent[] | undefin
 function GroupLabel({ children, depth = 0 }: { children: ReactNode; depth?: number }) {
   return (
     <div
+      data-subagent-group-label
+      className="subagent-hub-group-label"
       style={{
         marginLeft: depth > 0 ? `calc(var(--space-6) * ${depth})` : undefined,
         color: "var(--text-dim)",
@@ -263,7 +269,7 @@ function SubagentRow({
   return (
     <button
       type="button"
-      className="ui-focus-ring"
+      className="ui-focus-ring subagent-hub-row"
       onClick={() => onSelectSubagent(subagent)}
       aria-label={rowLabel}
       title={rowLabel}
@@ -298,24 +304,26 @@ function SubagentRow({
         event.currentTarget.style.background = live ? "var(--bg)" : "var(--bg-panel)";
       }}
     >
-      <span style={{ display: "flex", minWidth: 0, alignItems: "center", gap: "var(--space-3)" }}>
+      <span className="subagent-hub-row-main" style={{ display: "flex", minWidth: 0, alignItems: "center", gap: "var(--space-3)" }}>
         <SubagentStatusIcon status={subagent.status} live={live} />
-        <span style={{ flexShrink: 0, color: "var(--accent)", fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", fontWeight: 650 }}>
+        <span className="subagent-hub-row-agent" style={{ flexShrink: 0, color: "var(--accent)", fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", fontWeight: 650 }}>
           {subagent.agent}
         </span>
         <span
           title={task}
+          className="subagent-hub-row-task"
           style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "inherit" }}
         >
           {task}
         </span>
         {showStateLabel && (
-          <span style={{ flexShrink: 0, color: live ? "var(--text-muted)" : "var(--text-dim)", fontSize: "var(--text-xs)" }}>
+          <span className="subagent-hub-row-state" style={{ flexShrink: 0, color: live ? "var(--text-muted)" : "var(--text-dim)", fontSize: "var(--text-xs)" }}>
             {stateLabel}
           </span>
         )}
         <span
           data-subagent-freshness={freshness}
+          className="subagent-hub-freshness"
           aria-label={freshnessLabelWithAge}
           title={freshnessLabelWithAge}
           style={{
@@ -345,6 +353,8 @@ function SubagentRow({
         {subagent.detached && (
           <span
             aria-hidden
+            data-subagent-detached
+            className="subagent-hub-detached"
             style={{ flexShrink: 0, color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)" }}
           >
             ⤴
@@ -467,6 +477,7 @@ export function SubagentHub({
   return (
     <section
       aria-label={t("chatWindow.subagentsPanel")}
+      className="subagent-hub-root"
       style={{
         width: "100%",
         minWidth: 0,
@@ -478,7 +489,7 @@ export function SubagentHub({
     >
       <button
         type="button"
-        className="ui-focus-ring"
+        className="ui-focus-ring subagent-hub-header-trigger"
         aria-expanded={!collapsed}
         onClick={() => setCollapsed((value) => !value)}
         title={collapsed ? t("chatWindow.subagentHub.expand") : t("chatWindow.subagentHub.collapse")}
@@ -525,6 +536,7 @@ export function SubagentHub({
       </button>
       {!collapsed && (
         <div
+          className="subagent-hub-content"
           style={{
             display: "grid",
             maxHeight: "30vh",
@@ -535,6 +547,7 @@ export function SubagentHub({
         >
           <div
             data-subagent-filter-row
+            className="subagent-hub-filters"
             role="group"
             style={{
               display: "flex",
@@ -630,7 +643,13 @@ export function SubagentHub({
                   }
                 : undefined;
               return (
-                <div key={item.key} style={{ display: "grid", gap: "var(--space-3)", ...nestedStyle }}>
+                <div
+                  key={item.key}
+                  data-subagent-row-wrap
+                  data-subagent-depth={item.depth}
+                  className={`subagent-hub-row-wrap${item.depth > 0 ? " subagent-hub-nested" : ""}`}
+                  style={{ display: "grid", gap: "var(--space-3)", ...nestedStyle }}
+                >
                   <SubagentRow
                     subagent={item.subagent}
                     events={subagentEvents[item.subagent.id]}
@@ -643,6 +662,7 @@ export function SubagentHub({
           )}
           <div
             data-subagent-observe-only
+            className="subagent-hub-observe-only"
             role="note"
             style={{
               display: "flex",
