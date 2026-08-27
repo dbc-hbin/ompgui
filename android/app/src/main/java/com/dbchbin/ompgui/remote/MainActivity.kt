@@ -2,9 +2,11 @@ package com.dbchbin.ompgui.remote
 
 import android.net.Uri
 import android.os.Bundle
+import android.view.View
 import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.getcapacitor.BridgeActivity
 
@@ -13,10 +15,12 @@ class MainActivity : BridgeActivity() {
     private var replicaBridge: RemoteReplicaBridge? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         super.onCreate(savedInstanceState)
         val activeBridge = bridge ?: return
         val webView = activeBridge.webView ?: return
 
+        configureWindowInsets(webView)
         configureWebView(webView)
         replicaBridge = RemoteReplicaBridge(this, activeBridge.localUrl).also {
             it.onTopLevelUrlChanged(webView.url)
@@ -25,6 +29,23 @@ class MainActivity : BridgeActivity() {
         webView.webViewClient = RemoteWebViewClient(this, activeBridge)
 
         if (replicaBridge?.configuredOrigin != null) webView.post(::loadConfiguredOrigin)
+    }
+
+    private fun configureWindowInsets(webView: WebView) {
+        val contentView = webView.parent as? View ?: webView
+        ViewCompat.setOnApplyWindowInsetsListener(contentView) { view, insets ->
+            val systemInsets = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
+            )
+            view.setPadding(
+                systemInsets.left,
+                systemInsets.top,
+                systemInsets.right,
+                systemInsets.bottom,
+            )
+            insets
+        }
+        ViewCompat.requestApplyInsets(contentView)
     }
 
     private fun configureWebView(webView: WebView) {
@@ -38,19 +59,6 @@ class MainActivity : BridgeActivity() {
             setSupportMultipleWindows(false)
             safeBrowsingEnabled = true
         }
-        ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
-            val systemInsets = insets.getInsets(
-                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
-            )
-            view.setPadding(
-                systemInsets.left,
-                systemInsets.top,
-                systemInsets.right,
-                systemInsets.bottom,
-            )
-            insets
-        }
-        ViewCompat.requestApplyInsets(webView)
     }
 
     internal fun loadConfiguredOrigin() {
