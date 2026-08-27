@@ -2118,7 +2118,15 @@ html.dark .dropdown-surface :is(select, option) {
   box-shadow: var(--shadow-card);
   transition: background var(--dur-fast) var(--ease-out-warm), box-shadow var(--dur-fast) var(--ease-out-warm);
 }
-.composer-primary-action[data-state="send"]:disabled {
+.composer-primary-action[data-state="run-submit"] {
+  background: var(--accent-strong);
+  color: var(--on-accent);
+  cursor: pointer;
+  box-shadow: var(--shadow-card);
+  transition: background var(--dur-fast) var(--ease-out-warm), box-shadow var(--dur-fast) var(--ease-out-warm);
+}
+.composer-primary-action[data-state="send"]:disabled,
+.composer-primary-action[data-state="run-submit"]:disabled {
   background: var(--bg-panel);
   color: var(--text-dim);
   cursor: not-allowed;
@@ -2162,17 +2170,28 @@ html.dark .dropdown-surface :is(select, option) {
   right: 0;
   bottom: calc(100% + 8px);
   z-index: 20;
-  min-width: 142px;
-  padding: 8px 10px;
+  min-width: 190px;
+  padding: 12px 14px;
   white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
-.composer-context-ring-popup-summary {
-  display: block;
+.composer-context-ring-popup-title {
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--text-base);
   font-weight: 600;
+}
+.composer-context-ring-popup-used {
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
+}
+.composer-context-ring-popup-meta {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
 }
 .composer-context-ring-label {
   font-size: 8px;
@@ -2304,29 +2323,10 @@ html.dark .dropdown-surface :is(select, option) {
   .composer-primary-label {
     display: none;
   }
-  /* Steer/Follow-up while running: second row, icon-only. */
+  /* Running submissions use the configured Steer/Queue behavior through the
+     primary action. Desktop keeps the explicit pair; mobile never adds a row. */
   .composer-queue-action {
-    justify-content: center;
-    width: var(--control-height, 32px);
-    height: var(--control-height, 32px);
-    padding: 0 !important;
-    border-radius: 9999px;
-    touch-action: manipulation;
-  }
-  .composer-queue-action-label {
     display: none;
-  }
-  .composer-queue-action-steer {
-    order: 6;
-    grid-row: 2;
-    grid-column: 1;
-    justify-self: start;
-  }
-  .composer-queue-action-followup {
-    order: 7;
-    grid-row: 2;
-    grid-column: 2;
-    justify-self: start;
   }
   .composer-fast-toggle {
     order: 8;

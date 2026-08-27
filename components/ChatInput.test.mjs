@@ -8,7 +8,7 @@ const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   tsconfigPaths: true,
 });
-const { ChatInput, ModelErrorBanner, filterModelOptions } = await jiti.import("./ChatInput.tsx");
+const { ChatInput, ModelErrorBanner, filterModelOptions, resolveMobileRunSubmitMode } = await jiti.import("./ChatInput.tsx");
 
 const noop = () => {};
 
@@ -161,6 +161,7 @@ test("renders context ring button collapsed without its popup on the server", ()
       onAbort: noop,
       isStreaming: false,
       contextUsage: { percent: 34.2, contextWindow: 1_000_000, tokens: 342_000 },
+      sessionCost: 12.33,
     }),
   );
 
@@ -191,6 +192,7 @@ test("opens the context popup with the resolved percent and window summary", () 
       onAbort: noop,
       isStreaming: false,
       contextUsage: { percent: 34.2, contextWindow: 1_000_000, tokens: 342_000 },
+      sessionCost: 0,
     };
     const initialTree = rerender(props);
     const findRingButton = (tree) => findHostElements(
@@ -214,7 +216,7 @@ test("opens the context popup with the resolved percent and window summary", () 
 
     assert.equal(openedButton.props["aria-expanded"], true);
     assert.equal(popup.length, 1);
-    assert.equal(textContent(popup[0]), "34.2% / 1M");
+    assert.equal(textContent(popup[0]), "Context window34.2% used342k / 1.0M tokensSession cost $0.00");
 
     openedButton.props.onClick();
     const closedTree = rerender(props);
@@ -223,6 +225,14 @@ test("opens the context popup with the resolved percent and window summary", () 
       type === "div" && String(popupProps.className ?? "").includes("composer-context-ring-popup")
     )).length, 0);
   });
+});
+
+test("uses the configured behavior for mobile submissions during a run", () => {
+  assert.equal(resolveMobileRunSubmitMode(true, true, true, "steer", true, true), "steer");
+  assert.equal(resolveMobileRunSubmitMode(true, true, true, "queue", true, true), "followup");
+  assert.equal(resolveMobileRunSubmitMode(true, true, true, "queue", true, false), "steer");
+  assert.equal(resolveMobileRunSubmitMode(false, true, true, "steer", true, true), null);
+  assert.equal(resolveMobileRunSubmitMode(true, true, false, "steer", true, true), null);
 });
 
 test("compacts the medium thinking trigger without changing accessible copy", () => {

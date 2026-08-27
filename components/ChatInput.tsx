@@ -2,7 +2,11 @@
 
 import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, forwardRef, memo, KeyboardEvent } from "react";
 import { ChevronDown, ListChecks, Search, Sparkles, Target } from "lucide-react";
-import { getSubmitDuringRunBehavior } from "@/lib/composer-prefs";
+import {
+  getSubmitDuringRunBehavior,
+  subscribeSubmitDuringRunBehavior,
+  type SubmitDuringRunBehavior,
+} from "@/lib/composer-prefs";
 import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
 import type { ActiveGoal, ActivePlan } from "@/lib/web-mode-state";
 import { formatGoalElapsed } from "@/lib/web-mode-state";
@@ -89,6 +93,8 @@ interface Props {
   inputHistory?: string[];
   /** Context window usage for the circular indicator (percentage only). */
   contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null;
+  /** Accumulated session cost shown in the context details popover. */
+  sessionCost?: number | null;
   /** Remove one queued message from the queue panel (Edit/Delete/Steer). */
   onRemoveQueuedMessage?: (text: string) => void;
   /** Relabel the first queued follow-up as a steering message. */
@@ -104,6 +110,22 @@ interface Props {
   activeGoal?: ActiveGoal | null;
   activePlan?: ActivePlan | null;
   advisorEnabled?: boolean;
+}
+
+export function resolveMobileRunSubmitMode(
+  isMobile: boolean,
+  isStreaming: boolean,
+  hasQueueableDraft: boolean,
+  behavior: SubmitDuringRunBehavior,
+  canSteer: boolean,
+  canFollowUp: boolean,
+): "steer" | "followup" | null {
+  if (!isMobile || !isStreaming || !hasQueueableDraft) return null;
+  if (behavior === "steer" && canSteer) return "steer";
+  if (behavior === "queue" && canFollowUp) return "followup";
+  if (canSteer) return "steer";
+  if (canFollowUp) return "followup";
+  return null;
 }
 
 export interface ChatInputHandle {
@@ -410,7 +432,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   onAudioUnlock,
   onPromptWithStreamingBehavior,
   runtimeReady = true,
-  contextUsage,
+  contextUsage, sessionCost,
   onRemoveQueuedMessage,
   onPromoteQueuedToSteer,
   draftKey,
@@ -1428,6 +1450,29 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const contextSummary = hasContextRing && contextUsage
     ? `${formatPercent(clampedContextPercent)} / ${formatContextWindow(contextUsage.contextWindow)}`
     : null;
+  const contextTokensLabel = hasContextRing && contextUsage?.tokens != null
+    ? t("chatInput.contextTokens", {
+        used: formatCompactNumber(contextUsage.tokens, locale),
+        total: formatCompactNumber(contextUsage.contextWindow, locale),
+      })
+    : null;
+  const sessionCostLabel = sessionCost != null && Number.isFinite(sessionCost) && sessionCost >= 0
+    ? t("chatInput.sessionCost", { cost: `$${sessionCost.toFixed(sessionCost > 0 && sessionCost < 0.01 ? 4 : 2)}` })
+    : null;
+  const submitDuringRunBehavior = React.useSyncExternalStore(
+    subscribeSubmitDuringRunBehavior,
+    getSubmitDuringRunBehavior,
+    (): SubmitDuringRunBehavior => "steer",
+  );
+  const hasQueueableDraft = Boolean(value.trim()) && attachedImages.length === 0 && attachedTextFiles.length === 0;
+  const mobileRunSubmitMode = resolveMobileRunSubmitMode(
+    isMobile,
+    isStreaming,
+    hasQueueableDraft,
+    submitDuringRunBehavior,
+    Boolean(onSteer),
+    Boolean(onFollowUp),
+  );
   const thinkingLevelOptions = React.useMemo(
     () => selectableThinkingLevels(availableThinkingLevels),
     [availableThinkingLevels],
@@ -2385,7 +2430,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   className="composer-context-ring"
                   aria-haspopup={hasContextRing ? "dialog" : undefined}
                   aria-expanded={contextDropdownOpen}
-                  aria-label={hasContextRing ? "Context window usage" : "Context window usage unavailable"}
+                  aria-label={hasContextRing ? t("chatInput.contextWindow") : t("chatInput.contextWindowUnavailable")}
                   title={contextSummary ?? undefined}
                   disabled={!hasContextRing}
                   onClick={() => setContextDropdownOpen((open) => !open)}
@@ -2405,17 +2450,20 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   </span>
                 </button>
                 {hasContextRing && contextSummary && contextDropdownOpen && (
-                  <div className="dropdown-surface composer-context-ring-popup" role="dialog" aria-label="Context window usage">
-                    <span className="composer-context-ring-popup-summary">{contextSummary}</span>
+                  <div className="dropdown-surface composer-context-ring-popup" role="dialog" aria-label={t("chatInput.contextWindow")}>
+                    <strong className="composer-context-ring-popup-title">{t("chatInput.contextWindow")}</strong>
+                    <span className="composer-context-ring-popup-used">
+                      {t("chatInput.contextUsed", { percent: formatPercent(clampedContextPercent) })}
+                    </span>
+                    {contextTokensLabel && <span className="composer-context-ring-popup-meta">{contextTokensLabel}</span>}
+                    {sessionCostLabel && <span className="composer-context-ring-popup-meta">{sessionCostLabel}</span>}
                   </div>
                 )}
               </div>
 
-            {/* Queue-during-run actions: Steer injects into the current turn,
-                Follow-up schedules after it. These visible buttons were
-                dropped by the composer redesign (8a24697) leaving the
-                keyboard-only path — restored here, icon-only on mobile. */}
-            {isStreaming && onSteer && (
+            {/* Desktop keeps both explicit run actions. Mobile submits through
+                the primary action using the behavior selected in Settings. */}
+            {isStreaming && !isMobile && onSteer && (
               <button
                 type="button"
                 className="composer-queue-action composer-queue-action-steer ui-focus-ring"
@@ -2430,7 +2478,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 <span className="composer-queue-action-label">{t("chatInput.steer")}</span>
               </button>
             )}
-            {isStreaming && onFollowUp && (
+            {isStreaming && !isMobile && onFollowUp && (
               <button
                 type="button"
                 className="composer-queue-action composer-queue-action-followup ui-focus-ring"
@@ -2448,7 +2496,25 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             )}
 
             {/* Primary action: Send (idle) / Stop (running) */}
-            {isStreaming ? (
+            {isStreaming && mobileRunSubmitMode ? (
+              <button
+                className="composer-primary-action ui-focus-ring"
+                type="button"
+                onClick={() => sendQueued(mobileRunSubmitMode)}
+                title={mobileRunSubmitMode === "steer" ? t("chatInput.steerNowTitle") : t("chatInput.followUpTitle")}
+                aria-label={mobileRunSubmitMode === "steer" ? t("chatInput.steer") : t("chatInput.followUp")}
+                disabled={!runtimeReady}
+                data-state="run-submit"
+              >
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M3 8h10" />
+                  <path d="m9 4 4 4-4 4" />
+                </svg>
+                <span className="composer-primary-label">
+                  {mobileRunSubmitMode === "steer" ? t("chatInput.steer") : t("chatInput.followUp")}
+                </span>
+              </button>
+            ) : isStreaming ? (
               <button
                 className="composer-primary-action ui-focus-ring"
                 type="button"

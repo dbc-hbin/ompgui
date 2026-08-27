@@ -759,6 +759,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
       queuedMessages={queuedMessages}
       inputHistory={inputHistory}
       contextUsage={contextUsage}
+      sessionCost={sessionStats?.cost ?? null}
       onRemoveQueuedMessage={removeQueuedMessage}
       onPromoteQueuedToSteer={promoteQueuedToSteer}
       slashCommands={slashCommands}
