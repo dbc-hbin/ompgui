@@ -11,8 +11,6 @@
 
 ![ompgui — 深色主题](docs/screenshot-dark.png)
 
-![ompgui — 命令面板](docs/screenshot-palette.png)
-
 </details>
 
 ## 环境要求
@@ -133,14 +131,15 @@ npm install
 npm run dev
 ```
 
-本地开发服务器运行在 [http://127.0.0.1:30177](http://127.0.0.1:30177)。
+本地开发服务器运行在 [http://127.0.0.1:30178](http://127.0.0.1:30178)。
 
 常用检查：
 
 ```bash
-npx tsc --noEmit       # 类型检查
+npm run typecheck      # 类型检查
 npm run lint           # ESLint（零警告）
-node --test lib/*.test.mjs components/*.test.mjs   # 运行测试
+npm test               # 运行测试套件
+npm run build          # 生产构建
 ```
 
 本地开发时请避免运行 `next build` / `npm run build`。它会写入 `.next/`，可能干扰开发服务器；构建请留到发布阶段。

@@ -194,9 +194,6 @@ export function projectRemoteReplica(input: RemoteReplicaProjectInput): RemoteRe
   return { version: REMOTE_REPLICA_VERSION, origin, updatedAt, session };
 }
 
-/** Alias spelling for callers that prefer a constructor-style name. */
-export const createRemoteReplicaSnapshot = projectRemoteReplica;
-
 function parseMessage(value: unknown): RemoteReplicaMessage | null {
   if (!isRecord(value)) return null;
   const role = value.role;
@@ -271,50 +268,8 @@ export function getRemoteReplicaOrigin(): string | null {
   }
 }
 
-/** Ask the native shell to persist its configured origin when supported. */
-export function setRemoteReplicaOrigin(origin: string): boolean {
-  if (typeof window === "undefined") return false;
-  const normalizedOrigin = normalizeRemoteReplicaOrigin(origin);
-  if (!normalizedOrigin) return false;
-  try {
-    return window.OmpguiRemoteReplica?.setOrigin?.(normalizedOrigin) === true;
-  } catch {
-    return false;
-  }
-}
-
 function storageKey(origin: string, sessionId: string): string {
   return `${REMOTE_REPLICA_STORAGE_PREFIX}${encodeURIComponent(origin)}:${encodeURIComponent(sessionId)}`;
-}
-
-function readStoredSnapshot(json: string | null, origin: string, sessionId: string): RemoteReplicaSnapshot | null {
-  const parsed = parseRemoteReplicaJson(json);
-  if (!parsed || parsed.origin !== origin || parsed.session.id !== sessionId) return null;
-  return parsed;
-}
-
-/**
- * Read a replica from the native bridge first, then browser localStorage.
- * Reads are intentionally passive: this function never enables runtime
- * controls or mutates a session.
- */
-export function loadRemoteReplicaSnapshot(sessionId: string, origin?: string): RemoteReplicaSnapshot | null {
-  if (typeof window === "undefined") return null;
-  const id = boundedIdentifier(sessionId);
-  const resolvedOrigin = normalizeRemoteReplicaOrigin(origin) ?? getRemoteReplicaOrigin();
-  if (!id || !resolvedOrigin) return null;
-  try {
-    const nativeSnapshot = window.OmpguiRemoteReplica?.getSnapshot?.();
-    const parsedNative = readStoredSnapshot(nativeSnapshot ?? null, resolvedOrigin, id);
-    if (parsedNative) return parsedNative;
-  } catch {
-    // Native bridge reads are best-effort; browser storage remains available.
-  }
-  try {
-    return readStoredSnapshot(window.localStorage.getItem(storageKey(resolvedOrigin, id)), resolvedOrigin, id);
-  } catch {
-    return null;
-  }
 }
 
 /**

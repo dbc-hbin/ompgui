@@ -20,7 +20,13 @@
     "ompweb": "bin/omp-web.js"
   },
   "files": [
-    "bin",
+    "bin/ompgui.js",
+    "bin/omp-web.js",
+    "bin/ompgui-options.js",
+    "bin/omp-web-options.js",
+    "bin/node-version.js",
+    "bin/port-availability.js",
+    "bin/process-lifecycle.js",
     ".next",
     "!.next/cache",
     "!.next/dev",
@@ -29,7 +35,6 @@
     "!.next/trace",
     "!.next/trace-build",
     "!.next/**/*.map",
-    "public",
     "next.config.ts",
     "package.json"
   ],
@@ -80,7 +85,6 @@
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
-    "tailwindcss": "^4.2.2",
     "typescript": "^5"
   }
 }

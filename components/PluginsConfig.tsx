@@ -5,26 +5,10 @@ import { sendAgentCommand } from "@/lib/agent-client";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { translate, translatePlural, useI18n } from "@/lib/i18n";
 import { formatApiError } from "@/lib/i18n/api-error";
-import {
-  Dialog,
-  DialogContent,
-} from "@/components/ui/primitives";
 import { ConfirmDialog } from "@/components/ui/field";
 import { toast } from "@/components/ui/toast";
 import { Plus } from "lucide-react";
-import { SettingsTabs, type SettingsTab } from "./SettingsTabs";
 import type { PluginPackageInfo, PluginsResponse } from "@/lib/api-types";
-
-function PluginsConfigSurface({ embedded, isMobile, onClose, children }: { embedded: boolean; isMobile: boolean; onClose: () => void; children: React.ReactNode }) {
-  if (embedded) return <>{children}</>;
-  return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent ariaLabel="Plugins" style={{ width: isMobile ? "calc(100vw - 16px)" : 860, maxWidth: "calc(100vw - 16px)", height: isMobile ? "calc(100dvh - 16px)" : "78vh", maxHeight: "calc(100dvh - 16px)", padding: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {children}
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 type PluginScope = PluginPackageInfo["scope"];
 type PluginAction = "install" | "remove" | "update" | "disable" | "enable";
@@ -614,18 +598,12 @@ export function PackageDetail({
 export function PluginsConfig({
   cwd,
   sessionId,
-  onClose,
   onReloaded,
-  onSelectTab,
-  embedded = false,
   runtimeReady = true,
 }: {
   cwd: string;
   sessionId: string | null;
-  onClose: () => void;
   onReloaded?: () => void;
-  onSelectTab?: (tab: SettingsTab) => void;
-  embedded?: boolean;
   runtimeReady?: boolean;
 }) {
   const isMobile = useIsMobile();
@@ -760,52 +738,7 @@ export function PluginsConfig({
   const addBusy = busyKey?.startsWith("install:") ?? false;
 
   return (
-    <PluginsConfigSurface embedded={embedded} isMobile={isMobile} onClose={onClose}>
-        {!embedded && (<div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "12px 18px",
-            borderBottom: "1px solid var(--border)",
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
-            <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
-              {t("pluginsConfig.title")}
-            </span>
-            <code
-              style={{
-                fontSize: "var(--text-sm)",
-                color: "var(--text-muted)",
-                fontFamily: "var(--font-mono)",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {shortenPath(cwd)}
-            </code>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label={t("pluginsConfig.close")}
-            style={{
-              background: "none",
-              border: "none",
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              fontSize: 20,
-              lineHeight: 1,
-              padding: "2px 6px",
-            }}
-          >
-            ×
-          </button>
-        </div>)}
-        {!embedded && onSelectTab && <SettingsTabs active="plugins" onSelect={onSelectTab} />}
-
+    <>
         <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>
           <div
             style={{
@@ -1054,10 +987,7 @@ export function PluginsConfig({
           <button onClick={() => void loadPlugins()} disabled={loading || busyKey !== null} style={buttonStyle(loading || busyKey !== null)}>
             {t("pluginsConfig.refresh")}
           </button>
-          <button onClick={onClose} style={buttonStyle(false)}>
-            {t("pluginsConfig.close")}
-          </button>
         </div>
-    </PluginsConfigSurface>
+    </>
   );
 }

@@ -471,7 +471,7 @@ function OmpGuiTitle() {
   const revertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reducedMotion = usePrefersReducedMotion();
 
-  const target = showVersion ? `v${process.env.NEXT_PUBLIC_OMPGUI_VERSION ?? process.env.NEXT_PUBLIC_OMP_WEB_VERSION ?? "0.4.1"}` : "ompgui";
+  const target = showVersion ? `v${process.env.NEXT_PUBLIC_OMPGUI_VERSION}` : "ompgui";
   const display = useScramble(target, scrambling, reducedMotion);
 
   const triggerScramble = useCallback((toVersion: boolean) => {

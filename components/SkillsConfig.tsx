@@ -4,30 +4,14 @@ import { Fragment, useState, useEffect, useCallback, useRef } from "react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { translate, useI18n } from "@/lib/i18n";
 import { formatApiError } from "@/lib/i18n/api-error";
-import {
-  Dialog,
-  DialogContent,
-} from "@/components/ui/primitives";
 import { toast } from "@/components/ui/toast";
 import { Plus } from "lucide-react";
-import { SettingsTabs, type SettingsTab } from "./SettingsTabs";
 import type {
   SkillInfo as Skill,
   SkillInstallScope,
   SkillSearchResult,
   SkillUpdateResult,
 } from "@/lib/api-types";
-
-function SkillsConfigSurface({ embedded, isMobile, onClose, children }: { embedded: boolean; isMobile: boolean; onClose: () => void; children: React.ReactNode }) {
-  if (embedded) return <>{children}</>;
-  return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent ariaLabel="Skills" style={{ width: isMobile ? "calc(100vw - 16px)" : 860, maxWidth: "calc(100vw - 16px)", height: isMobile ? "calc(100dvh - 16px)" : "78vh", maxHeight: "calc(100dvh - 16px)", padding: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {children}
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 function shortenPath(p: string): string {
   // Match common home dir patterns: /Users/xxx, /home/xxx
@@ -711,17 +695,7 @@ function AddSkillPanel({
   );
 }
 
-export function SkillsConfig({
-  cwd,
-  onClose,
-  onSelectTab,
-  embedded = false,
-}: {
-  cwd: string;
-  onClose: () => void;
-  onSelectTab?: (tab: SettingsTab) => void;
-  embedded?: boolean;
-}) {
+export function SkillsConfig({ cwd }: { cwd: string }) {
   const isMobile = useIsMobile();
   const { t, tn } = useI18n();
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -894,58 +868,8 @@ export function SkillsConfig({
   const selectedSkill = skills.find((s) => s.filePath === selected) ?? null;
 
   return (
-    <SkillsConfigSurface embedded={embedded} isMobile={isMobile} onClose={onClose}>
-        {/* Header */}
-        {!embedded && (<div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "12px 18px",
-            borderBottom: "1px solid var(--border)",
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-            <span
-              id="skills-config-title"
-              style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}
-            >
-              {t("skillsConfig.title")}
-            </span>
-            <code
-              style={{
-                fontSize: "var(--text-sm)",
-                color: "var(--text-muted)",
-                fontFamily: "var(--font-mono)",
-                maxWidth: 320,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {shortenPath(cwd)}
-            </code>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label={t("skillsConfig.close")}
-            style={{
-              background: "none",
-              border: "none",
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              fontSize: 20,
-              lineHeight: 1,
-              padding: "2px 6px",
-            }}
-          >
-            ×
-          </button>
-        </div>)}
-        {!embedded && onSelectTab && <SettingsTabs active="skills" onSelect={onSelectTab} />}
-
-        {/* Body */}
+    <>
+      {/* Body */}
         <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>
           {/* Left: skill list */}
           <div
@@ -1298,21 +1222,7 @@ export function SkillsConfig({
               );
             })()}
           </div>
-          <button
-            onClick={onClose}
-            style={{
-              padding: "6px 14px",
-              background: "none",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              fontSize: "var(--text-base)",
-            }}
-          >
-            {t("skillsConfig.close")}
-          </button>
         </div>
-    </SkillsConfigSurface>
+    </>
   );
 }

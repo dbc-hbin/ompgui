@@ -3,21 +3,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bot, Edit3, Plus, Search, Trash2, Download, RefreshCw, X, Wrench, Eye } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import type { AgentDefinition, AgentSource } from "@/lib/omp/agents-service";
 import { agentModelOptionsFromResponse, formatAgentModelDisplay, parseAgentModelOverrideInput, type AgentModelOption } from "@/lib/agent-model-options";
 
 type Props = {
   cwd?: string;
   onSaved?: () => void;
-  embedded?: boolean;
-  onClose?: () => void;
-  isMobile?: boolean;
 };
 
 type ScopeFilter = "all" | AgentSource;
 
-export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Props) {
+export function AgentsConfig({ cwd, onSaved }: Props) {
   const { t } = useI18n();
+  const isMobile = useIsMobile();
   const [agents, setAgents] = useState<AgentDefinition[]>([]);
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -219,7 +218,7 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
         display: "flex",
         flexDirection: "column",
         gap: "var(--space-5)",
-        padding: embedded ? 0 : isMobile ? "12px 14px" : 20,
+        padding: 0,
         color: "var(--text)",
         minHeight: 0,
         flex: 1,
@@ -237,11 +236,6 @@ export function AgentsConfig({ cwd, onSaved, embedded, onClose, isMobile }: Prop
             {t("agentsConfig.description")}
           </p>
         </div>
-        {onClose && (
-          <button type="button" onClick={onClose} aria-label="Close" style={{ background: "transparent", border: 0, color: "var(--text-muted)", cursor: "pointer", padding: "var(--space-2)" }}>
-            <X size={18} />
-          </button>
-        )}
       </header>
 
       {statusNotice && (

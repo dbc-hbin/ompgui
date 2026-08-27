@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { getSoundEnabled } from "@/lib/sound-prefs";
 
 function playTone(ctx: AudioContext) {
   const now = ctx.currentTime;
@@ -28,11 +29,7 @@ function playTone(ctx: AudioContext) {
 }
 
 export function useAudio() {
-  const [enabled, setEnabled] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
-    const stored = localStorage.getItem("omp-sound-enabled");
-    return stored === null ? true : stored === "true";
-  });
+  const [enabled, setEnabled] = useState<boolean>(() => getSoundEnabled());
 
   const enabledRef = useRef(enabled);
   useEffect(() => { enabledRef.current = enabled; }, [enabled]);

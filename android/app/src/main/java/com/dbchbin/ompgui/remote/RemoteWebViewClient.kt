@@ -24,10 +24,6 @@ internal class RemoteWebViewClient(
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
         handleNavigation(request.url)
 
-    @Deprecated("Deprecated by Android")
-    override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean =
-        handleNavigation(Uri.parse(url))
-
     private fun handleNavigation(target: Uri?): Boolean {
         if (target == null) return true
         if (activity.isLocalUrl(target) || activity.isConfiguredUrl(target)) return false
@@ -49,12 +45,6 @@ internal class RemoteWebViewClient(
     override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
         super.onReceivedError(view, request, error)
         if (request.isForMainFrame && activity.isConfiguredUrl(request.url)) activity.showOffline()
-    }
-
-    @Deprecated("Deprecated by Android")
-    override fun onReceivedError(view: WebView, errorCode: Int, description: String, failingUrl: String) {
-        super.onReceivedError(view, errorCode, description, failingUrl)
-        if (activity.isConfiguredUrl(Uri.parse(failingUrl))) activity.showOffline()
     }
 
     override fun onReceivedHttpError(

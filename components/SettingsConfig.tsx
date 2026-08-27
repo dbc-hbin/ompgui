@@ -11,6 +11,7 @@ import { ExtensionsTabs, type ExtensionsTab, SettingsTabs, type SettingsTab, SET
 import { useI18n } from "@/lib/i18n";
 import { copyText } from "@/lib/clipboard";
 import { useTheme } from "@/hooks/useTheme";
+import { getSoundEnabled, setSoundEnabled as persistSoundEnabled } from "@/lib/sound-prefs";
 
 const SettingsTabLoading = () => <div role="status" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 12 }}>Loading settings…</div>;
 const ModelsConfig = dynamic(() => import("./ModelsConfig").then((module) => module.ModelsConfig), { loading: SettingsTabLoading });
@@ -329,15 +330,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
   const [searchQuery, setSearchQuery] = useState("");
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [submitBehavior, setSubmitBehavior] = useState<SubmitDuringRunBehavior>(() => getSubmitDuringRunBehavior());
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
-    try {
-      const value = window.localStorage.getItem("ompgui-sound-enabled") || window.localStorage.getItem("omp-sound-enabled");
-      return value === null ? true : value === "true";
-    } catch {
-      return true;
-    }
-  });
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => getSoundEnabled());
   const [update, setUpdate] = useState<UpdateState | null>(null);
   const [checking, setChecking] = useState(true);
   const [appUpdate, setAppUpdate] = useState<UpdateState | null>(null);
@@ -787,7 +780,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                       checked={soundEnabled}
                       onChange={(next) => {
                         setSoundEnabled(next);
-                        try { localStorage.setItem("ompgui-sound-enabled", String(next)); } catch { /* storage fallback */ }
+                        persistSoundEnabled(next);
                         window.dispatchEvent(new CustomEvent("omp-sound-pref-change", { detail: next }));
                       }}
                     />
@@ -834,7 +827,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                     <option value="always" style={nativeOptionStyle}>{t("settingsConfig.delegationAlways")}</option>
                   </select>
                 </NativeSetting>
-                <AgentsConfig cwd={cwd ?? undefined} onSaved={onModelsSaved} isMobile={isMobile} embedded />
+                <AgentsConfig cwd={cwd ?? undefined} onSaved={onModelsSaved} />
               </div>
             )}
 
@@ -942,7 +935,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
             {/* API KEYS & PROVIDERS TAB */}
             {(visitedTabs.has("providers") || visitedTabs.has("models")) && (
               <div role="tabpanel" id="settings-panel-providers" aria-labelledby="settings-tab-providers" style={{ display: currentTab === "providers" ? "flex" : "none", height: "100%", minHeight: 0, flexDirection: "column" }}>
-                <ModelsConfig embedded key={modelsEditorKey} onClose={requestClose} onSaved={() => { setModelsDirty(false); onModelsSaved(); }} onDirtyChange={setModelsDirty} />
+                <ModelsConfig key={modelsEditorKey} onSaved={() => { setModelsDirty(false); onModelsSaved(); }} onDirtyChange={setModelsDirty} />
               </div>
             )}
 
@@ -1216,13 +1209,13 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
 
                 {extensionTab === "skills" && (
                   <div role="tabpanel" id="settings-extension-panel-skills" aria-labelledby="settings-extension-tab-skills" style={{ display: "flex", flex: 1, minHeight: 0, flexDirection: "column", overflowY: "auto" }}>
-                    {cwd ? <SkillsConfig embedded cwd={cwd} onClose={requestClose} /> : <div role="status" style={{ padding: 16, border: "1px solid var(--border)", borderRadius: "var(--radius-card)", color: "var(--text-muted)", fontSize: 12 }}>{t("settingsConfig.workspaceRequired")}</div>}
+                    {cwd ? <SkillsConfig cwd={cwd} /> : <div role="status" style={{ padding: 16, border: "1px solid var(--border)", borderRadius: "var(--radius-card)", color: "var(--text-muted)", fontSize: 12 }}>{t("settingsConfig.workspaceRequired")}</div>}
                   </div>
                 )}
 
                 {extensionTab === "plugins" && (
                   <div role="tabpanel" id="settings-extension-panel-plugins" aria-labelledby="settings-extension-tab-plugins" style={{ display: "flex", flex: 1, minHeight: 0, flexDirection: "column", overflowY: "auto" }}>
-                    {cwd ? <PluginsConfig embedded cwd={cwd} sessionId={sessionId} onClose={requestClose} onReloaded={onPluginsReloaded} runtimeReady={runtimeReady} /> : <div role="status" style={{ padding: 16, border: "1px solid var(--border)", borderRadius: "var(--radius-card)", color: "var(--text-muted)", fontSize: 12 }}>{t("settingsConfig.workspaceRequired")}</div>}
+                    {cwd ? <PluginsConfig cwd={cwd} sessionId={sessionId} onReloaded={onPluginsReloaded} runtimeReady={runtimeReady} /> : <div role="status" style={{ padding: 16, border: "1px solid var(--border)", borderRadius: "var(--radius-card)", color: "var(--text-muted)", fontSize: 12 }}>{t("settingsConfig.workspaceRequired")}</div>}
                   </div>
                 )}
               </div>

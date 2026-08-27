@@ -9,25 +9,6 @@ After the initial bootstrap release, publishing is performed by GitHub Actions
 with npm trusted publishing. No npm access token is stored in this repository
 or in GitHub secrets.
 
-## Bootstrap the first release
-
-`ompgui` is not registered on npm yet. npm exposes trusted-publisher settings
-only for an existing package, so version `0.2.0` must be published once from a
-reviewed local checkout using the authenticated npm account:
-
-```bash
-npm ci
-npm test
-npm run build
-npm pack --dry-run
-npm publish --access public
-```
-
-Do not create a tag or GitHub Release for this bootstrap version: npm will
-reject a duplicate version.
-After this succeeds, configure trusted publishing before publishing any later
-version.
-
 ## One-time trusted-publisher setup
 
 1. In npm, open the `ompgui` package settings and add a **GitHub Actions**

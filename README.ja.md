@@ -11,8 +11,6 @@
 
 ![ompgui — ダークテーマ](docs/screenshot-dark.png)
 
-![ompgui — コマンドパレット](docs/screenshot-palette.png)
-
 </details>
 
 ## 必要条件
@@ -133,14 +131,15 @@ npm install
 npm run dev
 ```
 
-ローカル開発サーバーは [http://127.0.0.1:30177](http://127.0.0.1:30177) で動作します。
+ローカル開発サーバーは [http://127.0.0.1:30178](http://127.0.0.1:30178) で動作します。
 
 よく使うチェック:
 
 ```bash
-npx tsc --noEmit       # 型チェック
+npm run typecheck      # 型チェック
 npm run lint           # ESLint（警告ゼロを強制）
-node --test lib/*.test.mjs components/*.test.mjs   # テスト実行
+npm test               # テストスイート実行
+npm run build          # プロダクションビルド
 ```
 
 ローカル開発中は `next build` / `npm run build` の実行を避けてください。`.next/` への書き込みが行われ、開発サーバーに干渉することがあります。ビルドはリリース作業のときだけにしてください。

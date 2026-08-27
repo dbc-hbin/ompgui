@@ -24,7 +24,6 @@ import {
 } from "@/components/ui/field";
 import { Plus, Trash2, RefreshCw, AlertCircle, Cpu, Settings, Sparkles, Check as CheckIcon, ArrowDown, ArrowUp, Layers, SlidersHorizontal, BookOpen } from "lucide-react";
 import { toast } from "@/components/ui/toast";
-import { SettingsTabs, type SettingsTab } from "./SettingsTabs";
 import { ModelCatalogPicker, type CatalogPickedModel } from "./ModelCatalogPicker";
 // Color icons (have their own fill colors — no background needed)
 import AnthropicIcon from "@lobehub/icons/es/Anthropic/components/Mono";
@@ -212,29 +211,6 @@ type Selection =
   | { type: "roles" }
   | { type: "picker" }
   | { type: "registry" };
-
-function ModelsConfigSurface({ embedded, isMobile, onClose, children }: { embedded: boolean; isMobile: boolean; onClose: () => void; children: React.ReactNode }) {
-  if (embedded) return <>{children}</>;
-  return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent
-        ariaLabel="Models"
-        style={{
-          width: isMobile ? "calc(100vw - 16px)" : 860,
-          maxWidth: "calc(100vw - 16px)",
-          height: isMobile ? "calc(100dvh - 16px)" : "78vh",
-          maxHeight: "calc(100dvh - 16px)",
-          padding: 0,
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-        }}
-      >
-        {children}
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 interface RuntimeModelEntry {
   id: string;
@@ -1734,7 +1710,7 @@ export function modelsConfigFingerprint(value: unknown): string {
   return JSON.stringify(value) ?? "undefined";
 }
 
-export function ModelsConfig({ onClose, onSelectTab, onSaved, onDirtyChange, embedded = false }: { onClose: () => void; onSelectTab?: (tab: SettingsTab) => void; onSaved?: () => void; onDirtyChange?: (dirty: boolean) => void; embedded?: boolean }) {
+export function ModelsConfig({ onSaved, onDirtyChange }: { onSaved?: () => void; onDirtyChange?: (dirty: boolean) => void }) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const [config, setConfigState] = useState<ModelsFileData>({ providers: {} });
@@ -2133,19 +2109,7 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, onDirtyChange, emb
 
   return (
     <>
-      <ModelsConfigSurface embedded={embedded} isMobile={isMobile} onClose={onClose}>
-
-        {/* Header */}
-        {!embedded && (<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-            <DialogTitle style={{ fontSize: 16, margin: 0 }}>{t("modelsConfig.title")}</DialogTitle>
-            <code style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>~/.omp/agent/models.yml</code>
-          </div>
-          <button onClick={onClose} aria-label={t("modelsConfig.close")} title={t("modelsConfig.close")} className="ui-focus-ring" style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "4px 8px", minWidth: "var(--control-height-sm)", minHeight: "var(--control-height-sm)", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "var(--radius-control)" }}>×</button>
-        </div>)}
-        {!embedded && onSelectTab && <SettingsTabs active="models" onSelect={onSelectTab} />}
-
-        {/* Body */}
+      {/* Body */}
         {parseError ? (
           <div style={{ flex: 1, overflowY: "auto", padding: "var(--space-8)", display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
             <div style={{ fontSize: "var(--text-base)", fontWeight: 600, color: "var(--status-error)" }}>{t("modelsConfig.parseErrorTitle")}</div>
@@ -2346,9 +2310,6 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, onDirtyChange, emb
               {validationIssues.length > 0 && <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>{validationIssues.map((issue, index) => <li key={`${issue.path}-${index}`}>{issue.path ? `${issue.path}: ` : ""}{issue.message}</li>)}</ul>}
             </div>
           )}
-          <button onClick={onClose} style={{ padding: "6px 14px", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", color: "var(--text-muted)", cursor: "pointer", fontSize: "var(--text-base)" }}>
-            {t("modelsConfig.cancel")}
-          </button>
           <button onClick={handleSave} disabled={saving || savedOk || parseError !== null} style={{
             position: "relative",
             padding: "6px 16px",
@@ -2370,7 +2331,6 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, onDirtyChange, emb
             <span>{savedOk ? t("modelsConfig.saved") : saving ? t("modelsConfig.saving") : t("modelsConfig.save")}</span>
           </button>
         </div>
-      </ModelsConfigSurface>
     {pickerOpen && (
       <AddProviderPicker
         oauthProviders={oauthProviders}
