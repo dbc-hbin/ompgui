@@ -11,6 +11,7 @@ export type SettingsTab =
   | "providers"
   | "intelligence"
   | "extensions"
+  | "tools"
   | "mcp"
   | "skills"
   | "plugins"
@@ -31,20 +32,21 @@ export const SETTINGS_CATEGORIES: TabItem[] = [
   { id: "providers", label: "API Keys & Providers", description: "Connected OAuth accounts, API keys, and model registry", Icon: KeyRound },
   { id: "intelligence", label: "Agent & Intelligence", description: "Advisor, memory, autolearn, compaction and retry", Icon: Sparkles },
   { id: "agents", label: "Agents & Subagents", description: "Configured subagents, model routing, prewalk, and advisor", Icon: Bot },
-  { id: "extensions", label: "Extensions & Tools", description: "MCP servers, managed skills, and OMP plugins", Icon: Cable },
+  { id: "extensions", label: "Extensions & Tools", description: "Optional tools, MCP servers, managed skills, and OMP plugins", Icon: Cable },
   { id: "system", label: "System & Updates", description: "App updates, runtime version, and active session restart", Icon: RefreshCw },
 ];
 
-export type ExtensionsTab = "mcp" | "skills" | "plugins";
+export type ExtensionsTab = "tools" | "mcp" | "skills" | "plugins";
 
 export const EXTENSION_TABS: Array<{ id: ExtensionsTab; label: string; description: string }> = [
+  { id: "tools", label: "Optional Tools", description: "Toggle optional built-in tool capabilities" },
   { id: "mcp", label: "MCP Servers", description: "Configure global and project MCP servers" },
   { id: "skills", label: "Skills", description: "Manage reusable workspace skills" },
   { id: "plugins", label: "Plugins", description: "Manage OMP plugins for this workspace" },
 ];
 
 export const getNormalizedActive = (tab: SettingsTab): SettingsTab => {
-  if (tab === "mcp" || tab === "skills" || tab === "plugins" || tab === "extensions") return "extensions";
+  if (tab === "tools" || tab === "mcp" || tab === "skills" || tab === "plugins" || tab === "extensions") return "extensions";
   return tab;
 };
 

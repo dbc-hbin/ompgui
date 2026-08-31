@@ -36,6 +36,7 @@ test("settings tabs remain enabled and expose one keyboard-focusable active tab"
 });
 
 test("extension deep links select the single Extensions & Tools category", () => {
+  assert.equal(getNormalizedActive("tools"), "extensions");
   assert.equal(getNormalizedActive("mcp"), "extensions");
   assert.equal(getNormalizedActive("skills"), "extensions");
   assert.equal(getNormalizedActive("plugins"), "extensions");
@@ -55,10 +56,26 @@ test("extension segmented tabs expose exactly one selected subpanel target", () 
     active: "plugins",
     onSelect: () => {},
   }));
-  assert.equal((html.match(/role="tab"/g) ?? []).length, 3);
-  for (const label of ["MCP Servers", "Skills", "Plugins"]) assert.ok(html.includes(label), `${label} segment is missing`);
+  assert.equal((html.match(/role="tab"/g) ?? []).length, 4);
+  for (const label of ["Optional Tools", "MCP Servers", "Skills", "Plugins"]) assert.ok(html.includes(label), `${label} segment is missing`);
   assert.match(html, /id="settings-extension-tab-plugins"[^>]*aria-selected="true"/);
+  assert.match(html, /aria-controls="settings-extension-panel-tools"/);
   assert.match(html, /aria-controls="settings-extension-panel-mcp"/);
   assert.match(html, /aria-controls="settings-extension-panel-skills"/);
   assert.match(html, /aria-controls="settings-extension-panel-plugins"/);
+});
+
+test("extension segmented tabs place Optional Tools first in tab order", () => {
+  const html = renderToStaticMarkup(React.createElement(ExtensionsTabs, {
+    active: "tools",
+    onSelect: () => {},
+  }));
+  assert.match(html, /id="settings-extension-tab-tools"[^>]*aria-selected="true"/);
+  const toolsIndex = html.indexOf("settings-extension-tab-tools");
+  const mcpIndex = html.indexOf("settings-extension-tab-mcp");
+  const skillsIndex = html.indexOf("settings-extension-tab-skills");
+  const pluginsIndex = html.indexOf("settings-extension-tab-plugins");
+  assert.ok(toolsIndex < mcpIndex, "tools must come before mcp");
+  assert.ok(mcpIndex < skillsIndex, "mcp must come before skills");
+  assert.ok(skillsIndex < pluginsIndex, "skills must come before plugins");
 });

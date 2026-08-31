@@ -478,6 +478,110 @@ export function Check({ label, checked, onChange, disabled }: CheckProps) {
   );
 }
 
+/* ─── Accessible Switch ─── */
+
+export interface SwitchProps {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+  id?: string;
+  name?: string;
+  ariaLabel?: string;
+  "aria-label"?: string;
+  "aria-labelledby"?: string;
+  "aria-describedby"?: string;
+  title?: string;
+  style?: CSSProperties;
+  className?: string;
+}
+
+export function Switch({
+  checked,
+  onChange,
+  disabled,
+  id,
+  name,
+  ariaLabel,
+  "aria-label": ariaLabelProp,
+  "aria-labelledby": ariaLabelledBy,
+  "aria-describedby": ariaDescribedBy,
+  title,
+  style,
+  className,
+}: SwitchProps) {
+  const [focused, setFocused] = useState(false);
+  const effectiveAriaLabel = ariaLabel ?? ariaLabelProp;
+
+  return (
+    <button
+      type="button"
+      role="switch"
+      id={id}
+      name={name}
+      aria-checked={checked}
+      aria-label={effectiveAriaLabel}
+      aria-labelledby={ariaLabelledBy}
+      aria-describedby={ariaDescribedBy}
+      disabled={disabled}
+      title={title}
+      onClick={() => {
+        if (!disabled) {
+          onChange(!checked);
+        }
+      }}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      className={className}
+      style={{
+        position: "relative",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minWidth: "var(--control-touch, 44px)",
+        minHeight: "var(--control-touch, 44px)",
+        padding: 0,
+        background: "none",
+        border: "none",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.6 : 1,
+        outline: "none",
+        touchAction: "manipulation",
+        WebkitTapHighlightColor: "transparent",
+        flexShrink: 0,
+        ...style,
+      }}
+    >
+      <span
+        style={{
+          position: "relative",
+          display: "inline-flex",
+          alignItems: "center",
+          width: 36,
+          height: 20,
+          borderRadius: 10,
+          background: checked ? "var(--accent)" : "var(--switch-track, var(--border))",
+          transition: "background var(--dur-fast) var(--ease-out-warm), box-shadow var(--dur-fast) var(--ease-out-warm)",
+          padding: 2,
+          boxSizing: "border-box",
+          boxShadow: focused ? "var(--focus-ring, 0 0 0 2px var(--accent))" : undefined,
+        }}
+      >
+        <span
+          style={{
+            width: 16,
+            height: 16,
+            borderRadius: 8,
+            background: "var(--switch-thumb, var(--on-accent))",
+            transform: checked ? "translateX(16px)" : "translateX(0px)",
+            transition: "transform var(--dur-fast) var(--ease-out-warm)",
+            boxShadow: "var(--switch-thumb-shadow, var(--shadow-card))",
+          }}
+        />
+      </span>
+    </button>
+  );
+}
+
 /* ──────────────────── Convenience hooks ──────────────────── */
 
 /**

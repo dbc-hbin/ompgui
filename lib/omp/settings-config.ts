@@ -29,6 +29,12 @@ export type NativeSettings = {
   mnemopi?: { scoping?: "global" | "per-project" | "per-project-tagged"; autoRecall?: boolean; autoRetain?: boolean; noEmbeddings?: boolean };
   mcp?: { enableProjectConfig?: boolean; renderMarkdownResults?: boolean; notifications?: boolean; notificationDebounceMs?: number };
   task?: { eager?: "default" | "preferred" | "always"; prewalk?: boolean; agentModelOverrides?: Record<string, string | string[]>; agentPrewalk?: Record<string, boolean | string>; agentAdvisor?: Record<string, boolean | string>; disabledAgents?: string[] };
+  browser?: { enabled?: boolean; relay?: boolean; headless?: boolean };
+  computer?: { enabled?: boolean; display?: string };
+  web_search?: { enabled?: boolean };
+  github?: { enabled?: boolean };
+  security?: { enabled?: boolean };
+  checkpoint?: { enabled?: boolean };
 };
 
 const THINKING_LEVELS = new Set(["auto", "minimal", "low", "medium", "high", "xhigh", "max"]);
@@ -69,6 +75,10 @@ function assertOptionalRecord(value: unknown, name: string): asserts value is Re
 
 function assertOptionalBoolean(value: unknown, name: string): void {
   if (value !== undefined && typeof value !== "boolean") throw new Error(`${name} must be a boolean`);
+}
+
+function assertOptionalString(value: unknown, name: string): void {
+  if (value !== undefined && typeof value !== "string") throw new Error(`${name} must be a string`);
 }
 
 function hasDefined(record: Record<string, unknown>, key: string): boolean {
@@ -133,6 +143,12 @@ export function filterNativeSettings(settings: NativeSettings): NativeSettings {
     ["mnemopi", ["scoping", "autoRecall", "autoRetain", "noEmbeddings"], undefined],
     ["mcp", ["enableProjectConfig", "renderMarkdownResults", "notifications", "notificationDebounceMs"], undefined],
     ["task", ["eager", "prewalk", "agentModelOverrides", "agentPrewalk", "agentAdvisor", "disabledAgents"], undefined],
+    ["browser", ["enabled", "relay", "headless"], undefined],
+    ["computer", ["enabled", "display"], undefined],
+    ["web_search", ["enabled"], undefined],
+    ["github", ["enabled"], undefined],
+    ["security", ["enabled"], undefined],
+    ["checkpoint", ["enabled"], undefined],
   ];
   for (const [section, keys, nested] of sections) {
     const filtered = filterKnownSection(source, section, keys, nested);
@@ -157,6 +173,12 @@ const OBJECT_SETTINGS_SECTIONS: Record<string, true> = {
   mnemopi: true,
   mcp: true,
   task: true,
+  browser: true,
+  computer: true,
+  web_search: true,
+  github: true,
+  security: true,
+  checkpoint: true,
 };
 
 /** Merge a reviewed partial editor update onto the latest persisted snapshot.
@@ -212,6 +234,12 @@ export function readNativeSettings(): { path: string; settings: NativeSettings }
   const mnemopi = isRecord(data.mnemopi) ? data.mnemopi : {};
   const mcp = isRecord(data.mcp) ? data.mcp : {};
   const task = isRecord(data.task) ? data.task : {};
+  const browser = isRecord(data.browser) ? data.browser : {};
+  const computer = isRecord(data.computer) ? data.computer : {};
+  const webSearch = isRecord(data.web_search) ? data.web_search : {};
+  const github = isRecord(data.github) ? data.github : {};
+  const security = isRecord(data.security) ? data.security : {};
+  const checkpoint = isRecord(data.checkpoint) ? data.checkpoint : {};
   const registryHasScopedEntries = [data.enabledModels, data.disabledProviders, data.modelProviderOrder]
     .some((value) => Array.isArray(value) && !value.every((item) => typeof item === "string"));
   return {
@@ -282,6 +310,27 @@ export function readNativeSettings(): { path: string; settings: NativeSettings }
         ...(booleanStringMap(task.agentAdvisor) ? { agentAdvisor: booleanStringMap(task.agentAdvisor) } : {}),
         ...(stringArray(task.disabledAgents) ? { disabledAgents: stringArray(task.disabledAgents) } : {}),
       } } : {}),
+      ...(Object.keys(browser).length ? { browser: {
+        ...(typeof browser.enabled === "boolean" ? { enabled: browser.enabled } : {}),
+        ...(typeof browser.relay === "boolean" ? { relay: browser.relay } : {}),
+        ...(typeof browser.headless === "boolean" ? { headless: browser.headless } : {}),
+      } } : {}),
+      ...(Object.keys(computer).length ? { computer: {
+        ...(typeof computer.enabled === "boolean" ? { enabled: computer.enabled } : {}),
+        ...(typeof computer.display === "string" ? { display: computer.display } : {}),
+      } } : {}),
+      ...(Object.keys(webSearch).length ? { web_search: {
+        ...(typeof webSearch.enabled === "boolean" ? { enabled: webSearch.enabled } : {}),
+      } } : {}),
+      ...(Object.keys(github).length ? { github: {
+        ...(typeof github.enabled === "boolean" ? { enabled: github.enabled } : {}),
+      } } : {}),
+      ...(Object.keys(security).length ? { security: {
+        ...(typeof security.enabled === "boolean" ? { enabled: security.enabled } : {}),
+      } } : {}),
+      ...(Object.keys(checkpoint).length ? { checkpoint: {
+        ...(typeof checkpoint.enabled === "boolean" ? { enabled: checkpoint.enabled } : {}),
+      } } : {}),
     },
   };
 }
@@ -303,6 +352,12 @@ export function writeNativeSettings(settings: NativeSettings): void {
   assertOptionalRecord(settings.task?.agentModelOverrides, "task.agentModelOverrides");
   assertOptionalRecord(settings.task?.agentPrewalk, "task.agentPrewalk");
   assertOptionalRecord(settings.task?.agentAdvisor, "task.agentAdvisor");
+  assertOptionalRecord(settings.browser, "browser");
+  assertOptionalRecord(settings.computer, "computer");
+  assertOptionalRecord(settings.web_search, "web_search");
+  assertOptionalRecord(settings.github, "github");
+  assertOptionalRecord(settings.security, "security");
+  assertOptionalRecord(settings.checkpoint, "checkpoint");
   for (const [name, value] of Object.entries({
     hideThinkingBlock: settings.hideThinkingBlock,
     externalThinking: settings.externalThinking,
@@ -323,7 +378,16 @@ export function writeNativeSettings(settings: NativeSettings): void {
     "mcp.renderMarkdownResults": settings.mcp?.renderMarkdownResults,
     "mcp.notifications": settings.mcp?.notifications,
     "task.prewalk": settings.task?.prewalk,
+    "browser.enabled": settings.browser?.enabled,
+    "browser.relay": settings.browser?.relay,
+    "browser.headless": settings.browser?.headless,
+    "computer.enabled": settings.computer?.enabled,
+    "web_search.enabled": settings.web_search?.enabled,
+    "github.enabled": settings.github?.enabled,
+    "security.enabled": settings.security?.enabled,
+    "checkpoint.enabled": settings.checkpoint?.enabled,
   })) assertOptionalBoolean(value, name);
+  assertOptionalString(settings.computer?.display, "computer.display");
   for (const [name, value] of Object.entries(settings.task?.agentModelOverrides ?? {})) {
     if (typeof value === "string") {
       if (!value.trim()) throw new Error(`task.agentModelOverrides.${name} must be a non-empty string`);
@@ -402,6 +466,12 @@ export function writeNativeSettings(settings: NativeSettings): void {
   if (reviewed.task?.agentPrewalk !== undefined) doc.setIn(["task", "agentPrewalk"], reviewed.task.agentPrewalk);
   if (reviewed.task?.agentAdvisor !== undefined) doc.setIn(["task", "agentAdvisor"], reviewed.task.agentAdvisor);
   if (reviewed.task?.disabledAgents !== undefined) doc.setIn(["task", "disabledAgents"], reviewed.task.disabledAgents);
+  for (const [key, value] of Object.entries(reviewed.browser ?? {})) doc.setIn(["browser", key], value);
+  for (const [key, value] of Object.entries(reviewed.computer ?? {})) doc.setIn(["computer", key], value);
+  for (const [key, value] of Object.entries(reviewed.web_search ?? {})) doc.setIn(["web_search", key], value);
+  for (const [key, value] of Object.entries(reviewed.github ?? {})) doc.setIn(["github", key], value);
+  for (const [key, value] of Object.entries(reviewed.security ?? {})) doc.setIn(["security", key], value);
+  for (const [key, value] of Object.entries(reviewed.checkpoint ?? {})) doc.setIn(["checkpoint", key], value);
   const temp = `${path}.tmp-${process.pid}-${Date.now()}`;
   try { writeFileSync(temp, doc.toString(), "utf8"); renameSync(temp, path); } catch (error) { try { if (existsSync(temp)) unlinkSync(temp); } catch {} throw error; }
 }

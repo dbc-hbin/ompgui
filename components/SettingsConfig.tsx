@@ -14,6 +14,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { getSoundEnabled, setSoundEnabled as persistSoundEnabled } from "@/lib/sound-prefs";
 
 const SettingsTabLoading = () => <div role="status" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 12 }}>Loading settings…</div>;
+const BuiltInToolsConfig = dynamic(() => import("./BuiltInToolsConfig").then((module) => module.BuiltInToolsConfig), { loading: SettingsTabLoading });
 const ModelsConfig = dynamic(() => import("./ModelsConfig").then((module) => module.ModelsConfig), { loading: SettingsTabLoading });
 const SkillsConfig = dynamic(() => import("./SkillsConfig").then((module) => module.SkillsConfig), { loading: SettingsTabLoading });
 const PluginsConfig = dynamic(() => import("./PluginsConfig").then((module) => module.PluginsConfig), { loading: SettingsTabLoading });
@@ -59,6 +60,12 @@ type NativeSettings = {
     fallbackChains?: Record<string, string[]>;
   };
   task?: { eager?: "default" | "preferred" | "always" };
+  browser?: { enabled?: boolean; relay?: boolean; headless?: boolean };
+  computer?: { enabled?: boolean; display?: string };
+  web_search?: { enabled?: boolean };
+  github?: { enabled?: boolean };
+  security?: { enabled?: boolean };
+  checkpoint?: { enabled?: boolean };
 };
 
 // These are the native OMP defaults used when config.yml omits a retry field.
@@ -507,7 +514,14 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
   }, [onOmpSessionsRestarted, t]);
 
   const currentTab = getNormalizedActive(activeTab);
-  const extensionTab: ExtensionsTab = activeTab === "skills" ? "skills" : activeTab === "plugins" ? "plugins" : "mcp";
+  const extensionTab: ExtensionsTab =
+    activeTab === "mcp"
+      ? "mcp"
+      : activeTab === "skills"
+        ? "skills"
+        : activeTab === "plugins"
+          ? "plugins"
+          : "tools";
 
   const requestClose = useCallback(() => {
     if (!modelsDirty) {
@@ -1181,6 +1195,15 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                   <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>{t("settingsTabs.extensionsDesc")}</p>
                 </div>
                 <ExtensionsTabs active={extensionTab} onSelect={requestTabChange} />
+
+                {extensionTab === "tools" && (
+                  <div role="tabpanel" id="settings-extension-panel-tools" aria-labelledby="settings-extension-tab-tools" style={{ display: "flex", flex: 1, minHeight: 0, flexDirection: "column", overflowY: "auto" }}>
+                    <BuiltInToolsConfig
+                      settings={nativeSettings}
+                      onPatch={patchSettings}
+                    />
+                  </div>
+                )}
 
                 {extensionTab === "mcp" && (
                   <div role="tabpanel" id="settings-extension-panel-mcp" aria-labelledby="settings-extension-tab-mcp" style={{ display: "flex", flex: 1, minHeight: 0, flexDirection: "column", overflowY: "auto", gap: 12 }}>
