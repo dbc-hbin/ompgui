@@ -199,13 +199,14 @@ test("SubagentStatusIcon renders distinct status icons and distinguishes lost fr
   assert.notEqual(lostHtml, failedHtml);
 });
 
-test("hierarchy builder is deterministic and preserves parent ordering", () => {
+test("hierarchy builder stacks active agents first and newest agents first", () => {
   const roster = [
     { id: "root", agent: "scout", status: "started", index: 0, task: "Inspect" },
     { id: "unknown-child", agent: "worker", status: "completed", index: 1, parentToolCallId: "parent-call", task: "Write" },
     { id: "nested", agent: "helper", status: "started", index: 2, parentToolCallId: "root", task: "Check" },
     { id: "root-2", agent: "reviewer", status: "failed", index: 3, task: "Review" },
     { id: "unknown-child-2", agent: "helper", status: "aborted", index: 4, parentToolCallId: "parent-call", task: "Report" },
+    { id: "root-3", agent: "writer", status: "started", index: 5, task: "Implement" },
   ];
 
   const first = buildSubagentHubTree(roster);
@@ -213,7 +214,7 @@ test("hierarchy builder is deterministic and preserves parent ordering", () => {
   assert.deepEqual(second, first);
   assert.deepEqual(
     first.filter((item) => item.kind === "row").map((item) => item.subagent.id),
-    ["root", "nested", "root-2", "unknown-child", "unknown-child-2"],
+    ["root-3", "root", "nested", "root-2", "unknown-child-2", "unknown-child"],
   );
   assert.equal(first.filter((item) => item.kind === "row").length, roster.length);
 });
@@ -617,8 +618,9 @@ test("mobile minimal row contract: every subagent row maintains status icon, age
   );
   assert.equal(rows.length, 3);
 
-  for (let i = 0; i < testSubagents.length; i++) {
-    const sub = testSubagents[i];
+  const expectedOrder = [testSubagents[0], testSubagents[2], testSubagents[1]];
+  for (let i = 0; i < expectedOrder.length; i++) {
+    const sub = expectedOrder[i];
     const row = rows[i];
 
     // Main line contains agent name, task text, status

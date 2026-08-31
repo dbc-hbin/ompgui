@@ -373,7 +373,12 @@ export type SubagentHubTreeItem =
 
 /** Build the display order without mutating the input roster or render state. */
 export function buildSubagentHubTree(subagents: SubagentInfo[]): SubagentHubTreeItem[] {
-  const sorted = [...subagents].sort((left, right) => left.index - right.index || left.id.localeCompare(right.id));
+  const sorted = [...subagents].sort((left, right) => {
+    const leftActive = left.source !== "history" && left.status === "started";
+    const rightActive = right.source !== "history" && right.status === "started";
+    if (leftActive !== rightActive) return leftActive ? -1 : 1;
+    return right.index - left.index || right.id.localeCompare(left.id);
+  });
   const ids = new Set(sorted.map((subagent) => subagent.id));
   const childrenByParent = new Map<string, SubagentInfo[]>();
   const roots: SubagentInfo[] = [];
@@ -496,27 +501,26 @@ export function SubagentHub({
         style={{
           display: "flex",
           width: "100%",
-          minHeight: "var(--control-touch, 44px)",
           alignItems: "center",
-          gap: "var(--space-3)",
+          gap: "var(--space-4)",
           padding: "var(--space-4) var(--space-5)",
           border: "none",
           borderBottom: collapsed ? "none" : "thin solid var(--border)",
           background: "transparent",
           color: "var(--text-muted)",
           fontFamily: "inherit",
-          fontSize: "var(--text-sm)",
+          fontSize: "var(--text-xs)",
           textAlign: "left",
           cursor: "pointer",
           wordBreak: "keep-all",
         }}
       >
-        <Network aria-hidden style={{ width: "var(--text-lg)", height: "var(--text-lg)", flexShrink: 0 }} />
-        <strong style={{ color: "var(--text)", fontWeight: 650 }}>{t("chatWindow.subagentsPanel")}</strong>
+        <Network aria-hidden size={15} strokeWidth={1.8} style={{ flexShrink: 0 }} />
+        <strong style={{ color: "var(--text)", fontWeight: 500 }}>{t("chatWindow.subagentsPanel")}</strong>
         <span
           aria-label={t("chatWindow.subagentSummary", { running: runningCount, total: subagents.length })}
           title={t("chatWindow.subagentSummary", { running: runningCount, total: subagents.length })}
-          style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-2)", marginLeft: "auto", fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", fontVariantNumeric: "tabular-nums" }}
+          style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-2)", marginLeft: "auto", fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
         >
           <span>{runningCount}</span>
           <span aria-hidden>/</span>
@@ -524,9 +528,9 @@ export function SubagentHub({
         </span>
         <ChevronDown
           aria-hidden
+          size={14}
+          strokeWidth={1.8}
           style={{
-            width: "var(--text-lg)",
-            height: "var(--text-lg)",
             flexShrink: 0,
             color: "var(--text-dim)",
             transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)",
