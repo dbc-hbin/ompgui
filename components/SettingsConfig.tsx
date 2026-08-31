@@ -306,7 +306,7 @@ function NativeSetting({ label, description, scope, compact = false, hideDescrip
   );
 }
 
-export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, toolCallsDefaultCollapsed, onToolCallsDefaultCollapsedChange, cwd, sessionId, systemPrompt, systemPromptLoading, onLoadSystemPrompt, onModelsSaved, onPluginsReloaded, onOmpUpdateAvailabilityChange, onSelectTab, onClose, runtimeReady }: {
+export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, toolCallsDefaultCollapsed, onToolCallsDefaultCollapsedChange, cwd, sessionId, systemPrompt, systemPromptLoading, onLoadSystemPrompt, onModelsSaved, onPluginsReloaded, onOmpSessionsRestarted, onOmpUpdateAvailabilityChange, onSelectTab, onClose, runtimeReady }: {
   activeTab: SettingsTab;
   advisorEnabled: boolean;
   onAdvisorChange: (enabled: boolean) => void;
@@ -319,6 +319,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
   onLoadSystemPrompt: () => void;
   onModelsSaved: () => void;
   onPluginsReloaded: () => void;
+  onOmpSessionsRestarted: () => void;
   onOmpUpdateAvailabilityChange: (available: boolean) => void;
   onSelectTab: (tab: SettingsTab) => void;
   onClose: () => void;
@@ -496,13 +497,14 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
       const response = await fetch("/api/omp-update", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "restart" }) });
       const data = (await response.json()) as { error?: string; sessionsRestarted?: number };
       if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+      onOmpSessionsRestarted();
       setMessage(t("settingsConfig.restartSuccess", { count: data.sessionsRestarted ?? 0 }));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setRestarting(false);
     }
-  }, [t]);
+  }, [onOmpSessionsRestarted, t]);
 
   const currentTab = getNormalizedActive(activeTab);
   const extensionTab: ExtensionsTab = activeTab === "skills" ? "skills" : activeTab === "plugins" ? "plugins" : "mcp";

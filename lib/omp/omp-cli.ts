@@ -45,8 +45,8 @@ function probeOmpBin(): string | null {
 }
 
 /** Resolve the omp binary: OMP_WEB_OMP_BIN override, then PATH lookup. Returns
- * null when omp is not installed. A hit is cached for the process lifetime; a
- * miss is re-probed after MISS_TTL_MS. */
+ * null when omp is not installed. A hit is cached until explicitly
+ * invalidated; a miss is re-probed after MISS_TTL_MS. */
 export function resolveOmpBin(): string | null {
   if (cachedBin) return cachedBin;
   if (Date.now() - binMissAt < MISS_TTL_MS) return null;
@@ -60,9 +60,18 @@ export function resolveOmpBin(): string | null {
   return null;
 }
 
+/** Clear successful and failed probes before restarting OMP child processes
+ * after an update. The next caller re-resolves the executable and version. */
+export function invalidateOmpCliCache(): void {
+  cachedBin = null;
+  binMissAt = 0;
+  cachedVersion = null;
+  versionMissAt = 0;
+}
+
 /** `omp --version` output (e.g. "omp/17.1.3"), or null when unavailable.
- * Cached after the first successful probe; failures are retried after
- * MISS_TTL_MS so a later install is picked up without a server restart. */
+ * Successes are reused until OMP sessions are explicitly restarted; failures
+ * are retried after MISS_TTL_MS. */
 export async function getOmpVersion(): Promise<string | null> {
   if (cachedVersion) return cachedVersion;
   if (Date.now() - versionMissAt < MISS_TTL_MS) return null;

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { invalidateOmpCliCache } from "@/lib/omp/omp-cli";
 import { checkOmpUpdate } from "@/lib/omp/updates";
 import { restartAllRpcSessions } from "@/lib/rpc-manager";
 
@@ -12,6 +13,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Automatic self-updating is disabled. Run 'omp update' in your terminal.", code: "update_disabled" }, { status: 400 });
     }
     if (body.action === "restart") {
+      invalidateOmpCliCache();
       const sessionsRestarted = await restartAllRpcSessions();
       return NextResponse.json({ success: true, sessionsRestarted });
     }

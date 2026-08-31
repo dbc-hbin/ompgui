@@ -40,6 +40,7 @@ interface Props {
   onSessionCreated?: (session: SessionInfo) => void;
   onSessionForked?: (newSessionId: string) => void;
   modelsRefreshKey?: number;
+  ompVersionRefreshKey?: number;
   chatInputRef?: React.RefObject<ChatInputHandle | null>;
   onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => void;
   onSystemPromptChange?: (prompt: string | null) => void;
@@ -142,7 +143,7 @@ function withAssistantBlocks(
   return next;
 }
 
-function OmpRuntimeVersion() {
+function OmpRuntimeVersion({ refreshKey = 0 }: { refreshKey?: number }) {
   const { t } = useI18n();
   const [version, setVersion] = useState<string | null>(null);
   useEffect(() => {
@@ -157,7 +158,7 @@ function OmpRuntimeVersion() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshKey]);
   return (
     <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
       omp <span style={{ color: "var(--text)" }}>{version ? `v${version}` : t("chatWindow.versionNotFound")}</span>
@@ -416,7 +417,7 @@ const CommittedTranscript = memo(function CommittedTranscript({
   );
 });
 
-export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDefaultCollapsed = true, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onOpenSettingsTab, onContextUsageChange, onOpenFile, onRuntimeReadyChange }: Props) {
+export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDefaultCollapsed = true, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, ompVersionRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onOpenSettingsTab, onContextUsageChange, onOpenFile, onRuntimeReadyChange }: Props) {
   const { t, tn } = useI18n();
   const { playDoneSound, unlockAudio } = useAudio();
   const isMobile = useIsMobile();
@@ -919,7 +920,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
                       <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
                         gui <span style={{ color: "var(--text)" }}>v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.4.1"}</span>
                       </span>
-                      <OmpRuntimeVersion />
+                      <OmpRuntimeVersion refreshKey={ompVersionRefreshKey} />
                     </div>
                   </div>
                   <NoticeShelf notices={notices} align="right" />
