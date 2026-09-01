@@ -4,6 +4,7 @@
   background: #101317;
   color: #eef2f6;
   font-synthesis: none;
+  --app-viewport-height: 100dvh;
 }
 
 * { box-sizing: border-box; }
@@ -11,6 +12,8 @@
 body {
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100dvh;
+  min-height: var(--app-viewport-height, 100dvh);
   margin: 0;
   background: radial-gradient(circle at top, #283442 0, #101317 52%);
 }
@@ -18,6 +21,8 @@ body {
 .shell {
   width: min(100% - 32px, 760px);
   min-height: 100vh;
+  min-height: 100dvh;
+  min-height: var(--app-viewport-height, 100dvh);
   margin: 0 auto;
   padding: max(28px, env(safe-area-inset-top)) 0 max(28px, env(safe-area-inset-bottom));
   display: flex;

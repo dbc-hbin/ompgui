@@ -104,23 +104,36 @@ export function ClampedDescription({ children }: { children: React.ReactNode }) 
 function Toaster() {
   const { toasts } = Toast.useToastManager<ToastData>();
   const isMobile = useIsMobile();
-  // Clear the app chrome (topbar 36/44px + tab bar 36px) with a safe gap so
-  // toasts never cover the header, tabs, or chat content.
-  const topOffset = isMobile ? 88 : 80;
+
   return (
     <Toast.Portal>
       <Toast.Viewport
-        style={{
-          position: "fixed",
-          top: topOffset,
-          right: "var(--space-6)",
-          zIndex: "var(--z-toast)",
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--space-4)",
-          width: "min(92vw, 360px)",
-          pointerEvents: "none",
-        }}
+        style={
+          isMobile
+            ? {
+                position: "fixed",
+                bottom: "max(var(--space-4), env(safe-area-inset-bottom, 0px))",
+                left: "50%",
+                transform: "translateX(-50%)",
+                zIndex: "var(--z-toast)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "var(--space-3)",
+                width: "min(92vw, 360px)",
+                pointerEvents: "none",
+              }
+            : {
+                position: "fixed",
+                top: 80,
+                right: "var(--space-6)",
+                zIndex: "var(--z-toast)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "var(--space-4)",
+                width: "min(92vw, 360px)",
+                pointerEvents: "none",
+              }
+        }
       >
         {toasts.map((t) => (
           <Toast.Root
@@ -156,12 +169,16 @@ function Toaster() {
             </Toast.Content>
             <Toast.Close
               aria-label="Dismiss"
+              className="ui-focus-ring"
               style={{
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
-                width: "calc(var(--control-height-sm) - var(--space-4))",
-                height: "calc(var(--control-height-sm) - var(--space-4))",
+                width: isMobile ? 44 : "calc(var(--control-height-sm) - var(--space-4))",
+                height: isMobile ? 44 : "calc(var(--control-height-sm) - var(--space-4))",
+                minWidth: isMobile ? 44 : undefined,
+                minHeight: isMobile ? 44 : undefined,
+                margin: isMobile ? "calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) 0 0" : 0,
                 padding: 0,
                 border: 0,
                 borderRadius: "var(--radius-control)",
@@ -169,9 +186,10 @@ function Toaster() {
                 color: "var(--text-dim)",
                 cursor: "pointer",
                 flexShrink: 0,
+                touchAction: "manipulation",
               }}
             >
-              <X size={12} strokeWidth={2} aria-hidden />
+              <X size={isMobile ? 16 : 12} strokeWidth={2} aria-hidden />
             </Toast.Close>
           </Toast.Root>
         ))}

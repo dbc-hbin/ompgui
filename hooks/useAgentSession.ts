@@ -30,8 +30,24 @@ import { toast } from "@/components/ui/toast";
 import { expandWebSlashCommand } from "@/lib/web-slash-commands";
 import { createActiveGoal, parseActiveGoal, type ActiveGoal, type ActivePlan } from "@/lib/web-mode-state";
 import { deriveContextUsage, mergeContextUsage, resolveContextWindow } from "@/lib/context-usage";
-import { matchesStateLoadFence } from "@/lib/session-load-fence";
-import { getRemoteReplicaOrigin, persistRemoteReplicaSnapshot, projectRemoteReplica } from "@/lib/remote-replica";
+import { matchesSessionLoadGeneration, matchesStateLoadFence } from "@/lib/session-load-fence";
+import { getRemoteReplicaOrigin, loadRemoteReplicaSnapshot, persistRemoteReplicaSnapshot, projectRemoteReplica } from "@/lib/remote-replica";
+import type { RemoteReplicaSnapshot } from "@/lib/remote-replica";
+import { loadClientModels } from "@/lib/client-model-store";
+import {
+  createVisibilityPausedInterval,
+  delayWhileDocumentVisible,
+  isDocumentHidden,
+  nextEventStreamReconnectDelayMs,
+} from "@/lib/visibility-timers";
+import {
+  applyFollowScroll,
+  createFollowScrollToken,
+  decideFollowScroll,
+  followTodoSignature,
+  nextFollowScrollTop,
+  type FollowScrollIntent,
+} from "@/lib/chat-follow-scroll";
 import type { HostToolDefinition, HostUriSchemeDefinition, RpcAvailableSlashCommand, SessionStatsInfo, TodoPhase } from "@/lib/pi-types";
 import { isRecord } from "@/lib/type-guards";
 import {
@@ -82,6 +98,7 @@ export interface SessionData {
 interface StreamingState {
   isStreaming: boolean;
   streamingMessage: Partial<AgentMessage> | null;
+  revision: number;
 }
 
 type StreamAction =
@@ -93,12 +110,12 @@ type StreamAction =
 function streamReducer(state: StreamingState, action: StreamAction): StreamingState {
   switch (action.type) {
     case "start":
-      return { isStreaming: true, streamingMessage: null };
+      return { isStreaming: true, streamingMessage: null, revision: state.revision + 1 };
     case "update":
-      return { isStreaming: true, streamingMessage: action.message };
+      return { isStreaming: true, streamingMessage: action.message, revision: state.revision + 1 };
     case "end":
     case "reset":
-      return { isStreaming: false, streamingMessage: null };
+      return { isStreaming: false, streamingMessage: null, revision: state.revision + 1 };
     default:
       return state;
   }
@@ -437,10 +454,6 @@ function isSafeOpenUrl(raw: unknown): boolean {
   return scheme === "http" || scheme === "https" || scheme === "mailto";
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function markOldestNoticeExiting(notices: NoticeItem[]): NoticeItem[] {
   const index = notices.findIndex((notice) => !notice.exiting);
   if (index === -1) return notices;
@@ -585,14 +598,6 @@ export interface AttachedImage {
 
 type SelectedModel = { provider: string; modelId: string };
 type ModelEntry = { id: string; name: string; provider: string; supportsFastMode?: boolean; contextWindow?: number };
-type ModelsResponse = {
-  models: Record<string, string>;
-  modelList?: ModelEntry[];
-  defaultModel?: SelectedModel | null;
-  thinkingLevels?: Record<string, string[]>;
-  thinkingLevelMaps?: Record<string, Record<string, string | null>>;
-  modelError?: string;
-};
 
 type SlashCommandsResponse = {
   commands?: RpcAvailableSlashCommand[];
@@ -631,8 +636,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [activeLeafId, setActiveLeafId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
+  const [replicaPreview, setReplicaPreview] = useState<RemoteReplicaSnapshot | null>(null);
   const [entryIds, setEntryIds] = useState<string[]>([]);
-  const [streamState, dispatch] = useReducer(streamReducer, { isStreaming: false, streamingMessage: null });
+  const [streamState, dispatch] = useReducer(streamReducer, { isStreaming: false, streamingMessage: null, revision: 0 });
   const [agentRunning, setAgentRunning] = useState(false);
   const [bashRunning, setBashRunning] = useState(false);
   const [pendingBash, setPendingBash] = useState<{ command: string; excludeFromContext: boolean } | null>(null);
@@ -705,6 +711,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // fatal-close callback is installed during render and reads this ref later.
   const reconnectActionsRef = useRef<((sid: string) => void) | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptRef = useRef(0);
+  const visibilityDelayAbortRef = useRef(new AbortController());
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
   // This is the session selected by the latest render. Unlike sessionIdRef,
   // it stays null while a new session is acquiring its real id, so cleanup can
@@ -717,6 +725,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const sessionLoadGenerationRef = useRef(0);
   const runtimeLoadGenerationRef = useRef(0);
   const loadGenerationCounterRef = useRef(0);
+  const modelsLoadGenerationRef = useRef(0);
   const sessionReadinessRef = useRef<SessionReadiness>(initialReadiness);
   const runtimeReadyRef = useRef(isNew || initialReadiness.runtime === "ready");
   sessionReadinessRef.current = sessionReadiness;
@@ -759,6 +768,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // reconciliation loop share one timer so refreshes cannot overlap.
   const rosterRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rosterRefreshTimerKindRef = useRef<"initial" | "reconcile" | null>(null);
+  const rosterRefreshDeferredRef = useRef(false);
   const rosterRefreshInFlightRef = useRef<Promise<boolean> | null>(null);
   const rosterRefreshRequestIdRef = useRef(0);
   const refreshSubagentRosterRef = useRef<((sid: string) => Promise<boolean>) | null>(null);
@@ -833,7 +843,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         // healthy source reuse deliberately skips this reset.
         eventCoalescer.reset();
         const source = new EventSource(`/api/agent/${encodeURIComponent(sid)}/events`);
-        source.onopen = handlers.onOpen;
+        source.onopen = () => {
+          reconnectAttemptRef.current = 0;
+          handlers.onOpen();
+        };
         source.onerror = handlers.onError;
         eventSourceRef.current = source;
         return source;
@@ -847,9 +860,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           clearTimeout(reconnectTimerRef.current);
           reconnectTimerRef.current = null;
         }
-        if (!agentRunningRef.current) return;
+        if (!agentRunningRef.current || isDocumentHidden()) return;
+        const delayMs = nextEventStreamReconnectDelayMs(reconnectAttemptRef.current);
+        reconnectAttemptRef.current += 1;
         reconnectTimerRef.current = setTimeout(() => {
           reconnectTimerRef.current = null;
+          if (isDocumentHidden()) return;
           if (agentRunningRef.current && sessionIdRef.current === sid) {
             void connectEventsRef.current?.(sid);
             // The reconnect restores the event stream, but host tools, URI
@@ -857,7 +873,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             // connection — re-register them so the agent keeps working.
             reconnectActionsRef.current?.(sid);
           }
-        }, 1000);
+        }, delayMs);
       },
     });
   }
@@ -1024,6 +1040,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       || sessionIdRef.current !== sid
       || !runtimeReadyRef.current
       || !hasLiveStartedSubagent(subagentsRef.current)
+      || isDocumentHidden()
     ) return;
     if (rosterRefreshTimerRef.current || rosterRefreshInFlightRef.current) return;
 
@@ -1036,6 +1053,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         !hookAliveRef.current
         || sessionIdRef.current !== sid
         || subagentRosterGenerationRef.current !== generation
+        || isDocumentHidden()
       ) return;
       if (hasSubagentRosterReconcileNeed(subagentsRef.current)) {
         void refreshSubagentRosterRef.current?.(sid);
@@ -1297,8 +1315,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [applyLoadedAgentState, beginAuthoritativeModelSync, updateRuntimeReadiness]);
 
   const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false, fenceRunId?: number) => {
+    const hadAuthoritativeHistory = sessionReadinessRef.current.history === "ready";
     const loadGeneration = beginSessionLoad(sid, includeState);
     if (showLoading) setLoading(true);
+    if (!hadAuthoritativeHistory) {
+      const origin = getRemoteReplicaOrigin();
+      const replica = origin ? loadRemoteReplicaSnapshot(sid, origin) : null;
+      setReplicaPreview(replica && replica.session.id === sid ? replica : null);
+    } else {
+      setReplicaPreview(null);
+    }
     const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1" });
     // Start both network requests before awaiting either one. History is
     // applied independently so a slow runtime round-trip cannot delay the
@@ -1317,6 +1343,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           setData(null);
           setActiveLeafId(null);
           setMessages([]);
+          setReplicaPreview(null);
           setEntryIds([]);
           setError(null);
           updateSessionReadiness(sid, loadGeneration, { history: "error" });
@@ -1334,6 +1361,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setData(d);
         setActiveLeafId(d.leafId);
         setMessages(d.context.messages);
+        setReplicaPreview(null);
         setEntryIds(d.context.entryIds ?? []);
         setTodoPhases(d.context.todoPhases ?? []);
         // Recover on-disk subagent history (task toolResults) for this
@@ -1355,6 +1383,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           && (fenceRunId === undefined || promptRunIdRef.current === fenceRunId)
         ) {
           setError(String(e));
+          setReplicaPreview(null);
           updateSessionReadiness(sid, loadGeneration, { history: "error" });
           setLoading(false);
         }
@@ -1904,7 +1933,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [loadSession, onAgentEnd, refreshSubagentHistory]);
 
   const waitForPromptSettlement = useCallback(async (sid: string, runId?: number) => {
-    await delay(PROMPT_SETTLE_INITIAL_DELAY_MS);
+    await delayWhileDocumentVisible(
+      PROMPT_SETTLE_INITIAL_DELAY_MS,
+      undefined,
+      undefined,
+      visibilityDelayAbortRef.current.signal,
+    );
     const startedAt = Date.now();
 
     const loadGeneration = runtimeLoadGenerationRef.current;
@@ -1929,7 +1963,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       } catch {
         // SSE remains the primary completion path.
       }
-      await delay(PROMPT_SETTLE_POLL_MS);
+      await delayWhileDocumentVisible(
+        PROMPT_SETTLE_POLL_MS,
+        undefined,
+        undefined,
+        visibilityDelayAbortRef.current.signal,
+      );
     }
   }, [finishPromptWithoutStream]);
 
@@ -1943,7 +1982,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       && bashRecoveryIdRef.current === recoveryId
       && sessionIdRef.current === sid
     ) {
-      await delay(BASH_STATE_RECONCILE_MS);
+      const delaySignal = visibilityDelayAbortRef.current.signal;
+      await delayWhileDocumentVisible(
+        BASH_STATE_RECONCILE_MS,
+        undefined,
+        undefined,
+        delaySignal,
+      );
+      if (
+        delaySignal.aborted
+        || !bashRunningRef.current
+        || bashRecoveryIdRef.current !== recoveryId
+        || sessionIdRef.current !== sid
+      ) return;
       try {
         const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
         if (!res.ok) continue;
@@ -1963,6 +2014,34 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [loadSession]);
 
+  const scheduleInitialRosterRefresh = useCallback((sid: string) => {
+    if (rosterRefreshTimerRef.current) {
+      clearTimeout(rosterRefreshTimerRef.current);
+      rosterRefreshTimerRef.current = null;
+    }
+    if (
+      !hookAliveRef.current
+      || sessionIdRef.current !== sid
+      || !runtimeReadyRef.current
+    ) return;
+    if (isDocumentHidden()) {
+      rosterRefreshDeferredRef.current = true;
+      return;
+    }
+    rosterRefreshDeferredRef.current = false;
+    rosterRefreshTimerKindRef.current = "initial";
+    rosterRefreshTimerRef.current = setTimeout(() => {
+      rosterRefreshTimerRef.current = null;
+      rosterRefreshTimerKindRef.current = null;
+      if (isDocumentHidden()) {
+        rosterRefreshDeferredRef.current = true;
+        return;
+      }
+      if (sessionIdRef.current !== sid || !runtimeReadyRef.current) return;
+      void refreshSubagentRoster(sid);
+    }, 600);
+  }, [refreshSubagentRoster]);
+
   const restoreRuntimeFromState = useCallback((sid: string, agentState: { running: boolean; state?: AgentStateResponse }) => {
     if (!hookAliveRef.current || sessionIdRef.current !== sid || !runtimeReadyRef.current) return;
     const liveState = agentState.state;
@@ -1976,18 +2055,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // the runtime state request has proved that this wrapper is available.
       void registerHostTools(sid);
       void registerHostUriSchemes(sid);
-      if (rosterRefreshTimerRef.current) {
-        clearTimeout(rosterRefreshTimerRef.current);
-        rosterRefreshTimerRef.current = null;
-      }
-      rosterRefreshTimerKindRef.current = "initial";
-      const rosterTimerSid = sid;
-      rosterRefreshTimerRef.current = setTimeout(() => {
-        rosterRefreshTimerRef.current = null;
-        rosterRefreshTimerKindRef.current = null;
-        if (sessionIdRef.current !== rosterTimerSid || !runtimeReadyRef.current) return;
-        void refreshSubagentRoster(rosterTimerSid);
-      }, 600);
+      scheduleInitialRosterRefresh(sid);
       if (!liveState.isStreaming && liveState.isPromptRunning) {
         void waitForPromptSettlement(sid);
       }
@@ -2003,7 +2071,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const persisted = readPersistedQueue(sid);
       if (persisted) setQueuedMessages((prev) => (isEmptyQueue(prev) ? persisted : prev));
     }
-  }, [connectEvents, refreshSubagentRoster, registerHostTools, registerHostUriSchemes, waitForBashSettlement, waitForPromptSettlement]);
+  }, [connectEvents, registerHostTools, registerHostUriSchemes, scheduleInitialRosterRefresh, waitForBashSettlement, waitForPromptSettlement]);
 
   const retryRuntimeState = useCallback(async () => {
     const sid = sessionIdRef.current;
@@ -2074,24 +2142,65 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // foreground or the network comes back.
   useEffect(() => {
     if (!agentRunning) return;
-    const reconcile = () => {
-      // Read the ref on every tick: for brand-new sessions the id is
-      // assigned only after ensure_session returns.
+    return createVisibilityPausedInterval(() => {
       const sid = sessionIdRef.current;
       if (sid) void reconcileAgentState(sid);
+    }, AGENT_STATE_RECONCILE_MS);
+  }, [agentRunning, reconcileAgentState]);
+
+  useEffect(() => {
+    const pauseHiddenTimers = () => {
+      if (!isDocumentHidden()) return;
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      if (rosterRefreshTimerRef.current) {
+        if (rosterRefreshTimerKindRef.current === "initial") {
+          rosterRefreshDeferredRef.current = true;
+        }
+        clearTimeout(rosterRefreshTimerRef.current);
+        rosterRefreshTimerRef.current = null;
+        rosterRefreshTimerKindRef.current = null;
+      }
+    };
+    const resumeVisibleSession = () => {
+      if (isDocumentHidden()) return;
+      const sid = sessionIdRef.current;
+      if (!sid) return;
+      const sessionLoadGeneration = sessionLoadGenerationRef.current;
+      const runtimeLoadGeneration = runtimeLoadGenerationRef.current;
+      const liveSource = eventSourceRef.current ?? eventConnectionManager.currentSource(sid);
+      if (agentRunningRef.current || bashRunningRef.current || liveSource) {
+        void ensureEventsConnected(sid);
+      }
+      void (async () => {
+        if (
+          !matchesSessionLoadGeneration(
+            sessionIdRef.current,
+            sid,
+            sessionLoadGenerationRef.current,
+            sessionLoadGeneration,
+          )
+          || runtimeLoadGenerationRef.current !== runtimeLoadGeneration
+        ) return;
+        await reconcileAgentState(sid);
+      })();
+      scheduleSubagentRosterReconcile(sid);
+      if (rosterRefreshDeferredRef.current) scheduleInitialRosterRefresh(sid);
     };
     const onVisible = () => {
-      if (document.visibilityState === "visible") reconcile();
+      if (document.visibilityState === "visible") resumeVisibleSession();
+      else pauseHiddenTimers();
     };
-    const interval = setInterval(reconcile, AGENT_STATE_RECONCILE_MS);
+    pauseHiddenTimers();
     document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("online", reconcile);
+    window.addEventListener("online", resumeVisibleSession);
     return () => {
-      clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("online", reconcile);
+      window.removeEventListener("online", resumeVisibleSession);
     };
-  }, [agentRunning, reconcileAgentState]);
+  }, [ensureEventsConnected, eventConnectionManager, reconcileAgentState, scheduleInitialRosterRefresh, scheduleSubagentRosterReconcile]);
 
   useEffect(() => {
     agentRunningRef.current = agentRunning;
@@ -3062,14 +3171,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [canMutateSession, isCompacting, loadSession, refreshLiveModelState]);
 
-  const loadModels = useCallback(async (signal?: AbortSignal) => {
+  const loadModels = useCallback(async (signal?: AbortSignal, force = false) => {
+    const modelsLoadId = modelsLoadGenerationRef.current + 1;
+    modelsLoadGenerationRef.current = modelsLoadId;
+    const modelCwd = newSessionCwd ?? session?.cwd ?? "";
+    const cwdUnchanged = () => (newSessionCwd ?? session?.cwd ?? "") === modelCwd;
+    const ownsModelsLoad = () =>
+      !signal?.aborted
+      && modelsLoadGenerationRef.current === modelsLoadId
+      && cwdUnchanged();
     setModelsLoading(true);
     try {
-      const modelCwd = newSessionCwd ?? session?.cwd ?? "";
-      const modelsUrl = modelCwd ? `/api/models?cwd=${encodeURIComponent(modelCwd)}` : "/api/models";
-      const res = await fetch(modelsUrl, { cache: "no-store", ...(signal ? { signal } : {}) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json() as ModelsResponse;
+      const d = await loadClientModels(modelCwd, force ? { force: true } : undefined);
+      if (!ownsModelsLoad()) return;
       setModelNames(d.models);
       setModelError(d.modelError ?? null);
       setModelThinkingLevels(d.thinkingLevels ?? {});
@@ -3086,8 +3200,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (e) {
       // Surface fetch/parse failures instead of silently rendering an empty
       // model list with no error state.
-      if (!signal?.aborted) setModelError(e instanceof Error ? e.message : String(e));
+      if (!ownsModelsLoad()) return;
+      setModelError(e instanceof Error ? e.message : String(e));
     } finally {
+      if (!ownsModelsLoad()) return;
       setModelsLoading(false);
     }
   }, [isNew, newSessionCwd, session?.cwd]);
@@ -3143,7 +3259,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           await Promise.all([
             loadSession(sid, false, true),
             loadSlashCommands(),
-            loadModels(),
+            loadModels(undefined, true),
           ]);
           return complete({ handled: true, message: translate("agentSession.reloadedResources") });
         }
@@ -3337,17 +3453,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [setToolPresetState, addNotice, canMutateSession]);
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+  const applyConversationFollow = useCallback((intent: FollowScrollIntent) => {
     const container = scrollContainerRef.current;
     const end = messagesEndRef.current;
     if (!container || !end) return;
-    ignoreProgrammaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_IGNORE_MS;
-    // `behavior: "auto"` falls back to the container's computed
-    // `scroll-behavior` (which inherits `html { scroll-behavior: smooth }`),
-    // so a per-frame live follow would restart an eased scroll animation
-    // every frame — an endless chase that lags the growing content. Callers
-    // pass "instant" for live follow; "smooth" stays for idle scrolls.
-    end.scrollIntoView({ block: "nearest", behavior: reducedMotion ? "instant" : behavior });
+    const nextScrollTop = nextFollowScrollTop(container);
+    const decision = decideFollowScroll({
+      following: intent === "initial" || intent === "user-send" || completionScrollAllowedRef.current,
+      intent,
+      scrollTop: container.scrollTop,
+      nextScrollTop,
+      reducedMotion,
+    });
+    const result = applyFollowScroll({ container, end, decision });
+    if (result.wrote) {
+      ignoreProgrammaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_IGNORE_MS;
+    }
   }, [reducedMotion]);
 
   const markUserScrollIntent = useCallback((event: Event) => {
@@ -3386,6 +3507,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
+    reconnectAttemptRef.current = 0;
     if (rosterRefreshTimerRef.current) {
       clearTimeout(rosterRefreshTimerRef.current);
       rosterRefreshTimerRef.current = null;
@@ -3393,6 +3515,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     rosterRefreshTimerKindRef.current = null;
     rosterRefreshInFlightRef.current = null;
     rosterRefreshRequestIdRef.current += 1;
+    visibilityDelayAbortRef.current.abort();
+    visibilityDelayAbortRef.current = new AbortController();
     if (subagentVersionFlushFrameRef.current !== null) {
       cancelAnimationFrame(subagentVersionFlushFrameRef.current);
       subagentVersionFlushFrameRef.current = null;
@@ -3435,6 +3559,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (sameSession) return;
       resetSubagentRoster();
       disposeSessionResources();
+      setReplicaPreview(null);
       sessionIdRef.current = null;
     };
   }, [session?.id, disposeSessionResources, resetSubagentRoster]);
@@ -3493,11 +3618,48 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   // Follow the conversation: scroll to the user's latest message when they
   // send one, then keep the newest content in view while the agent streams.
-  // `messages` identity changes on every message boundary and `streamState`
-  // on every streaming token batch, so the scroll is throttled to one frame
-  // during a run to avoid layout thrash. A manual scroll-up
-  // (completionScrollAllowedRef === false) disables following.
+  // A derived token (not `messages`/`streamState` identity) schedules work;
+  // the rAF callback then skips when there is no pixel delta. A manual
+  // scroll-up (completionScrollAllowedRef === false) disables following.
   const followScrollFrameRef = useRef<number | null>(null);
+  const isStreamingRef = useRef(streamState.isStreaming);
+  isStreamingRef.current = streamState.isStreaming;
+  const messageCountRef = useRef(messages.length);
+  messageCountRef.current = messages.length;
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
+  const lastEntryId = entryIds.length > 0 ? entryIds[entryIds.length - 1]! : "";
+  const followScrollToken = useMemo(() => createFollowScrollToken({
+    loading,
+    messageCount: messages.length,
+    lastEntryId,
+    streaming: streamState.isStreaming,
+    streamRevision: streamState.revision,
+    agentRunning,
+    agentPhase: agentPhase
+      ? agentPhase.kind === "running_tools"
+        ? `running_tools:${agentPhase.tools.map((tool) => tool.name).join(",")}`
+        : agentPhase.kind
+      : null,
+    widgetSignature: extensionWidgets.map((widget) => `${widget.key}:${widget.lines.join("\n")}`).join(","),
+    isCompacting,
+    retrySignature: retryInfo ? `${retryInfo.attempt}/${retryInfo.maxAttempts}` : "",
+    activeSubagentCount,
+    todoSignature: followTodoSignature(todoPhases),
+  }), [
+    loading,
+    messages.length,
+    lastEntryId,
+    streamState.isStreaming,
+    streamState.revision,
+    agentRunning,
+    agentPhase,
+    extensionWidgets,
+    isCompacting,
+    retryInfo,
+    activeSubagentCount,
+    todoPhases,
+  ]);
   // Reset scroll anchors when the active session changes. Not every navigation
   // bumps ChatWindow's sessionKey (promoted new sessions, hydration), so a
   // revisited compacted session would otherwise stay pinned at the top
@@ -3517,31 +3679,34 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [session?.id]);
   useEffect(() => {
-    const hasContent = messages.length > 0 || streamState.isStreaming;
-    if (!hasContent) return;
+    if (messageCountRef.current === 0 && !isStreamingRef.current) return;
     if (pendingScrollToUserRef.current) {
       pendingScrollToUserRef.current = false;
       initialScrollDoneRef.current = true;
-      scrollToBottom(streamState.isStreaming || agentRunningRef.current ? "instant" : "smooth");
+      applyConversationFollow(
+        isStreamingRef.current || agentRunningRef.current ? "follow-stream" : "user-send",
+      );
     } else if (!initialScrollDoneRef.current) {
       // Wait for the message list to actually be mounted: while `loading` is
       // true the scroll container does not exist, so scrolling now would
       // no-op yet mark the initial scroll as done - leaving the viewport at
       // the top (which then auto-loads the full history) after load ends.
-      // The `loading` dep re-runs this effect once the list is rendered.
-      if (loading) return;
+      // The token includes `loading` so this effect re-runs once the list is rendered.
+      if (loadingRef.current) return;
       initialScrollDoneRef.current = true;
-      scrollToBottom("instant");
+      applyConversationFollow("initial");
     } else if (completionScrollAllowedRef.current) {
       if (followScrollFrameRef.current === null) {
         followScrollFrameRef.current = requestAnimationFrame(() => {
           followScrollFrameRef.current = null;
           if (!completionScrollAllowedRef.current) return;
-          scrollToBottom(agentRunningRef.current || streamState.isStreaming ? "instant" : "smooth");
+          applyConversationFollow(
+            agentRunningRef.current || isStreamingRef.current ? "follow-stream" : "follow-idle",
+          );
         });
       }
     }
-  }, [messages, streamState, agentRunning, agentPhase, extensionWidgets, isCompacting, retryInfo, activeSubagentCount, todoPhases, scrollToBottom, loading]);
+  }, [followScrollToken, applyConversationFollow]);
 
   // Session changes are handled by the id-scoped effect above; this effect
   // owns the final unmount so an unchanged selected id cannot skip disposal.
@@ -3557,7 +3722,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // Load model list
   useEffect(() => {
     const controller = new AbortController();
-    loadModels(controller.signal).catch((e) => {
+    loadModels(controller.signal, (modelsRefreshKey ?? 0) > 0).catch((e) => {
       if (e instanceof DOMException && e.name === "AbortError") return;
     });
     return () => controller.abort();
@@ -3599,7 +3764,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   return {
     // State
-    data, loading, error, sessionReadiness, runtimeError, runtimeReady, activeLeafId, messages, entryIds, streamState,
+    data, loading, error, sessionReadiness, runtimeError, runtimeReady, activeLeafId, messages, replicaPreview, entryIds, streamState,
     agentRunning, modelNames, modelList, modelsLoading, modelError, modelThinkingLevels, modelThinkingLevelMaps, newSessionModel, toolPreset, thinkingLevel, fastModeEnabled, fastModeActive, autoRetryEnabled, interruptMode, autoCompactionEnabled, steeringMode, followUpMode,
     liveModelMeta,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,

@@ -35,6 +35,53 @@ test("settings tabs remain enabled and expose one keyboard-focusable active tab"
   assert.match(html, /id="settings-tab-providers"[^>]*aria-selected="true"[^>]*tabindex="0"/);
 });
 
+test("settings tabs maintain >=44px minimum touch target across layouts", () => {
+  const verticalHtml = renderToStaticMarkup(React.createElement(SettingsTabs, {
+    active: "general",
+    onSelect: () => {},
+    layout: "vertical",
+  }));
+  assert.match(verticalHtml, /min-height:var\(--control-touch,\s*44px\)/);
+
+  const horizontalHtml = renderToStaticMarkup(React.createElement(SettingsTabs, {
+    active: "general",
+    onSelect: () => {},
+    layout: "horizontal",
+  }));
+  assert.match(horizontalHtml, /min-height:var\(--control-touch,\s*44px\)/);
+
+  const extHtml = renderToStaticMarkup(React.createElement(ExtensionsTabs, {
+    active: "tools",
+    onSelect: () => {},
+  }));
+  assert.match(extHtml, /min-height:var\(--control-touch,\s*44px\)/);
+});
+
+test("settings tabs share unified selected background and accent border across layouts", () => {
+  const verticalHtml = renderToStaticMarkup(React.createElement(SettingsTabs, {
+    active: "safety",
+    onSelect: () => {},
+    layout: "vertical",
+  }));
+  assert.match(verticalHtml, /id="settings-tab-safety"[^>]*aria-selected="true"[^>]*style="[^"]*background:var\(--bg-selected\)/);
+  assert.match(verticalHtml, /id="settings-tab-safety"[^>]*aria-selected="true"[^>]*style="[^"]*border:1px solid var\(--accent\)/);
+
+  const horizontalHtml = renderToStaticMarkup(React.createElement(SettingsTabs, {
+    active: "safety",
+    onSelect: () => {},
+    layout: "horizontal",
+  }));
+  assert.match(horizontalHtml, /id="settings-tab-safety"[^>]*aria-selected="true"[^>]*style="[^"]*background:var\(--bg-selected\)/);
+  assert.match(horizontalHtml, /id="settings-tab-safety"[^>]*aria-selected="true"[^>]*style="[^"]*border:1px solid var\(--accent\)/);
+
+  const extHtml = renderToStaticMarkup(React.createElement(ExtensionsTabs, {
+    active: "skills",
+    onSelect: () => {},
+  }));
+  assert.match(extHtml, /id="settings-extension-tab-skills"[^>]*aria-selected="true"[^>]*style="[^"]*background:var\(--bg-selected\)/);
+  assert.match(extHtml, /id="settings-extension-tab-skills"[^>]*aria-selected="true"[^>]*style="[^"]*border:1px solid var\(--accent\)/);
+});
+
 test("extension deep links select the single Extensions & Tools category", () => {
   assert.equal(getNormalizedActive("tools"), "extensions");
   assert.equal(getNormalizedActive("mcp"), "extensions");

@@ -1,10 +1,15 @@
 "use client";
 
-import { Children, cloneElement, isValidElement, useMemo, type ComponentProps, type MouseEvent, type ReactElement, type ReactNode } from "react";
+import { Children, cloneElement, isValidElement, memo, useMemo, type ComponentProps, type MouseEvent, type ReactElement, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import type { Options as ReactMarkdownOptions } from "react-markdown";
 import { resolveLocalFileHref } from "@/lib/file-links";
 import { encodeFilePathForApi } from "@/lib/file-paths";
-import { normalizeDisplayMath, useMarkdownPlugins } from "../lib/markdown";
+import {
+  normalizeDisplayMath,
+  splitStableMarkdownPrefix,
+  useMarkdownPlugins,
+} from "../lib/markdown";
 import { markdownCodeRenderer } from "./MarkdownCode";
 import { ClickableImage } from "./ImageLightbox";
 
@@ -16,9 +21,41 @@ interface MarkdownBodyProps {
   onOpenFile?: (filePath: string) => void;
 }
 
+const MarkdownSegment = memo(function MarkdownSegment({
+  markdown,
+  remarkPlugins,
+  rehypePlugins,
+  components,
+}: {
+  markdown: string;
+  remarkPlugins: NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
+  rehypePlugins: NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
+  components: Components;
+}) {
+  const normalizedMarkdown = useMemo(() => {
+    if (!markdown) return markdown;
+    return normalizeDisplayMath(markdown);
+  }, [markdown]);
+
+  if (!markdown) return null;
+
+  return (
+    <ReactMarkdown
+      remarkPlugins={remarkPlugins}
+      rehypePlugins={rehypePlugins}
+      components={components}
+    >
+      {normalizedMarkdown}
+    </ReactMarkdown>
+  );
+});
+
 export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile }: MarkdownBodyProps) {
-  const normalizedMarkdown = useMemo(() => normalizeDisplayMath(children), [children]);
-  const { remarkPlugins, rehypePlugins } = useMarkdownPlugins(normalizedMarkdown);
+  const streamingSplit = useMemo(
+    () => (isStreaming ? splitStableMarkdownPrefix(children) : null),
+    [children, isStreaming],
+  );
+  const { remarkPlugins, rehypePlugins } = useMarkdownPlugins(children);
 
   // Rebuilt only when its captured props change, not on every render.
   const components = useMemo<Components>(() => {
@@ -126,13 +163,30 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
 
   return (
     <div className={["markdown-body", className].filter(Boolean).join(" ")}>
-      <ReactMarkdown
-        remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins}
-        components={components}
-      >
-        {normalizedMarkdown}
-      </ReactMarkdown>
+      {streamingSplit ? (
+        <>
+          <MarkdownSegment
+            markdown={streamingSplit.stable}
+            remarkPlugins={remarkPlugins}
+            rehypePlugins={rehypePlugins}
+            components={components}
+          />
+          {streamingSplit.stable && streamingSplit.tail ? "\n" : null}
+          <MarkdownSegment
+            markdown={streamingSplit.tail}
+            remarkPlugins={remarkPlugins}
+            rehypePlugins={rehypePlugins}
+            components={components}
+          />
+        </>
+      ) : (
+        <MarkdownSegment
+          markdown={children}
+          remarkPlugins={remarkPlugins}
+          rehypePlugins={rehypePlugins}
+          components={components}
+        />
+      )}
     </div>
   );
 }

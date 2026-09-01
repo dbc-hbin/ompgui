@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, forwardRef, memo, KeyboardEvent } from "react";
-import { ChevronDown, ListChecks, Search, Sparkles, Target } from "lucide-react";
+import { Check, ChevronDown, ListChecks, Search, Sparkles, Target } from "lucide-react";
+import { MobileSheet } from "@/components/ui/mobile-sheet";
 import {
   getSubmitDuringRunBehavior,
   subscribeSubmitDuringRunBehavior,
@@ -301,12 +302,12 @@ function QueuedActionButton({
         flexShrink: 0,
         padding: "4px 8px", minHeight: 24,
         border: "none",
-        borderRadius: 6,
+        borderRadius: "var(--radius-control)",
         background: "transparent",
         color: accent ? "var(--accent)" : "var(--text-dim)",
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.5 : 1,
-        fontSize: 11,
+        fontSize: "var(--text-sm)",
         fontWeight: accent ? 600 : 400,
         transition: "background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm)",
       }}
@@ -342,7 +343,7 @@ export function ModelErrorBanner({ error }: { error?: string | null }) {
         borderRadius: "var(--radius-control)",
         background: "color-mix(in srgb, var(--status-error) 8%, transparent)",
         color: "var(--status-error)",
-        fontSize: 11,
+        fontSize: "var(--text-sm)",
         lineHeight: 1.45,
       }}
     >
@@ -403,16 +404,16 @@ function ComposerModeStatus({ goal, plan }: { goal?: ActiveGoal | null; plan?: A
           }}
         >
           <Target size={14} strokeWidth={2} style={{ flexShrink: 0, marginTop: expanded ? 1 : 0, color: "var(--accent)" }} aria-hidden="true" />
-          <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10, fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+          <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
             {t("chatInput.goalActive")} · {formatGoalElapsed(now - goal.startedAt)}
           </span>
-          <span style={{ minWidth: 0, flex: 1, overflow: expanded ? "visible" : "hidden", textOverflow: expanded ? undefined : "ellipsis", whiteSpace: expanded ? "pre-wrap" : "nowrap", fontSize: 12, lineHeight: 1.4 }}>
+          <span style={{ minWidth: 0, flex: 1, overflow: expanded ? "visible" : "hidden", textOverflow: expanded ? undefined : "ellipsis", whiteSpace: expanded ? "pre-wrap" : "nowrap", fontSize: "var(--text-sm)", lineHeight: 1.4 }}>
             {goal.objective}
           </span>
         </button>
       )}
       {plan && (
-        <div role="status" aria-live="polite" style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", color: "var(--text-muted)", fontSize: 12 }}>
+        <div role="status" aria-live="polite" style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
           <ListChecks size={14} strokeWidth={2} style={{ flexShrink: 0, color: "var(--accent)" }} aria-hidden="true" />
           <span style={{ fontWeight: 600 }}>{t("chatInput.planningInProgress")}</span>
           <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-dim)" }}>{plan.objective}</span>
@@ -1543,9 +1544,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         flexShrink: 0,
         background: "transparent",
         paddingTop: 0,
-        paddingBottom: "calc(8px + env(safe-area-inset-bottom))",
-        paddingLeft: CHAT_BASE_HORIZONTAL_PADDING,
-        paddingRight: CHAT_BASE_HORIZONTAL_PADDING,
+        paddingBottom: "calc(8px + env(safe-area-inset-bottom, 0px))",
+        paddingLeft: `max(${CHAT_BASE_HORIZONTAL_PADDING}px, env(safe-area-inset-left, 0px))`,
+        paddingRight: `max(${CHAT_BASE_HORIZONTAL_PADDING}px, env(safe-area-inset-right, 0px))`,
       }}
     >
       {/* Hidden file input */}
@@ -1573,7 +1574,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
           <div style={{
             marginBottom: 8, padding: "5px 10px",
             background: "color-mix(in srgb, var(--status-warning) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--status-warning) 25%, transparent)",
-            borderRadius: 6, fontSize: 12, color: "var(--status-warning)",
+            borderRadius: "var(--radius-control)", fontSize: "var(--text-sm)", color: "var(--status-warning)",
             display: "flex", alignItems: "center", gap: 6,
           }}>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
@@ -1589,11 +1590,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 style={{
                   marginLeft: "auto",
                   padding: "3px 9px",
-                  fontSize: 11,
+                  fontSize: "var(--text-xs)",
                   color: "var(--status-warning)",
                   background: "transparent",
                   border: "1px solid color-mix(in srgb, var(--status-warning) 45%, transparent)",
-                  borderRadius: 6,
+                  borderRadius: "var(--radius-control)",
                   cursor: "pointer",
                   whiteSpace: "nowrap",
                   transition: "background var(--dur-fast) var(--ease-out-warm)",
@@ -1610,7 +1611,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
           <div style={{
             marginBottom: 8, padding: "5px 10px",
             background: "color-mix(in srgb, var(--status-success) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--status-success) 24%, transparent)",
-            borderRadius: 6, fontSize: 12, color: "var(--status-success)",
+            borderRadius: "var(--radius-control)", fontSize: "var(--text-sm)", color: "var(--status-success)",
             display: "flex", alignItems: "center", gap: 6,
           }}>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
@@ -1624,7 +1625,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
           <div role="alert" style={{
             marginBottom: 8, padding: "5px 10px",
             background: "color-mix(in srgb, var(--status-error) 7%, transparent)", border: "1px solid color-mix(in srgb, var(--status-error) 30%, transparent)",
-            borderRadius: 6, fontSize: 12, color: "var(--status-error)",
+            borderRadius: "var(--radius-control)", fontSize: "var(--text-sm)", color: "var(--status-error)",
           }}>
             {attachError}
           </div>
@@ -1637,7 +1638,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 <img
                   src={img.previewUrl}
                   alt=""
-                  style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)", display: "block" }}
+                  style={{ width: 56, height: 56, objectFit: "cover", borderRadius: "var(--radius-control)", border: "1px solid var(--border)", display: "block" }}
                 />
                 <button
                   onClick={() => removeImage(i)}
@@ -1673,9 +1674,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   maxWidth: 260, height: 30,
                   padding: "0 6px 0 9px",
                   border: "1px solid var(--border)",
-                  borderRadius: 6,
+                  borderRadius: "var(--radius-control)",
                   background: "var(--bg-panel)",
-                  fontSize: 12,
+                  fontSize: "var(--text-sm)",
                   color: "var(--text)",
                 }}
               >
@@ -1689,12 +1690,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   title={file.name}
                   style={{
                     minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    fontFamily: "var(--font-mono)", fontSize: 11.5,
+                    fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)",
                   }}
                 >
                   {file.name}
                 </span>
-                <span style={{ flexShrink: 0, fontSize: 10, color: "var(--text-dim)" }}>
+                <span style={{ flexShrink: 0, fontSize: "var(--text-xs)", color: "var(--text-dim)" }}>
                   {file.size < 1024 ? `${file.size} B` : `${Math.round(file.size / 1024)} KB`}
                 </span>
                 <button
@@ -1724,7 +1725,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
         {/* Main input */}
         <div style={{ position: "relative" }}>
-          {historyMenuOpen && inputHistory.length > 0 && (
+          {historyMenuOpen && !isMobile && inputHistory.length > 0 && (
             <div
               ref={historyMenuRef}
               className="dropdown-surface"
@@ -1786,16 +1787,16 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                         gap: 8,
                         padding: "7px 8px",
                         border: "none",
-                        borderRadius: 6,
+                        borderRadius: "var(--radius-control)",
                         background: active ? "var(--bg-selected)" : "none",
                         color: "var(--text)",
                         cursor: "pointer",
                         textAlign: "left",
-                        fontSize: 12.5,
+                        fontSize: "var(--text-base)",
                         lineHeight: 1.45,
                       }}
                     >
-                      <span style={{ flexShrink: 0, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-dim)", paddingTop: 1 }}>
+                      <span style={{ flexShrink: 0, fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", color: "var(--text-dim)", paddingTop: 1 }}>
                         {index + 1}
                       </span>
                       <span style={{ minWidth: 0, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflow: "hidden", overflowWrap: "anywhere" }}>
@@ -1807,7 +1808,52 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               </div>
             </div>
           )}
-          {slashMenuOpen && slashQuery !== null && (
+          {historyMenuOpen && isMobile && inputHistory.length > 0 && (
+            <MobileSheet
+              open={historyMenuOpen}
+              onClose={() => setHistoryMenuOpen(false)}
+              title={t("chatInput.inputHistory")}
+              maxHeight="min(65dvh, 480px)"
+            >
+              <div style={{ padding: "var(--space-2) var(--space-3)" }}>
+                {inputHistory.map((item, index) => (
+                  <button
+                    key={`${index}:${item}`}
+                    type="button"
+                    onClick={() => {
+                      applyHistoryInput(item);
+                      setHistoryMenuOpen(false);
+                    }}
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: 12,
+                      minHeight: 48,
+                      padding: "10px 12px",
+                      border: "none",
+                      borderRadius: "var(--radius-control)",
+                      background: "transparent",
+                      color: "var(--text)",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      fontSize: "var(--text-base)",
+                      lineHeight: 1.45,
+                      touchAction: "manipulation",
+                    }}
+                  >
+                    <span style={{ flexShrink: 0, fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", color: "var(--text-dim)", paddingTop: 2 }}>
+                      {index + 1}
+                    </span>
+                    <span style={{ minWidth: 0, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflow: "hidden", overflowWrap: "anywhere" }}>
+                      {item}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </MobileSheet>
+          )}
+          {slashMenuOpen && slashQuery !== null && !isMobile && (
             <div
               className="dropdown-surface"
               style={{
@@ -1827,7 +1873,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   alignItems: "center",
                   justifyContent: "space-between",
                   gap: 8,
-                  fontSize: 11,
+                  fontSize: "var(--text-sm)",
                   color: "var(--text-dim)",
                 }}
               >
@@ -1836,7 +1882,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               </div>
               <div style={{ maxHeight: "calc(min(56vh, 460px) - 34px)", overflowY: "auto", padding: 10 }}>
                 {!slashCommandsLoading && filteredSlashCommands.length === 0 ? (
-                  <div style={{ padding: "2px 2px 4px", fontSize: 12, color: "var(--text-dim)" }}>
+                  <div style={{ padding: "2px 2px 4px", fontSize: "var(--text-sm)", color: "var(--text-dim)" }}>
                     {t("chatInput.noCommandsFound")}
                   </div>
                 ) : (
@@ -1854,7 +1900,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                           padding: "4px 0 6px",
                           background: "var(--bg)",
                           color: "var(--text-dim)",
-                          fontSize: 10,
+                          fontSize: "var(--text-xs)",
                           fontWeight: 600,
                           textTransform: "uppercase",
                         }}
@@ -1894,7 +1940,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                                 justifyContent: "center",
                                 padding: "9px 10px",
                                 border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
-                                borderRadius: 7,
+                                borderRadius: "var(--radius-control)",
                                 background: active ? "var(--bg-selected)" : "var(--bg-panel)",
                                 color: dormant ? "var(--text-dim)" : "var(--text)",
                                 cursor: "pointer",
@@ -1903,16 +1949,16 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                               }}
                             >
                               <span style={{
-                                fontSize: 13,
+                                fontSize: "var(--text-base)",
                                 fontFamily: "var(--font-mono)",
                                 overflowWrap: "anywhere",
                                 wordBreak: "break-word",
                               }}>
                                 /{command.name}
                                 {command.argumentHint && (
-                                  <span style={{ marginLeft: 6, fontSize: 10, color: "var(--text-dim)" }}>{command.argumentHint}</span>
+                                  <span style={{ marginLeft: 6, fontSize: "var(--text-xs)", color: "var(--text-dim)" }}>{command.argumentHint}</span>
                                 )}
-                                {dormant && <span style={{ marginLeft: 6, fontSize: 10, color: "var(--text-dim)" }}>{t("chatInput.dormant")}</span>}
+                                {dormant && <span style={{ marginLeft: 6, fontSize: "var(--text-xs)", color: "var(--text-dim)" }}>{t("chatInput.dormant")}</span>}
                               </span>
                               {command.description && (
                                 <span style={{
@@ -1920,7 +1966,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                                   WebkitBoxOrient: "vertical",
                                   WebkitLineClamp: 2,
                                   overflow: "hidden",
-                                  fontSize: 11,
+                                  fontSize: "var(--text-sm)",
                                   lineHeight: 1.35,
                                   color: "var(--text-dim)",
                                 }}>
@@ -1937,7 +1983,91 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               </div>
             </div>
           )}
-          {atMenuOpen && atQuery !== null && (() => {
+          {slashMenuOpen && slashQuery !== null && isMobile && (
+            <MobileSheet
+              open={slashMenuOpen}
+              onClose={() => setSlashMenuOpen(false)}
+              title={slashCommandsLoading ? t("chatInput.loadingCommands") : t("chatInput.slashCommandsHeader", { countLabel: slashCommandCountLabel })}
+              maxHeight="min(75dvh, 520px)"
+            >
+              <div style={{ padding: "var(--space-2) var(--space-3)" }}>
+                {!slashCommandsLoading && filteredSlashCommands.length === 0 ? (
+                  <div style={{ padding: "16px var(--space-4)", fontSize: "var(--text-base)", color: "var(--text-dim)", textAlign: "center" }}>
+                    {t("chatInput.noCommandsFound")}
+                  </div>
+                ) : (
+                  groupedSlashCommands.map((group) => (
+                    <section key={group.source} style={{ marginBottom: 12 }}>
+                      <div
+                        style={{
+                          position: "sticky",
+                          top: 0,
+                          zIndex: 1,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "6px var(--space-2)",
+                          background: "var(--bg)",
+                          color: "var(--text-dim)",
+                          fontSize: "var(--text-sm)",
+                          fontWeight: 600,
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        <span>{t(SLASH_SOURCE_GROUP_LABEL_KEYS[group.source])}</span>
+                        <span style={{ fontFamily: "var(--font-mono)", fontWeight: 500 }}>{group.items.length}</span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {group.items.map(({ command }) => {
+                          const dormant = isDormantSkillCommand(command, dormantSkillNames);
+                          return (
+                            <button
+                              key={`${command.source}:${command.name}`}
+                              type="button"
+                              onClick={() => {
+                                applySlashCommand(command);
+                                setSlashMenuOpen(false);
+                              }}
+                              style={{
+                                width: "100%",
+                                minHeight: 52,
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: 4,
+                                justifyContent: "center",
+                                padding: "10px 12px",
+                                border: "1px solid var(--border)",
+                                borderRadius: "var(--radius-control)",
+                                background: "var(--bg-panel)",
+                                color: dormant ? "var(--text-dim)" : "var(--text)",
+                                cursor: "pointer",
+                                textAlign: "left",
+                                touchAction: "manipulation",
+                              }}
+                            >
+                              <span style={{ fontSize: "var(--text-base)", fontFamily: "var(--font-mono)", fontWeight: 600 }}>
+                                /{command.name}
+                                {command.argumentHint && (
+                                  <span style={{ marginLeft: 6, fontSize: "var(--text-sm)", color: "var(--text-dim)", fontWeight: 400 }}>{command.argumentHint}</span>
+                                )}
+                                {dormant && <span style={{ marginLeft: 6, fontSize: "var(--text-sm)", color: "var(--text-dim)", fontWeight: 400 }}>{t("chatInput.dormant")}</span>}
+                              </span>
+                              {command.description && (
+                                <span style={{ fontSize: "var(--text-sm)", lineHeight: 1.35, color: "var(--text-dim)", display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflow: "hidden" }}>
+                                  {command.description}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))
+                )}
+              </div>
+            </MobileSheet>
+          )}
+          {atMenuOpen && atQuery !== null && !isMobile && (() => {
             const indexLoading = fileIndexLoading && (!fileIndex || fileIndex.cwd !== cwd);
             const matchCountLabel = tn("chatInput.matchCount", atMatches.length);
             // With a truncated index, local results are provisional — the
@@ -1965,7 +2095,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                     alignItems: "center",
                     justifyContent: "space-between",
                     gap: 8,
-                    fontSize: 11,
+                    fontSize: "var(--text-sm)",
                     color: "var(--text-dim)",
                   }}
                 >
@@ -1978,7 +2108,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 </div>
                 <div style={{ maxHeight: "calc(min(48vh, 400px) - 34px)", overflowY: "auto", padding: 4 }}>
                   {!indexLoading && atMatches.length === 0 ? (
-                    <div style={{ padding: "6px 8px", fontSize: 12, color: "var(--text-dim)" }}>
+                    <div style={{ padding: "6px 8px", fontSize: "var(--text-sm)", color: "var(--text-dim)" }}>
                       {needsServerSearch && !serverResultInUse ? t("chatInput.searching") : t("chatInput.noMatchingFiles")}
                     </div>
                   ) : (
@@ -2005,12 +2135,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                             gap: 8,
                             padding: "6px 8px",
                             border: "none",
-                            borderRadius: 6,
+                            borderRadius: "var(--radius-control)",
                             background: active ? "var(--bg-selected)" : "none",
                             color: "var(--text)",
                             cursor: "pointer",
                             textAlign: "left",
-                            fontSize: 12.5,
+                            fontSize: "var(--text-base)",
                             fontFamily: "var(--font-mono)",
                           }}
                         >
@@ -2030,6 +2160,70 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               </div>
             );
           })()}
+          {atMenuOpen && atQuery !== null && isMobile && (() => {
+            const indexLoading = fileIndexLoading && (!fileIndex || fileIndex.cwd !== cwd);
+            const matchCountLabel = tn("chatInput.matchCount", atMatches.length);
+            const truncatedHint = fileIndex?.truncated && !serverResultInUse
+              ? ` · ${atQuery.query ? t("chatInput.searchingAllFiles") : t("chatInput.indexTruncated")}`
+              : "";
+            return (
+              <MobileSheet
+                open={atMenuOpen}
+                onClose={() => setAtMenuOpen(false)}
+                title={indexLoading ? t("chatInput.loadingFiles") : `${t("chatInput.filesHeader", { countLabel: matchCountLabel })}${truncatedHint}`}
+                maxHeight="min(75dvh, 520px)"
+              >
+                <div style={{ padding: "var(--space-2) var(--space-3)" }}>
+                  {!indexLoading && atMatches.length === 0 ? (
+                    <div style={{ padding: "16px var(--space-4)", fontSize: "var(--text-base)", color: "var(--text-dim)", textAlign: "center" }}>
+                      {needsServerSearch && !serverResultInUse ? t("chatInput.searching") : t("chatInput.noMatchingFiles")}
+                    </div>
+                  ) : (
+                    atMatches.map((entry) => {
+                      const name = entry.path.split("/").pop() ?? entry.path;
+                      const dirPrefix = entry.path.slice(0, entry.path.length - name.length);
+                      return (
+                        <button
+                          key={`${entry.isDir ? "d" : "f"}:${entry.path}`}
+                          type="button"
+                          onClick={() => {
+                            applyAtCompletion(entry);
+                            setAtMenuOpen(false);
+                          }}
+                          style={{
+                            width: "100%",
+                            minHeight: 48,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: "10px 12px",
+                            border: "none",
+                            borderRadius: "var(--radius-control)",
+                            background: "transparent",
+                            color: "var(--text)",
+                            cursor: "pointer",
+                            textAlign: "left",
+                            fontSize: "var(--text-base)",
+                            fontFamily: "var(--font-mono)",
+                            touchAction: "manipulation",
+                          }}
+                        >
+                          <span style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
+                            {entry.isDir ? <FolderIcon size={16} /> : getFileIcon(name, 16)}
+                          </span>
+                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {dirPrefix && <span style={{ color: "var(--text-dim)" }}>{dirPrefix}</span>}
+                            {name}
+                            {entry.isDir && <span style={{ color: "var(--text-dim)" }}>/</span>}
+                          </span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </MobileSheet>
+            );
+          })()}
         {/* Queued follow-up bar — thin strip attached to the composer's top
             edge. Hidden entirely when nothing is queued. */}
         {firstQueued && (
@@ -2046,7 +2240,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
           }}>
             <span style={{
               flexShrink: 0,
-              fontSize: 10,
+              fontSize: "var(--text-xs)",
               fontWeight: 600,
               letterSpacing: "0.06em",
               textTransform: "uppercase",
@@ -2063,7 +2257,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
-                fontSize: 12,
+                fontSize: "var(--text-sm)",
                 color: "var(--text-muted)",
               }}
             >
@@ -2120,6 +2314,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             readOnly={!runtimeReady}
             placeholder={t("chatInput.placeholder")}
             rows={1}
+            className="chat-input-textarea"
             style={{
               width: "100%",
               background: "none",
@@ -2127,7 +2322,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               outline: "none",
               resize: "none",
               color: "var(--text)",
-              fontSize: 14,
+              fontSize: isMobile ? 16 : "var(--text-base)",
               lineHeight: 1.6,
               fontFamily: "inherit",
               minHeight: 24,
@@ -2210,31 +2405,121 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   </span>
                   <ChevronDown size={12} strokeWidth={1.8} style={{ flexShrink: 0, opacity: 0.7 }} aria-hidden="true" />
                 </button>
-                {modelDropdownOpen && modelDropdownRect && (() => {
+                {modelDropdownOpen && !isMobile && modelDropdownRect && (() => {
                   const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
                   const bottom = viewportHeight - modelDropdownRect.top + 6;
                   const maxH = Math.max(120, Math.min(modelDropdownRect.top - 8, viewportHeight * 0.6));
-                  const panelPos: React.CSSProperties = isMobile
-                    ? { left: 8, right: 8, maxWidth: "calc(100vw - 16px)" }
-                    : { left: modelDropdownRect.left, width: "max-content", minWidth: modelDropdownRect.width, maxWidth: "calc(100vw - 16px)" };
                   return (
                     <div ref={modelDropdownPanelRef} className="dropdown-surface" style={{
-                    position: "fixed",
-                    bottom,
-                    ...panelPos,
-                    zIndex: 500,
-                    display: "flex", flexDirection: "column",
-                    overflow: "hidden", maxHeight: maxH,
+                      position: "fixed",
+                      bottom,
+                      left: modelDropdownRect.left,
+                      width: "max-content",
+                      minWidth: modelDropdownRect.width,
+                      maxWidth: "calc(100vw - 16px)",
+                      zIndex: 500,
+                      display: "flex", flexDirection: "column",
+                      overflow: "hidden", maxHeight: maxH,
                     }}>
-                    <div style={{ padding: "8px 8px 6px", flexShrink: 0 }}>
+                      <div style={{ padding: "8px 8px 6px", flexShrink: 0 }}>
+                        <div style={{
+                          display: "flex", alignItems: "center", gap: 8,
+                          padding: "6px 10px",
+                          background: "var(--bg)",
+                          border: "1px solid var(--border)",
+                          borderRadius: "var(--radius-control)",
+                        }}>
+                          <Search size={13} strokeWidth={1.8} color="var(--text-dim)" aria-hidden="true" />
+                          <input
+                            ref={modelSearchInputRef}
+                            type="search"
+                            autoComplete="off"
+                            spellCheck={false}
+                            value={modelSearchQuery}
+                            onChange={(e) => setModelSearchQuery(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") {
+                                e.preventDefault();
+                                setModelDropdownOpen(false);
+                              }
+                            }}
+                            placeholder={t("chatInput.searchModels")}
+                            aria-label={t("chatInput.searchModels")}
+                            style={{
+                              flex: 1, background: "none", border: "none", outline: "none",
+                              color: "var(--text)", fontSize: "var(--text-md)", boxSizing: "border-box", minWidth: 0,
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div style={{ overflowY: "auto", minHeight: 0, paddingBottom: 4 }}>
+                        {modelsByProvider.length === 0 ? (
+                          <div style={{ padding: "8px 12px", color: "var(--text-dim)", fontSize: "var(--text-sm)", whiteSpace: "nowrap" }}>
+                            {modelSearchQuery.trim() ? t("chatInput.noMatchingModels") : showModelsLoading ? t("chatInput.loadingModels") : t("chatInput.noAvailableModels")}
+                          </div>
+                        ) : modelsByProvider.map((group, gi) => (
+                          <div key={group.provider}>
+                            {(modelsByProvider.length > 1) && (
+                              <div style={{
+                                padding: "6px 12px 4px",
+                                fontSize: "var(--text-xs)", fontWeight: 600, color: "var(--text-dim)",
+                                textTransform: "uppercase", letterSpacing: "0.07em",
+                                borderTop: gi > 0 ? "1px solid var(--border)" : "none",
+                              }}>
+                                {group.provider}
+                              </div>
+                            )}
+                            {group.options.map((opt) => {
+                              const isActive = opt.modelId === model?.modelId && opt.provider === model?.provider;
+                              return (
+                                <button
+                                  className="dropdown-item"
+                                  key={`${opt.provider}:${opt.modelId}`}
+                                  onClick={() => { setModelDropdownOpen(false); if (runtimeReady && (!isActive || isAutoModelSelection)) onModelChange(opt.provider, opt.modelId); }}
+                                  disabled={!runtimeReady}
+                                  style={{
+                                    display: "flex", alignItems: "center", gap: 8,
+                                    width: "100%", padding: "7px 12px",
+                                    background: isActive ? "var(--bg-selected)" : "transparent",
+                                    border: "none",
+                                    color: isActive ? "var(--text)" : "var(--text-muted)",
+                                    cursor: "pointer", fontSize: "var(--text-sm)", textAlign: "left",
+                                    fontWeight: isActive ? 600 : 400,
+                                    whiteSpace: "nowrap",
+                                  }}
+                                  onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                                  onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
+                                >
+                                  {isActive
+                                    ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
+                                    : <span style={{ width: 10, flexShrink: 0 }} />}
+                                  <span className="model-option-name" title={opt.name} style={{ flex: 1, minWidth: 0 }}>{opt.name}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+                {modelDropdownOpen && isMobile && (
+                  <MobileSheet
+                    open={modelDropdownOpen}
+                    onClose={() => setModelDropdownOpen(false)}
+                    title={t("chatInput.selectModel")}
+                    maxHeight="min(82dvh, 600px)"
+                  >
+                    <div style={{ padding: "8px var(--space-4) 10px", flexShrink: 0, borderBottom: "1px solid var(--border)" }}>
                       <div style={{
                         display: "flex", alignItems: "center", gap: 8,
-                        padding: "6px 10px",
-                        background: "var(--bg)",
+                        padding: "8px 12px",
+                        background: "var(--bg-panel)",
                         border: "1px solid var(--border)",
                         borderRadius: "var(--radius-control)",
+                        minHeight: 44,
                       }}>
-                        <Search size={13} strokeWidth={1.8} color="var(--text-dim)" aria-hidden="true" />
+                        <Search size={16} strokeWidth={1.8} color="var(--text-dim)" aria-hidden="true" />
                         <input
                           ref={modelSearchInputRef}
                           type="search"
@@ -2242,72 +2527,75 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                           spellCheck={false}
                           value={modelSearchQuery}
                           onChange={(e) => setModelSearchQuery(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Escape") {
-                              e.preventDefault();
-                              setModelDropdownOpen(false);
-                            }
-                          }}
                           placeholder={t("chatInput.searchModels")}
                           aria-label={t("chatInput.searchModels")}
                           style={{
                             flex: 1, background: "none", border: "none", outline: "none",
-                            color: "var(--text)", fontSize: 13, boxSizing: "border-box", minWidth: 0,
+                            color: "var(--text)", fontSize: 16, boxSizing: "border-box", minWidth: 0,
+                            touchAction: "manipulation",
                           }}
                         />
                       </div>
                     </div>
-                    <div style={{ overflowY: "auto", minHeight: 0, paddingBottom: 4 }}>
-                    {modelsByProvider.length === 0 ? (
-                      <div style={{ padding: "8px 12px", color: "var(--text-dim)", fontSize: 12, whiteSpace: "nowrap" }}>
-                        {modelSearchQuery.trim() ? t("chatInput.noMatchingModels") : showModelsLoading ? t("chatInput.loadingModels") : t("chatInput.noAvailableModels")}
-                      </div>
-                    ) : modelsByProvider.map((group, gi) => (
-                      <div key={group.provider}>
-                        {(modelsByProvider.length > 1) && (
-                          <div style={{
-                            padding: "6px 12px 4px",
-                            fontSize: 10, fontWeight: 600, color: "var(--text-dim)",
-                            textTransform: "uppercase", letterSpacing: "0.07em",
-                            borderTop: gi > 0 ? "1px solid var(--border)" : "none",
-                          }}>
-                            {group.provider}
+                    <div style={{ overflowY: "auto", minHeight: 0, padding: "var(--space-2) var(--space-3)" }}>
+                      {modelsByProvider.length === 0 ? (
+                        <div style={{ padding: "16px var(--space-4)", color: "var(--text-dim)", fontSize: "var(--text-base)", textAlign: "center" }}>
+                          {modelSearchQuery.trim() ? t("chatInput.noMatchingModels") : showModelsLoading ? t("chatInput.loadingModels") : t("chatInput.noAvailableModels")}
+                        </div>
+                      ) : modelsByProvider.map((group, gi) => (
+                        <div key={group.provider} style={{ marginBottom: 12 }}>
+                          {modelsByProvider.length > 1 && (
+                            <div style={{
+                              padding: "6px var(--space-2)",
+                              fontSize: "var(--text-sm)", fontWeight: 600, color: "var(--text-dim)",
+                              textTransform: "uppercase", letterSpacing: "0.07em",
+                              borderTop: gi > 0 ? "1px solid var(--border)" : "none",
+                            }}>
+                              {group.provider}
+                            </div>
+                          )}
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            {group.options.map((opt) => {
+                              const isActive = opt.modelId === model?.modelId && opt.provider === model?.provider;
+                              return (
+                                <button
+                                  key={`${opt.provider}:${opt.modelId}`}
+                                  type="button"
+                                  onClick={() => {
+                                    setModelDropdownOpen(false);
+                                    if (runtimeReady && (!isActive || isAutoModelSelection)) onModelChange(opt.provider, opt.modelId);
+                                  }}
+                                  disabled={!runtimeReady}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    gap: 12,
+                                    minHeight: 48,
+                                    padding: "10px 12px",
+                                    borderRadius: "var(--radius-control)",
+                                    background: isActive ? "var(--bg-selected)" : "transparent",
+                                    border: "none",
+                                    color: "var(--text)",
+                                    cursor: "pointer",
+                                    textAlign: "left",
+                                    touchAction: "manipulation",
+                                  }}
+                                >
+                                  <div style={{ minWidth: 0, flex: 1 }}>
+                                    <div style={{ fontSize: "var(--text-base)", fontWeight: isActive ? 600 : 400 }}>{opt.name}</div>
+                                    <div style={{ fontSize: "var(--text-sm)", color: "var(--text-dim)", marginTop: 2 }}>{opt.provider}</div>
+                                  </div>
+                                  {isActive && <Check size={16} color="var(--accent)" style={{ flexShrink: 0 }} />}
+                                </button>
+                              );
+                            })}
                           </div>
-                        )}
-                        {group.options.map((opt) => {
-                          const isActive = opt.modelId === model?.modelId && opt.provider === model?.provider;
-                          return (
-                            <button
-                              className="dropdown-item"
-                              key={`${opt.provider}:${opt.modelId}`}
-                              onClick={() => { setModelDropdownOpen(false); if (runtimeReady && (!isActive || isAutoModelSelection)) onModelChange(opt.provider, opt.modelId); }}
-                              disabled={!runtimeReady}
-                              style={{
-                                display: "flex", alignItems: "center", gap: 8,
-                                width: "100%", padding: "7px 12px",
-                                background: isActive ? "var(--bg-selected)" : "transparent",
-                                border: "none",
-                                color: isActive ? "var(--text)" : "var(--text-muted)",
-                                cursor: "pointer", fontSize: 12, textAlign: "left",
-                                fontWeight: isActive ? 600 : 400,
-                                whiteSpace: "nowrap",
-                              }}
-                              onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "var(--bg-hover)"; }}
-                              onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
-                            >
-                              {isActive
-                                ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
-                                : <span style={{ width: 10, flexShrink: 0 }} />}
-                              <span className="model-option-name" title={opt.name} style={{ flex: 1, minWidth: 0 }}>{opt.name}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ))}
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                  );
-                })()}
+                  </MobileSheet>
+                )}
               </div>
             )}
 
@@ -2344,12 +2632,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   <span style={{ whiteSpace: "nowrap" }}>{thinkingTriggerLabel}</span>
                   <ChevronDown size={12} strokeWidth={1.8} style={{ flexShrink: 0, opacity: 0.7 }} aria-hidden="true" />
                 </button>
-                {thinkingDropdownOpen && (
+                {thinkingDropdownOpen && !isMobile && (
                   <div className="dropdown-surface" style={{
                     position: "absolute",
                     bottom: "calc(100% + 6px)",
-                    left: isMobile ? "auto" : 0,
-                    right: isMobile ? 0 : undefined,
+                    left: 0,
                     zIndex: 100, minWidth: 250, maxWidth: "calc(100vw - 32px)",
                   }}>
                     {thinkingLevelOptions.map((lvl) => {
@@ -2371,7 +2658,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                             background: isActive ? "var(--bg-selected)" : "transparent",
                             border: "none",
                             color: isActive ? "var(--text)" : "var(--text-muted)",
-                            cursor: "pointer", fontSize: 12, textAlign: "left",
+                            cursor: "pointer", fontSize: "var(--text-sm)", textAlign: "left",
                             fontWeight: isActive ? 600 : 400,
                             whiteSpace: "nowrap",
                           }}
@@ -2383,7 +2670,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                             : <span style={{ width: 10, flexShrink: 0 }} />}
                           <span style={{ flexShrink: 0, whiteSpace: "nowrap" }}>{displayLabel}{showOriginal && <span style={{ color: "var(--text-dim)", fontWeight: 400 }}> ({lvl})</span>}</span>
                           {desc && (
-                            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, color: "var(--text-dim)", marginLeft: 8 }}>
+                            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "var(--text-sm)", color: "var(--text-dim)", marginLeft: 8 }}>
                               {desc}
                             </span>
                           )}
@@ -2391,6 +2678,61 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                       );
                     })}
                   </div>
+                )}
+                {thinkingDropdownOpen && isMobile && (
+                  <MobileSheet
+                    open={thinkingDropdownOpen}
+                    onClose={() => setThinkingDropdownOpen(false)}
+                    title={t("chatInput.changeReasoning")}
+                    maxHeight="min(60dvh, 400px)"
+                  >
+                    <div style={{ padding: "var(--space-2) var(--space-3)" }}>
+                      {thinkingLevelOptions.map((lvl) => {
+                        const isActive = (thinkingLevel ?? "auto") === lvl;
+                        const descKey = THINKING_LEVEL_DESC_KEYS[lvl];
+                        const desc = descKey ? t(descKey) : "";
+                        const mappedVal = (lvl !== "auto" && thinkingLevelMap) ? thinkingLevelMap[lvl] : undefined;
+                        const displayLabel = (mappedVal != null && mappedVal !== lvl) ? mappedVal : lvl;
+                        const showOriginal = mappedVal != null && mappedVal !== lvl;
+                        return (
+                          <button
+                            key={lvl}
+                            type="button"
+                            onClick={() => {
+                              setThinkingDropdownOpen(false);
+                              if (runtimeReady && !isActive && !isStreaming) onThinkingLevelChange(lvl);
+                            }}
+                            disabled={!runtimeReady}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 12,
+                              width: "100%",
+                              minHeight: 48,
+                              padding: "10px 14px",
+                              background: isActive ? "var(--bg-selected)" : "transparent",
+                              border: "none",
+                              borderRadius: "var(--radius-control)",
+                              color: isActive ? "var(--text)" : "var(--text-muted)",
+                              cursor: "pointer",
+                              textAlign: "left",
+                              fontSize: "var(--text-base)",
+                              touchAction: "manipulation",
+                            }}
+                          >
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: isActive ? 600 : 400 }}>
+                                <span>{displayLabel}</span>
+                                {showOriginal && <span style={{ fontSize: "var(--text-sm)", color: "var(--text-dim)" }}>({lvl})</span>}
+                              </div>
+                              {desc && <div style={{ fontSize: "var(--text-sm)", color: "var(--text-dim)", marginTop: 2 }}>{desc}</div>}
+                            </div>
+                            {isActive && <Check size={16} color="var(--accent)" style={{ flexShrink: 0 }} />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </MobileSheet>
                 )}
               </div>
             )}

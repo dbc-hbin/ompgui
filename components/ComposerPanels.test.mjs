@@ -8,7 +8,7 @@ const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   tsconfigPaths: true,
 });
-const { ComposerPanels } = await jiti.import("./ComposerPanels.tsx");
+const { ComposerPanels, composerPanelsPropsEqual } = await jiti.import("./ComposerPanels.tsx");
 
 const noop = () => {};
 
@@ -193,5 +193,15 @@ test("zero context tokens never print a null gauge", () => {
   }));
   assert.doesNotMatch(html, /null/);
   assert.match(html, /read/);
+});
+
+test("token-only parent identity changes are not observable panel updates", () => {
+  const todoPhases = [{ name: "Implementation", tasks: [{ content: "Wire panels", status: "in_progress" }] }];
+  const subagents = [{ id: "s1", agent: "scout", status: "started", task: "Map the surface", index: 0 }];
+  const prev = { todoPhases, subagents, onSelectSubagent: noop, defaultExpanded: false };
+  assert.equal(composerPanelsPropsEqual(prev, { ...prev }), true);
+  assert.equal(composerPanelsPropsEqual(prev, { ...prev, subagentEvents: undefined }), true);
+  assert.equal(composerPanelsPropsEqual(prev, { ...prev, todoPhases: [...todoPhases] }), false);
+  assert.equal(composerPanelsPropsEqual(prev, { ...prev, subagents: [...subagents] }), false);
 });
 

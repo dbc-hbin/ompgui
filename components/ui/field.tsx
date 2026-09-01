@@ -1,14 +1,13 @@
 "use client";
 
 /**
- * Warm-paper form field primitives + confirmation dialog.
+ * Warm-paper form field primitives + confirmation dialog + shared button kit.
  *
  * Tokens come from app/globals.css (--bg, --bg-panel, --border, --accent,
  * --accent-strong, --accent-hover, --text, --text-muted, --text-dim,
  * --radius-control, --radius-card, --shadow-card, --shadow-pop, --space-*,
- * --text-*, --control-height-*). No global CSS edits — focus glow + invalid
- * state are implemented inline via React state on focus / blur so we don't need
- * to touch globals.css.
+ * --text-*, --control-height-*, --control-touch). No global CSS edits — focus
+ * glow + invalid state are implemented inline via React state on focus / blur.
  */
 import {
   cloneElement,
@@ -178,7 +177,7 @@ function focusGlowStyle(focused: boolean, invalid: boolean): CSSProperties {
 
 /* ─── Text input ─── */
 
-interface TextInputProps {
+export interface TextInputProps {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
@@ -191,6 +190,9 @@ interface TextInputProps {
   autoComplete?: string;
   spellCheck?: boolean;
   id?: string;
+  name?: string;
+  style?: CSSProperties;
+  className?: string;
 }
 
 export function TextInput({
@@ -206,12 +208,16 @@ export function TextInput({
   autoComplete,
   spellCheck,
   id,
+  name,
+  style,
+  className,
 }: TextInputProps) {
   const [focused, setFocused] = useState(false);
   const isInvalid = Boolean(invalid || error);
   return (
     <input
       id={id}
+      name={name}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
@@ -225,11 +231,13 @@ export function TextInput({
         setFocused(false);
         onBlurValidate?.();
       }}
+      className={className}
       style={{
         ...inputShellStyle({ invalid: isInvalid }),
         ...focusGlowStyle(focused, isInvalid),
         fontFamily: mono ? "var(--font-mono)" : "inherit",
         opacity: disabled ? 0.6 : 1,
+        ...style,
       }}
     />
   );
@@ -237,7 +245,7 @@ export function TextInput({
 
 /* ─── Number input ─── */
 
-interface NumInputProps {
+export interface NumInputProps {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
@@ -246,6 +254,9 @@ interface NumInputProps {
   onBlurValidate?: () => void;
   disabled?: boolean;
   id?: string;
+  name?: string;
+  style?: CSSProperties;
+  className?: string;
 }
 
 export function NumInput({
@@ -257,12 +268,16 @@ export function NumInput({
   onBlurValidate,
   disabled,
   id,
+  name,
+  style,
+  className,
 }: NumInputProps) {
   const [focused, setFocused] = useState(false);
   const isInvalid = Boolean(invalid || error);
   return (
     <input
       id={id}
+      name={name}
       type="number"
       value={value}
       onChange={(e) => onChange(e.target.value)}
@@ -274,10 +289,12 @@ export function NumInput({
         setFocused(false);
         onBlurValidate?.();
       }}
+      className={className}
       style={{
         ...inputShellStyle({ invalid: isInvalid }),
         ...focusGlowStyle(focused, isInvalid),
         opacity: disabled ? 0.6 : 1,
+        ...style,
       }}
     />
   );
@@ -285,7 +302,7 @@ export function NumInput({
 
 /* ─── Secret (password) input with show / hide ─── */
 
-interface SecretInputProps {
+export interface SecretInputProps {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
@@ -293,9 +310,17 @@ interface SecretInputProps {
   error?: string | null;
   onBlurValidate?: () => void;
   disabled?: boolean;
-  showLabel: string;
-  hideLabel: string;
+  showLabel?: string;
+  hideLabel?: string;
   id?: string;
+  name?: string;
+  autoComplete?: string;
+  autoFocus?: boolean;
+  required?: boolean;
+  onKeyDown?: KeyboardEventHandler<HTMLInputElement>;
+  style?: CSSProperties;
+  className?: string;
+  "aria-describedby"?: string;
 }
 
 export function SecretInput({
@@ -306,9 +331,17 @@ export function SecretInput({
   error,
   onBlurValidate,
   disabled,
-  showLabel,
-  hideLabel,
+  showLabel = "Show password",
+  hideLabel = "Hide password",
   id,
+  name,
+  autoComplete = "off",
+  autoFocus,
+  required,
+  onKeyDown,
+  style,
+  className,
+  "aria-describedby": ariaDescribedBy,
 }: SecretInputProps) {
   const [visible, setVisible] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -319,17 +352,22 @@ export function SecretInput({
   }, [value]);
 
   return (
-    <div style={{ position: "relative", width: "100%" }}>
+    <div style={{ position: "relative", width: "100%", ...style }} className={className}>
       <input
         id={id}
+        name={name}
         type={visible ? "text" : "password"}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         disabled={disabled}
-        autoComplete="off"
+        autoComplete={autoComplete}
+        autoFocus={autoFocus}
+        required={required}
+        onKeyDown={onKeyDown}
         spellCheck={false}
         aria-invalid={isInvalid || undefined}
+        aria-describedby={ariaDescribedBy}
         onFocus={() => setFocused(true)}
         onBlur={() => {
           setFocused(false);
@@ -338,7 +376,7 @@ export function SecretInput({
         style={{
           ...inputShellStyle({ invalid: isInvalid }),
           ...focusGlowStyle(focused, isInvalid),
-          paddingRight: "calc(var(--control-height-lg) - var(--space-1))",
+          paddingRight: "var(--control-touch, 44px)",
           fontFamily: "var(--font-mono)",
           opacity: disabled ? 0.6 : 1,
         }}
@@ -348,13 +386,16 @@ export function SecretInput({
         onClick={() => setVisible((v) => !v)}
         aria-label={visible ? hideLabel : showLabel}
         title={visible ? hideLabel : showLabel}
+        className="ui-focus-ring"
         style={{
           position: "absolute",
-          right: "calc(var(--space-2) + var(--space-1) / 2)",
+          right: 0,
           top: "50%",
           transform: "translateY(-50%)",
-          width: "calc(var(--control-height-sm) - var(--space-2))",
-          height: "calc(var(--control-height-sm) - var(--space-2))",
+          width: "var(--control-touch, 44px)",
+          height: "var(--control-touch, 44px)",
+          minWidth: "var(--control-touch, 44px)",
+          minHeight: "var(--control-touch, 44px)",
           padding: 0,
           border: "none",
           background: "transparent",
@@ -363,7 +404,7 @@ export function SecretInput({
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          borderRadius: "calc(var(--radius-control) / 2)",
+          borderRadius: "var(--radius-control)",
         }}
       >
         {visible ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
@@ -374,16 +415,27 @@ export function SecretInput({
 
 /* ─── Select ─── */
 
-interface SelectProps {
+export type SelectOptionItem = string | { value: string; label: ReactNode | string };
+export type SelectOption = SelectOptionItem;
+
+export interface SelectProps {
   value: string;
   onChange: (v: string) => void;
-  options: readonly string[];
+  options: readonly SelectOptionItem[];
   required?: boolean;
   placeholder?: string;
   invalid?: boolean;
   error?: string | null;
   disabled?: boolean;
   id?: string;
+  name?: string;
+  ariaLabel?: string;
+  "aria-label"?: string;
+  "aria-labelledby"?: string;
+  "aria-describedby"?: string;
+  title?: string;
+  style?: CSSProperties;
+  className?: string;
 }
 
 export function Select({
@@ -396,50 +448,92 @@ export function Select({
   error,
   disabled,
   id,
+  name,
+  ariaLabel,
+  "aria-label": ariaLabelProp,
+  "aria-labelledby": ariaLabelledBy,
+  "aria-describedby": ariaDescribedBy,
+  title,
+  style,
+  className,
 }: SelectProps) {
   const [focused, setFocused] = useState(false);
   const isInvalid = Boolean(invalid || error);
+  const effectiveAriaLabel = ariaLabel ?? ariaLabelProp;
+
   return (
-    <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-    <select
-      id={id}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      disabled={disabled}
-      aria-invalid={isInvalid || undefined}
-      onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}
+    <div
       style={{
-        ...inputShellStyle({ invalid: isInvalid }),
-        ...focusGlowStyle(focused, isInvalid),
-        color: value ? "var(--text)" : "var(--text-dim)",
-        appearance: "none",
-        width: "100%",
-        paddingRight: "var(--space-8)",
-        opacity: disabled ? 0.6 : 1,
+        position: "relative",
+        display: "inline-flex",
+        alignItems: "center",
+        width: style?.width ?? "100%",
+        minWidth: style?.minWidth ?? 0,
+        flex: style?.flex,
       }}
+      className={className}
     >
-      {!required && <option value="">{placeholder ?? ""}</option>}
-      {options.map((o) => (
-        <option key={o} value={o}>
-          {o}
-        </option>
-      ))}
-    </select>
-    <svg
-      width="10"
-      height="10"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      style={{ position: "absolute", right: "var(--space-4)", color: "var(--text-dim)", pointerEvents: "none" }}
-    >
-      <polyline points="6 9 12 15 18 9" />
-    </svg>
+      <select
+        id={id}
+        name={name}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        aria-invalid={isInvalid || undefined}
+        aria-label={effectiveAriaLabel}
+        aria-labelledby={ariaLabelledBy}
+        aria-describedby={ariaDescribedBy}
+        title={title}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        style={{
+          ...inputShellStyle({ invalid: isInvalid }),
+          ...focusGlowStyle(focused, isInvalid),
+          color: value ? "var(--text)" : "var(--text-dim)",
+          appearance: "none",
+          WebkitAppearance: "none",
+          width: "100%",
+          paddingRight: "var(--space-8)",
+          cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.6 : 1,
+          ...style,
+        }}
+      >
+        {!required && <option value="" style={{ background: "var(--bg-panel)", color: "var(--text)" }}>{placeholder ?? ""}</option>}
+        {required && placeholder !== undefined && (
+          <option value="" style={{ background: "var(--bg-panel)", color: "var(--text)" }}>
+            {placeholder}
+          </option>
+        )}
+        {options.map((option) => {
+          if (typeof option === "string") {
+            return (
+              <option key={option} value={option} style={{ background: "var(--bg-panel)", color: "var(--text)" }}>
+                {option}
+              </option>
+            );
+          }
+          return (
+            <option key={option.value} value={option.value} style={{ background: "var(--bg-panel)", color: "var(--text)" }}>
+              {option.label}
+            </option>
+          );
+        })}
+      </select>
+      <svg
+        width="10"
+        height="10"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+        style={{ position: "absolute", right: "var(--space-4)", color: "var(--text-dim)", pointerEvents: "none" }}
+      >
+        <polyline points="6 9 12 15 18 9" />
+      </svg>
     </div>
   );
 }
@@ -509,7 +603,6 @@ export function Switch({
   style,
   className,
 }: SwitchProps) {
-  const [focused, setFocused] = useState(false);
   const effectiveAriaLabel = ariaLabel ?? ariaLabelProp;
 
   return (
@@ -529,9 +622,7 @@ export function Switch({
           onChange(!checked);
         }
       }}
-      onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}
-      className={className}
+      className={["ui-focus-ring", className].filter(Boolean).join(" ") || undefined}
       style={{
         position: "relative",
         display: "inline-flex",
@@ -544,7 +635,6 @@ export function Switch({
         border: "none",
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.6 : 1,
-        outline: "none",
         touchAction: "manipulation",
         WebkitTapHighlightColor: "transparent",
         flexShrink: 0,
@@ -560,10 +650,9 @@ export function Switch({
           height: 20,
           borderRadius: 10,
           background: checked ? "var(--accent)" : "var(--switch-track, var(--border))",
-          transition: "background var(--dur-fast) var(--ease-out-warm), box-shadow var(--dur-fast) var(--ease-out-warm)",
+          transition: "background var(--dur-fast) var(--ease-out-warm)",
           padding: 2,
           boxSizing: "border-box",
-          boxShadow: focused ? "var(--focus-ring, 0 0 0 2px var(--accent))" : undefined,
         }}
       >
         <span
@@ -581,6 +670,126 @@ export function Switch({
     </button>
   );
 }
+
+/* ─── Shared Button ─── */
+
+export interface ButtonProps {
+  type?: "button" | "submit" | "reset";
+  variant?: "primary" | "secondary" | "danger";
+  size?: "sm" | "md" | "lg";
+  busy?: boolean;
+  disabled?: boolean;
+  onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  children: ReactNode;
+  style?: CSSProperties;
+  className?: string;
+  id?: string;
+  name?: string;
+  autoFocus?: boolean;
+  title?: string;
+  "aria-label"?: string;
+  ariaLabel?: string;
+}
+
+export function Button({
+  type = "button",
+  variant = "primary",
+  size = "md",
+  busy = false,
+  disabled = false,
+  onClick,
+  children,
+  style,
+  className,
+  id,
+  name,
+  autoFocus,
+  title,
+  "aria-label": ariaLabelProp,
+  ariaLabel,
+}: ButtonProps) {
+  const [focused, setFocused] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const isInactive = disabled || busy;
+  const effectiveAriaLabel = ariaLabel ?? ariaLabelProp;
+
+  const isPrimary = variant === "primary" || variant === "danger";
+  const isSecondary = variant === "secondary";
+
+  let bg = "var(--accent-strong)";
+  let hoverBg = "var(--accent-hover)";
+  let color = "var(--on-accent)";
+  let border = "none";
+
+  if (isSecondary) {
+    bg = "transparent";
+    hoverBg = "var(--bg-subtle)";
+    color = "var(--text-muted)";
+    border = "1px solid var(--border)";
+  }
+
+  const currentBg = hovered && !isInactive ? hoverBg : bg;
+
+  const padding =
+    size === "sm"
+      ? "var(--space-1) var(--space-3)"
+      : size === "lg"
+        ? "var(--space-3) calc(var(--space-6) + var(--space-1))"
+        : "var(--space-3) calc(var(--space-5) + var(--space-1))";
+
+  const minHeight =
+    size === "sm"
+      ? "var(--control-height-sm, 28px)"
+      : size === "lg"
+        ? "var(--control-height-lg, 40px)"
+        : "var(--control-height, 36px)";
+
+  return (
+    <button
+      type={type}
+      id={id}
+      name={name}
+      disabled={isInactive}
+      autoFocus={autoFocus}
+      title={title}
+      aria-label={effectiveAriaLabel}
+      aria-busy={busy || undefined}
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      className={className}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "var(--space-2)",
+        minHeight,
+        padding,
+        background: currentBg,
+        border,
+        borderRadius: "var(--radius-control)",
+        color,
+        fontSize: "var(--text-base)",
+        fontWeight: isPrimary ? 600 : 500,
+        cursor: busy ? "wait" : disabled ? "not-allowed" : "pointer",
+        opacity: isInactive ? 0.7 : 1,
+        outline: "none",
+        boxShadow: focused ? "var(--focus-ring)" : undefined,
+        transition:
+          "background var(--dur-fast) var(--ease-out-warm), box-shadow var(--dur-fast) var(--ease-out-warm), opacity var(--dur-fast) var(--ease-out-warm)",
+        touchAction: "manipulation",
+        WebkitTapHighlightColor: "transparent",
+        ...style,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+export const PrimaryButton = Button;
 
 /* ──────────────────── Convenience hooks ──────────────────── */
 
@@ -660,49 +869,23 @@ export function ConfirmDialog({
           </p>
         )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--space-4)" }}>
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            disabled={busy}
             onClick={() => onOpenChange(false)}
-            style={{
-              padding: "var(--space-3) calc(var(--space-5) + var(--space-1))",
-              background: "none",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-control)",
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              fontSize: "var(--text-base)",
-            }}
           >
             {cancelLabel ?? "Cancel"}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant={danger ? "danger" : "primary"}
+            busy={busy}
             disabled={busy}
             onClick={onConfirm}
-            style={{
-              padding: "var(--space-3) calc(var(--space-5) + var(--space-1))",
-              background: "var(--accent-strong)",
-              border: "none",
-              borderRadius: "var(--radius-control)",
-              color: "var(--on-accent)",
-              cursor: busy ? "wait" : "pointer",
-              fontSize: "var(--text-base)",
-              fontWeight: 600,
-              opacity: busy ? 0.7 : 1,
-              transition: "background var(--dur-fast) var(--ease-out-warm)",
-            }}
-            onMouseEnter={(e) => {
-              if (!busy) e.currentTarget.style.background = "var(--accent-hover)";
-            }}
-            onMouseLeave={(e) => {
-              if (!busy)
-                e.currentTarget.style.background = danger
-                  ? "var(--accent-strong)"
-                  : "var(--accent)";
-            }}
           >
             {confirmLabel}
-          </button>
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

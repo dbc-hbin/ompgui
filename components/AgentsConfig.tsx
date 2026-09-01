@@ -6,6 +6,7 @@ import { useI18n } from "@/lib/i18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import type { AgentDefinition, AgentSource } from "@/lib/omp/agents-service";
 import { agentModelOptionsFromResponse, formatAgentModelDisplay, parseAgentModelOverrideInput, type AgentModelOption } from "@/lib/agent-model-options";
+import { loadClientModels } from "@/lib/client-model-store";
 
 type Props = {
   cwd?: string;
@@ -34,9 +35,9 @@ export function AgentsConfig({ cwd, onSaved }: Props) {
     setError(null);
     try {
       const qs = cwd ? `?cwd=${encodeURIComponent(cwd)}` : "";
-      const [agentsRes, modelsRes, settingsRes] = await Promise.all([
+      const [agentsRes, models, settingsRes] = await Promise.all([
         fetch(`/api/agents${qs}`),
-        fetch(`/api/models${qs}`),
+        loadClientModels(cwd).catch(() => null),
         fetch("/api/omp-settings"),
       ]);
 
@@ -44,9 +45,8 @@ export function AgentsConfig({ cwd, onSaved }: Props) {
       const agentsData = await agentsRes.json();
       setAgents(agentsData.agents ?? []);
 
-      if (modelsRes.ok) {
-        const md = await modelsRes.json();
-        setModels(agentModelOptionsFromResponse(md));
+      if (models) {
+        setModels(agentModelOptionsFromResponse(models));
       }
 
       if (settingsRes.ok) {

@@ -1,4 +1,8 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
     <string name="app_name">ompgui Remote</string>
+    <string name="shell_exit_title">Leave ompgui?</string>
+    <string name="shell_exit_message">The app will close.</string>
+    <string name="shell_exit_confirm">Leave</string>
+    <string name="shell_exit_cancel">Stay</string>
 </resources>

@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback, useMemo, type CSSProperties, type MouseEvent } from "react";
+import { memo, useEffect, useState, useRef, useCallback, useMemo, type CSSProperties, type MouseEvent } from "react";
 import type { SyntaxHighlighterProps } from "react-syntax-highlighter";
 import {
   createSyntaxElement as renderSyntaxNode,
-  ensureLanguageRegistered,
-  isLanguageRegistered,
+  shouldHighlightLanguage,
   SyntaxHighlighter,
   vs,
   vscDarkPlus,
@@ -187,6 +186,66 @@ function SourceCodeRenderer({ rows, stylesheet, useInlineStyles, wrapLines }: So
     );
   });
 }
+
+export function splitPlainFileLines(content: string): string[] {
+  return content.split("\n");
+}
+
+const PLAIN_EMPTY_LINE_MIN_HEIGHT = "1.6em";
+
+export const PlainFileSource = memo(function PlainFileSource({ content, wrapLines }: { content: string; wrapLines: boolean }) {
+  const lines = useMemo(() => splitPlainFileLines(content), [content]);
+  const lineContentStyle = useMemo<CSSProperties>(() => ({
+    flex: "1 1 auto",
+    minWidth: 0,
+    minHeight: PLAIN_EMPTY_LINE_MIN_HEIGHT,
+    overflowWrap: wrapLines ? "anywhere" : "normal",
+    whiteSpace: wrapLines ? "pre-wrap" : "pre",
+  }), [wrapLines]);
+  const rows = useMemo(
+    () => lines.map((line, lineIndex) => (
+      <span
+        className="file-source-line"
+        data-line-number={lineIndex + 1}
+        key={`source-line-${lineIndex}`}
+        style={{ display: "flex", minWidth: "100%", minHeight: PLAIN_EMPTY_LINE_MIN_HEIGHT }}
+      >
+        <span className="linenumber" style={FILE_LINE_NUMBER_STYLE}>
+          {lineIndex + 1}
+        </span>
+        <span className="file-source-line-content" style={lineContentStyle}>
+          {line}
+        </span>
+      </span>
+    )),
+    [lineContentStyle, lines],
+  );
+  return (
+    <pre
+      className={wrapLines ? "file-source-view is-wrapped" : "file-source-view"}
+      style={{
+        margin: 0,
+        padding: 0,
+        border: 0,
+        backgroundColor: "var(--bg)",
+        ...FILE_CODE_STYLE,
+        width: wrapLines ? "100%" : "max-content",
+        minWidth: "100%",
+        minHeight: "100%",
+        overflow: "visible",
+      }}
+    >
+      <code
+        style={{
+          fontFamily: "var(--font-mono)",
+          overflowWrap: wrapLines ? "anywhere" : "normal",
+        }}
+      >
+        {rows}
+      </code>
+    </pre>
+  );
+});
 
 function getFileApiUrl(
   filePath: string,
@@ -808,20 +867,6 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
   const [gitDiff, setGitDiff] = useState<GitFileDiffResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [highlightReady, setHighlightReady] = useState(true);
-
-  // Load the PrismLight grammar for this file's language on demand instead of
-  // paying for every grammar at cold start (see lib/syntax-highlight.ts).
-  useEffect(() => {
-    if (!data) return;
-    let cancelled = false;
-    setHighlightReady(isLanguageRegistered(data.language));
-    const promise = ensureLanguageRegistered(data.language);
-    if (promise) {
-      promise.then(() => { if (!cancelled) setHighlightReady(true); });
-    }
-    return () => { cancelled = true; };
-  }, [data]);
   const [displayMode, setDisplayMode] = useState<DisplayMode>("source");
   const [wrapLines, setWrapLines] = useState(false);
   const [watching, setWatching] = useState(false);
@@ -1221,10 +1266,10 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
               {markdownPreview}
             </ReactMarkdown>
           </div>
-        ) : highlightReady ? (
+        ) : shouldHighlightLanguage(data.language) ? (
           <SyntaxHighlighter
             className={wrapLines ? "file-source-view is-wrapped" : "file-source-view"}
-            language={data.language === "text" ? "plaintext" : data.language}
+            language={data.language}
             style={isDark ? vscDarkPlus : vs}
             showLineNumbers
             lineNumberStyle={{
@@ -1255,23 +1300,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
             {data.content}
           </SyntaxHighlighter>
         ) : (
-          <pre
-            style={{
-              margin: 0,
-              padding: "var(--code-padding-block) var(--code-padding-inline)",
-              fontSize: "var(--code-font-size)",
-              lineHeight: "var(--code-line-height)",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-              color: "var(--text)",
-              fontFamily: "var(--font-mono)",
-              minWidth: "100%",
-              minHeight: "100%",
-              boxSizing: "border-box",
-            }}
-          >
-            {data.content}
-          </pre>
+          <PlainFileSource content={data.content} wrapLines={wrapLines} />
         )}
       </div>
     </div>

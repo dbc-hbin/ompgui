@@ -10,6 +10,7 @@ const jiti = createJiti(import.meta.url, {
 });
 const { MessageView, SafeMarkdownBody, TaskResultPanel } = await jiti.import("./MessageView.tsx");
 const { CodeBlock } = await jiti.import("./MermaidBlock.tsx");
+const { CHAT_COLUMN_MAX_WIDTH } = await jiti.import("../lib/chat-layout.ts");
 
 test("large message content avoids the markdown pipeline until requested", () => {
   const largeMessage = "x".repeat(100_001);
@@ -28,6 +29,7 @@ test("streaming code blocks avoid syntax-highlighter line markup", () => {
 
   assert.match(html, /const value = 1;/);
   assert.doesNotMatch(html, /linenumber/);
+  assert.doesNotMatch(html, /react-syntax-highlighter/);
 });
 
 test("MCP mount notices stay out of the transcript", () => {
@@ -129,5 +131,102 @@ test("advisor custom messages use the localized advisor label", () => {
   assert.match(html, /Advisor/);
   assert.match(html, /Consider handling the edge case/);
   assert.doesNotMatch(html, /customType/);
+});
+
+test("CHAT_COLUMN_MAX_WIDTH is 744", () => {
+  assert.equal(CHAT_COLUMN_MAX_WIDTH, 744);
+});
+
+test("user message container uses quiet neutral border without accent mix or shadow", () => {
+  const html = renderToStaticMarkup(React.createElement(MessageView, {
+    message: {
+      role: "user",
+      content: "Hello from user",
+    },
+  }));
+
+  assert.match(html, /border:1px solid var\(--border\)/);
+  assert.match(html, /box-shadow:none/);
+  assert.doesNotMatch(html, /color-mix\(in srgb, var\(--accent\)/);
+  assert.doesNotMatch(html, /var\(--shadow-card\)/);
+});
+
+test("user message actions render with touch-ready action button classes and labels", () => {
+  const html = renderToStaticMarkup(React.createElement(MessageView, {
+    message: {
+      role: "user",
+      content: "Copyable text",
+    },
+    entryId: "entry-1",
+    onFork: () => {},
+    prevAssistantEntryId: "prev-1",
+    onNavigate: () => {},
+    onEditContent: () => {},
+  }));
+
+  assert.match(html, /class="[^"]*chat-action-row[^"]*"/);
+  assert.match(html, /class="[^"]*chat-action-group[^"]*"/);
+  assert.match(html, /class="[^"]*chat-action-btn[^"]*"/);
+  assert.match(html, /aria-label="Copy message"/);
+  assert.match(html, /aria-label="Jump back here and edit this message"/);
+  assert.match(html, /aria-label="Fork a new session from this point"/);
+  // Verify Lucide inline icon size 14 with strokeWidth 1.75
+  assert.match(html, /width="14" height="14"[^>]*stroke-width="1.75"/);
+});
+
+test("normal tool call renders with neutral border and text without status-success tint", () => {
+  const html = renderToStaticMarkup(React.createElement(MessageView, {
+    toolCallsDefaultCollapsed: false,
+    message: {
+      role: "assistant",
+      content: [
+        { type: "toolCall", toolCallId: "call-1", toolName: "read", input: { path: "foo.ts" } },
+      ],
+    },
+    toolResults: new Map([
+      ["call-1", { role: "toolResult", toolCallId: "call-1", toolName: "read", content: "file contents", isError: false }],
+    ]),
+  }));
+
+  assert.match(html, /border:1px solid var\(--border\)/);
+  assert.match(html, /color:var\(--text\)/);
+  assert.doesNotMatch(html, /var\(--status-success\)/);
+  // Chip chevron uses size 12 and strokeWidth 2
+  assert.match(html, /width="12" height="12"[^>]*stroke-width="2"/);
+});
+
+test("error tool call renders with semantic error border and text", () => {
+  const html = renderToStaticMarkup(React.createElement(MessageView, {
+    toolCallsDefaultCollapsed: false,
+    message: {
+      role: "assistant",
+      content: [
+        { type: "toolCall", toolCallId: "call-err", toolName: "bash", input: { command: "exit 1" } },
+      ],
+    },
+    toolResults: new Map([
+      ["call-err", { role: "toolResult", toolCallId: "call-err", toolName: "bash", content: "command failed", isError: true }],
+    ]),
+  }));
+
+  assert.match(html, /border:1px solid var\(--status-error\)/);
+  assert.match(html, /color:var\(--status-error\)/);
+});
+
+test("thinking block renders with normalized Lucide icons and neutral border", () => {
+  const html = renderToStaticMarkup(React.createElement(MessageView, {
+    message: {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "Pondering the solution..." },
+      ],
+    },
+  }));
+
+  assert.match(html, /border:1px solid var\(--border\)/);
+  // Brain icon: inline 14/1.75
+  assert.match(html, /width="14" height="14"[^>]*stroke-width="1.75"/);
+  // Chevron: chip 12/2
+  assert.match(html, /width="12" height="12"[^>]*stroke-width="2"/);
 });
 

@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ompgui Remote</string>
+    <string name="shell_exit_title">要离开 ompgui 吗？</string>
+    <string name="shell_exit_message">应用将会关闭。</string>
+    <string name="shell_exit_confirm">离开</string>
+    <string name="shell_exit_cancel">留下</string>
+</resources>

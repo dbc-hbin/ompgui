@@ -300,3 +300,33 @@ export function persistRemoteReplicaSnapshot(snapshot: RemoteReplicaSnapshot): b
   }
   return persisted;
 }
+
+/**
+ * Read a sanitized replica tail for first paint. The result is never an
+ * AgentMessage list: callers must keep it in a separate preview slot.
+ */
+export function loadRemoteReplicaSnapshot(
+  sessionId: string,
+  origin: string | null = getRemoteReplicaOrigin(),
+): RemoteReplicaSnapshot | null {
+  if (typeof window === "undefined") return null;
+  const id = boundedIdentifier(sessionId);
+  const normalizedOrigin = normalizeRemoteReplicaOrigin(origin);
+  if (!id || !normalizedOrigin) return null;
+
+  let parsed: RemoteReplicaSnapshot | null = null;
+  try {
+    parsed = parseRemoteReplicaJson(window.localStorage.getItem(storageKey(normalizedOrigin, id)));
+  } catch {
+    parsed = null;
+  }
+  if (!parsed) {
+    try {
+      parsed = parseRemoteReplicaJson(window.OmpguiRemoteReplica?.getSnapshot?.() ?? null);
+    } catch {
+      parsed = null;
+    }
+  }
+  if (!parsed || parsed.origin !== normalizedOrigin || parsed.session.id !== id) return null;
+  return parsed;
+}

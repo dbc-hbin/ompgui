@@ -14,10 +14,12 @@
 //   but the module factory is not available.
 //
 // The async grammar chunk either raced with HMR or referenced a module factory
-// in a chunk that was never evaluated, taking down the whole page. Static
-// imports keep every grammar in the main client chunk, so no split/race
-// exists. Grammars are small regex-based objects, so the eager cost is a few
-// KB on top of what the core set already shipped.
+// in a chunk that was never evaluated, taking down the whole page. Next 16's
+// `next dev` still uses Turbopack, so demand-loading is not a testable-safe
+// cut. Static imports keep every grammar in the main client chunk. Grammars
+// are small regex-based objects; render-work savings come from omitting
+// line-number DOM on coarse pointers and long fences, not from dropping
+// registrations.
 import type { CSSProperties } from "react";
 import createSyntaxElement from "react-syntax-highlighter/dist/esm/create-element";
 import PrismLight from "react-syntax-highlighter/dist/esm/prism-light";
@@ -63,18 +65,73 @@ const GRAMMARS: Record<string, unknown> = {
   python, ruby, rust, scss, sql, swift, toml, tsx, typescript, yaml,
 };
 
+type PrismGrammar = {
+  aliases?: string[];
+};
+
+const registeredLanguages = new Set<string>();
+
 for (const [name, grammar] of Object.entries(GRAMMARS)) {
   PrismLight.registerLanguage(name, grammar);
+  registeredLanguages.add(name);
+  for (const alias of (grammar as PrismGrammar).aliases ?? []) {
+    registeredLanguages.add(alias.toLowerCase());
+  }
+}
+
+/** Desktop omits per-line number nodes above this fence length. */
+export const LONG_CODE_BLOCK_LINE_LIMIT = 200;
+
+export const COARSE_POINTER_MEDIA_QUERY = "(hover: none), (pointer: coarse)";
+
+export function normalizeFenceLanguage(language: string): string {
+  return language.trim().toLowerCase();
+}
+
+export function countCodeLines(code: string): number {
+  if (!code) return 0;
+  let lines = 1;
+  for (let i = 0; i < code.length; i++) {
+    if (code.charCodeAt(i) === 10) lines += 1;
+  }
+  return lines;
 }
 
 /**
- * True for every language — all grammars are registered eagerly, so nothing
- * ever needs a pending load. Unknown languages are passed through and fall
- * back to plain text inside the highlighter itself.
+ * Line numbers double highlighter DOM. Skip them on coarse/mobile pointers
+ * and on sufficiently long fences; copy/content stay on the same code string.
+ */
+export function shouldShowCodeLineNumbers(input: {
+  isCoarsePointer: boolean;
+  lineCount: number;
+}): boolean {
+  if (input.isCoarsePointer) return false;
+  if (input.lineCount > LONG_CODE_BLOCK_LINE_LIMIT) return false;
+  return input.lineCount > 0;
+}
+
+/**
+ * True when a fence language has an eager Prism grammar (canonical name or
+ * alias). Unknown languages are not registered and should render as plain text.
  */
 export function isLanguageRegistered(language: string): boolean {
-  void language; // All grammars are eager — kept only for call-site clarity.
-  return true;
+  const key = normalizeFenceLanguage(language);
+  return key.length > 0 && registeredLanguages.has(key);
+}
+
+const PLAIN_TEXT_LANGUAGES = new Set(["text", "plaintext", "plain", "txt"]);
+
+/** True for labels that mean "plain text", not a Prism grammar. */
+export function isPlainTextLanguage(language: string): boolean {
+  return PLAIN_TEXT_LANGUAGES.has(normalizeFenceLanguage(language));
+}
+
+/**
+ * File/fence highlighting requires a real registered grammar. `text` and
+ * `plaintext` stay line-addressable without registering a dummy language.
+ */
+export function shouldHighlightLanguage(language: string): boolean {
+  return isLanguageRegistered(language) && !isPlainTextLanguage(language);
 }
 
 /**
@@ -83,7 +140,7 @@ export function isLanguageRegistered(language: string): boolean {
  * registered, so there is never anything to wait for.
  */
 export function ensureLanguageRegistered(language: string): Promise<void> | null {
-  void language; // All grammars are eager — kept only for call-site clarity.
+  void language;
   return null;
 }
 

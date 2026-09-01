@@ -3,17 +3,19 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getSubmitDuringRunBehavior, setSubmitDuringRunBehavior, type SubmitDuringRunBehavior } from "@/lib/composer-prefs";
 import dynamic from "next/dynamic";
-import { Copy, ExternalLink, RefreshCw, RotateCcw, Sparkles, Search, AlertCircle, Monitor, Moon, Sun } from "lucide-react";
+import { Copy, ExternalLink, RefreshCw, RotateCcw, Sparkles, Search, Monitor, Moon, Sun } from "lucide-react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/primitives";
-import { ConfirmDialog } from "@/components/ui/field";
+import { ConfirmDialog, Select, Switch } from "@/components/ui/field";
 import { ExtensionsTabs, type ExtensionsTab, SettingsTabs, type SettingsTab, SETTINGS_CATEGORIES, getNormalizedActive } from "./SettingsTabs";
 import { useI18n } from "@/lib/i18n";
 import { copyText } from "@/lib/clipboard";
 import { useTheme } from "@/hooks/useTheme";
 import { getSoundEnabled, setSoundEnabled as persistSoundEnabled } from "@/lib/sound-prefs";
+import { loadClientModels } from "@/lib/client-model-store";
+import { mergeClientNativeSettings, shouldApplyRemoteSettings } from "@/lib/native-settings-client";
 
-const SettingsTabLoading = () => <div role="status" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 12 }}>Loading settings…</div>;
+const SettingsTabLoading = () => <div role="status" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>Loading settings…</div>;
 const BuiltInToolsConfig = dynamic(() => import("./BuiltInToolsConfig").then((module) => module.BuiltInToolsConfig), { loading: SettingsTabLoading });
 const ModelsConfig = dynamic(() => import("./ModelsConfig").then((module) => module.ModelsConfig), { loading: SettingsTabLoading });
 const SkillsConfig = dynamic(() => import("./SkillsConfig").then((module) => module.SkillsConfig), { loading: SettingsTabLoading });
@@ -81,28 +83,10 @@ const NATIVE_RETRY_DEFAULTS = {
 const NATIVE_MODEL_ROLES = ["default", "smol", "slow", "vision", "plan", "designer", "commit", "tiny", "task", "advisor"] as const;
 const NATIVE_RETRY_COUNTS = Array.from({ length: 21 }, (_, index) => index);
 
-const nativeSelectStyle = {
-  minHeight: 32,
-  padding: "4px 28px 4px 10px",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-control)",
-  background: "var(--bg)",
-  color: "var(--text)",
-  fontSize: 12,
-  cursor: "pointer",
-  outline: "none",
-  colorScheme: "dark light",
-} as const;
-
-const nativeOptionStyle = {
-  background: "var(--bg-panel)",
-  color: "var(--text)",
-} as const;
-
 const chipStyle = {
-  fontSize: 10,
+  fontSize: "var(--text-xs)",
   padding: "1px 6px",
-  borderRadius: 4,
+  borderRadius: "calc(var(--radius-control) / 2)",
   background: "var(--bg-subtle)",
   color: "var(--text-muted)",
   fontWeight: 500,
@@ -189,7 +173,7 @@ const SETTING_INDEX: SettingIndexEntry[] = [
 function SearchResultsList({ results, query, onSelect }: { results: SearchResult[]; query: string; onSelect: (result: SearchResult) => void }) {
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "var(--bg)", padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
+      <div style={{ fontSize: "var(--text-base)", color: "var(--text-muted)" }}>
         {results.length === 0 ? `No settings match “${query}”.` : `${results.length} result${results.length === 1 ? "" : "s"} for “${query}”.`}
       </div>
       {results.map((result) => (
@@ -212,7 +196,7 @@ function SearchResultsList({ results, query, onSelect }: { results: SearchResult
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 12.5, fontWeight: 600 }}>{result.label}</span>
+            <span style={{ fontSize: "var(--text-base)", fontWeight: 600 }}>{result.label}</span>
             {result.kind === "category" && (
               <span style={chipStyle}>Section</span>
             )}
@@ -220,49 +204,11 @@ function SearchResultsList({ results, query, onSelect }: { results: SearchResult
               <span style={chipStyle}>{result.scope}</span>
             )}
           </div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.45 }}>{result.description}</div>
-          {result.section && <div style={{ fontSize: 10, color: "var(--text-dim)" }}>{result.section}</div>}
+          <div style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", lineHeight: 1.45 }}>{result.description}</div>
+          {result.section && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-dim)" }}>{result.section}</div>}
         </button>
       ))}
     </div>
-  );
-}
-
-function ToggleSwitch({ checked, onChange, disabled }: { checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      style={{
-        position: "relative",
-        display: "inline-flex",
-        alignItems: "center",
-        width: 36,
-        height: 20,
-        borderRadius: 10,
-        border: "none",
-        background: checked ? "var(--accent)" : "var(--border)",
-        cursor: disabled ? "not-allowed" : "pointer",
-        transition: "background var(--dur-fast) var(--ease-out-warm)",
-        padding: 2,
-        flexShrink: 0,
-      }}
-    >
-      <span
-        style={{
-          width: 16,
-          height: 16,
-          borderRadius: 8,
-          background: "var(--on-accent)",
-          transform: checked ? "translateX(16px)" : "translateX(0px)",
-          transition: "transform var(--dur-fast) var(--ease-out-warm)",
-          boxShadow: "var(--shadow-card)",
-        }}
-      />
-    </button>
   );
 }
 
@@ -297,7 +243,7 @@ function NativeSetting({ label, description, scope, compact = false, hideDescrip
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>{label}</span>
+          <span style={{ fontSize: "var(--text-base)", fontWeight: 600, color: "var(--text)" }}>{label}</span>
           {scope && (
             <span style={chipStyle}>
               {scope === "New sessions" ? t("settingsConfig.newSessions") : scope}
@@ -307,7 +253,7 @@ function NativeSetting({ label, description, scope, compact = false, hideDescrip
         <span style={{ flexShrink: 0 }}>{children}</span>
       </div>
       {!hideDescription && (
-        <span style={{ color: "var(--text-muted)", fontSize: compact ? 10.5 : 11, lineHeight: compact ? 1.3 : 1.45 }}>{description}</span>
+        <span style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", lineHeight: compact ? 1.3 : 1.45 }}>{description}</span>
       )}
     </div>
   );
@@ -319,382 +265,444 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
   onAdvisorChange: (enabled: boolean) => void;
   toolCallsDefaultCollapsed: boolean;
   onToolCallsDefaultCollapsedChange: (collapsed: boolean) => void;
-  cwd: string | null;
-  sessionId: string | null;
+  cwd?: string | null;
+  sessionId?: string | null;
   systemPrompt: string | null;
   systemPromptLoading: boolean;
   onLoadSystemPrompt: () => void;
   onModelsSaved: () => void;
   onPluginsReloaded: () => void;
   onOmpSessionsRestarted: () => void;
-  onOmpUpdateAvailabilityChange: (available: boolean) => void;
+  onOmpUpdateAvailabilityChange?: (available: boolean) => void;
   onSelectTab: (tab: SettingsTab) => void;
   onClose: () => void;
   runtimeReady?: boolean;
 }) {
-  const isMobile = useIsMobile();
   const { t } = useI18n();
-  const { preference, setTheme, palette, setPalette } = useTheme();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [highlightId, setHighlightId] = useState<string | null>(null);
-  const [submitBehavior, setSubmitBehavior] = useState<SubmitDuringRunBehavior>(() => getSubmitDuringRunBehavior());
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => getSoundEnabled());
+  const isMobile = useIsMobile();
+  const [currentTab, setCurrentTab] = useState<SettingsTab>(getNormalizedActive(activeTab));
+  const [extensionTab, setExtensionTab] = useState<ExtensionsTab>(() => {
+    if (activeTab === "mcp" || activeTab === "skills" || activeTab === "plugins") return activeTab;
+    return "tools";
+  });
+  const [visitedTabs, setVisitedTabs] = useState<Set<SettingsTab>>(() => new Set([getNormalizedActive(activeTab)]));
+  const [modelsDirty, setModelsDirty] = useState(false);
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+  const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
+  const [modelsEditorKey, setModelsEditorKey] = useState(0);
+
   const [update, setUpdate] = useState<UpdateState | null>(null);
-  const [checking, setChecking] = useState(true);
+  const [checking, setChecking] = useState(false);
   const [appUpdate, setAppUpdate] = useState<UpdateState | null>(null);
-  const [checkingAppUpdate, setCheckingAppUpdate] = useState(true);
+  const [checkingAppUpdate, setCheckingAppUpdate] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [nativeSettings, setNativeSettings] = useState<NativeSettings | null>(null);
-  const [nativeSettingsError, setNativeSettingsError] = useState<string | null>(null);
-  const [nativeSavesInFlight, setNativeSavesInFlight] = useState<number>(0);
-  const [nativeApplication, setNativeApplication] = useState<NativeApplication>({ mode: "new-session", restartRequired: false });
-  const [availableModels, setAvailableModels] = useState<RuntimeModelOption[]>([]);
+  const [soundEnabled, setSoundEnabled] = useState(false);
+  const [submitBehavior, setSubmitBehavior] = useState<SubmitDuringRunBehavior>("steer");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [highlightSettingId, setHighlightSettingId] = useState<string | null>(null);
+  const [runtimeModels, setRuntimeModels] = useState<RuntimeModelOption[]>([]);
   const [fallbackRole, setFallbackRole] = useState<string>("default");
-  const [fallbackCandidate, setFallbackCandidate] = useState("");
-  const [modelsDirty, setModelsDirty] = useState(false);
-  const [modelsEditorKey, setModelsEditorKey] = useState(0);
-  const [pendingAction, setPendingAction] = useState<{ kind: "close" } | { kind: "tab"; tab: SettingsTab } | null>(null);
-  const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
-  const [visitedTabs, setVisitedTabs] = useState<Set<SettingsTab>>(() => new Set(["general", activeTab]));
-  const latestNativeSettingsRef = useRef<NativeSettings | null>(null);
-  const nativeSaveDrainingRef = useRef(false);
-  const nativeSettingsMutatedRef = useRef(false);
+  const [fallbackCandidate, setFallbackCandidate] = useState<string>("");
 
-  useEffect(() => {
-    setVisitedTabs((tabs) => (tabs.has(activeTab) ? tabs : new Set([...tabs, activeTab])));
-  }, [activeTab]);
+  const { preference, setTheme, palette, setPalette } = useTheme();
+  const nativeSettingsRef = useRef<NativeSettings>({});
+  const settingsGenerationRef = useRef(0);
+  const mountedRef = useRef(true);
+  const saveChainRef = useRef(Promise.resolve());
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    fetch("/api/omp-settings")
-      .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`))))
-      .then((data: { settings?: NativeSettings; application?: NativeApplication }) => {
-        if (!nativeSettingsMutatedRef.current) setNativeSettings(data.settings ?? {});
-        if (data.application && (data.application.mode === "new-session" || data.application.mode === "runtime-refresh") && typeof data.application.restartRequired === "boolean") {
-          setNativeApplication(data.application);
-        }
-      })
-      .catch((error) => setNativeSettingsError(error instanceof Error ? error.message : String(error)));
+  const loadNativeSettings = useCallback(async () => {
+    const requestGeneration = settingsGenerationRef.current;
+    try {
+      const response = await fetch("/api/omp-settings");
+      if (!response.ok) return;
+      const data = await response.json() as { settings?: NativeSettings };
+      if (!shouldApplyRemoteSettings({
+        mounted: mountedRef.current,
+        requestGeneration,
+        latestGeneration: settingsGenerationRef.current,
+      })) return;
+      const settings = data.settings ?? {};
+      nativeSettingsRef.current = settings;
+      setNativeSettings(settings);
+    } catch {
+      // ignore
+    }
   }, []);
 
   useEffect(() => {
-    fetch("/api/models", { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`))))
-      .then((data: { modelList?: RuntimeModelOption[] }) => {
-        setAvailableModels(Array.isArray(data.modelList) ? data.modelList.filter((model) => typeof model?.provider === "string" && typeof model?.id === "string") : []);
-      })
-      .catch(() => setAvailableModels([]));
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = null;
+      }
+    };
   }, []);
 
-  const saveNativeSettings = useCallback((next: NativeSettings) => {
-    nativeSettingsMutatedRef.current = true;
-    setNativeSettings(next);
-    setNativeSettingsError(null);
-    latestNativeSettingsRef.current = next;
-    if (nativeSaveDrainingRef.current) return;
-    nativeSaveDrainingRef.current = true;
-    setNativeSavesInFlight((count) => count + 1);
+  useEffect(() => {
+    void loadNativeSettings();
+  }, [loadNativeSettings]);
 
+  useEffect(() => {
+    setSoundEnabled(getSoundEnabled());
+    setSubmitBehavior(getSubmitDuringRunBehavior());
+  }, []);
+
+  useEffect(() => {
+    let unmounted = false;
     void (async () => {
       try {
-        while (latestNativeSettingsRef.current !== null) {
-          const snapshot = latestNativeSettingsRef.current;
-          latestNativeSettingsRef.current = null;
-          try {
-            const response = await fetch("/api/omp-settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings: snapshot }) });
-            const data = (await response.json()) as { settings?: NativeSettings; error?: string; application?: NativeApplication };
-            if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
-            if (data.application && (data.application.mode === "new-session" || data.application.mode === "runtime-refresh") && typeof data.application.restartRequired === "boolean") {
-              setNativeApplication(data.application);
-            }
-            if (latestNativeSettingsRef.current === null) setNativeSettings(data.settings ?? snapshot);
-          } catch (error) {
-            setNativeSettingsError(error instanceof Error ? error.message : String(error));
-            break;
-          }
-        }
-      } finally {
-        nativeSaveDrainingRef.current = false;
-        setNativeSavesInFlight((count) => Math.max(0, count - 1));
+        const catalog = await loadClientModels();
+        if (unmounted) return;
+        const flat: RuntimeModelOption[] = catalog.modelList.map((m) => ({
+          id: m.id,
+          provider: m.provider,
+          name: m.name,
+        }));
+        setRuntimeModels(flat);
+      } catch {
+        // Fall back to empty options if model catalog is unreachable.
       }
     })();
+    return () => {
+      unmounted = true;
+    };
   }, []);
 
-  const currentSettings = (): NativeSettings => latestNativeSettingsRef.current ?? nativeSettings ?? {};
-
-  const patchSettings = (patch: Partial<NativeSettings>) => {
-    void saveNativeSettings({ ...currentSettings(), ...patch });
-  };
-
-  // `key` is always an object-valued section here (tools/advisor/compaction/...),
-  // so the section spread is safe; the cast keeps the generic index type-checkable.
-  const patchSection = <K extends keyof NativeSettings>(key: K, patch: Partial<NonNullable<NativeSettings[K]>>) => {
-    const base = latestNativeSettingsRef.current;
-    const section = (base ?? nativeSettings?.[key] ?? {}) as object;
-    void saveNativeSettings({
-      ...currentSettings(),
-      [key]: { ...section, ...patch },
+  const patchSettings = useCallback(async (patch: Partial<NativeSettings>): Promise<boolean> => {
+    const merged = mergeClientNativeSettings(nativeSettingsRef.current, patch);
+    nativeSettingsRef.current = merged;
+    setNativeSettings(merged);
+    const requestGeneration = ++settingsGenerationRef.current;
+    let succeeded = false;
+    saveChainRef.current = saveChainRef.current.then(async () => {
+      if (!mountedRef.current) return;
+      try {
+        const response = await fetch("/api/omp-settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ settings: nativeSettingsRef.current }),
+        });
+        if (!response.ok) return;
+        const data = await response.json() as { settings?: NativeSettings; application?: NativeApplication };
+        succeeded = true;
+        if (!shouldApplyRemoteSettings({
+          mounted: mountedRef.current,
+          requestGeneration,
+          latestGeneration: settingsGenerationRef.current,
+        })) return;
+        if (data.settings) {
+          nativeSettingsRef.current = data.settings;
+          setNativeSettings(data.settings);
+        }
+        if (data.application?.restartRequired) {
+          setMessage(t("settingsConfig.restartPrompt"));
+        }
+      } catch {
+        succeeded = false;
+      }
     });
-  };
+    await saveChainRef.current;
+    return succeeded;
+  }, [t]);
 
-  const fallbackModelOptions = useMemo(
-    () => Array.from(new Set(availableModels.map((model) => `${model.provider}/${model.id}`))),
-    [availableModels],
-  );
-  const retrySettings = nativeSettings?.retry ?? {};
-  const fallbackChain = retrySettings.fallbackChains?.[fallbackRole] ?? [];
-  const updateFallbackChain = (chain: string[]) => {
-    const currentRetry = currentSettings().retry ?? {};
-    patchSection("retry", {
-      fallbackChains: {
-        ...(currentRetry.fallbackChains ?? {}),
-        [fallbackRole]: chain,
+  const patchSection = useCallback(<K extends keyof NativeSettings>(
+    section: K,
+    patch: Partial<NonNullable<NativeSettings[K]>>,
+  ) => {
+    return patchSettings({ [section]: patch } as unknown as Partial<NativeSettings>);
+  }, [patchSettings]);
+
+  const patchApproval = useCallback((patch: Partial<NonNullable<NonNullable<NativeSettings["tools"]>["approval"]>>) => {
+    return patchSettings({
+      tools: {
+        approval: patch,
       },
     });
-  };
+  }, [patchSettings]);
 
-  // tools.approval is itself a nested object, so it needs its own base spread.
-  const patchApproval = (patch: Partial<NonNullable<NonNullable<NativeSettings["tools"]>["approval"]>>) => {
-    const base = latestNativeSettingsRef.current ?? nativeSettings ?? {};
-    const tools = base.tools ?? {};
-    void saveNativeSettings({ ...base, tools: { ...tools, approval: { ...(tools.approval ?? {}), ...patch } } });
-  };
+  const retrySettings = useMemo(() => nativeSettings?.retry ?? {}, [nativeSettings?.retry]);
+  const fallbackChains = useMemo(() => retrySettings.fallbackChains ?? {}, [retrySettings.fallbackChains]);
+  const fallbackChain = useMemo(() => fallbackChains[fallbackRole] ?? [], [fallbackChains, fallbackRole]);
+
+  const fallbackModelOptions = useMemo(() => {
+    const unique = new Set<string>();
+    for (const model of runtimeModels) {
+      if (model.id) unique.add(model.id);
+      if (model.provider && model.id) unique.add(`${model.provider}/${model.id}`);
+    }
+    return Array.from(unique).sort((a, b) => a.localeCompare(b));
+  }, [runtimeModels]);
+
+  const updateFallbackChain = useCallback((nextChain: string[]) => {
+    const currentChains = nativeSettingsRef.current.retry?.fallbackChains ?? {};
+    const nextChains: Record<string, string[]> = { ...currentChains };
+    if (nextChain.length === 0) {
+      delete nextChains[fallbackRole];
+    } else {
+      nextChains[fallbackRole] = nextChain;
+    }
+    return patchSection("retry", { fallbackChains: nextChains });
+  }, [fallbackRole, patchSection]);
+
+  const requestAction = useCallback((action: () => void) => {
+    if (modelsDirty) {
+      setPendingAction(() => action);
+      setDiscardDialogOpen(true);
+      return;
+    }
+    action();
+  }, [modelsDirty]);
+
+  const requestClose = useCallback(() => {
+    requestAction(() => {
+      onClose();
+    });
+  }, [onClose, requestAction]);
+
+  const requestTabChange = useCallback((tab: SettingsTab | ExtensionsTab) => {
+    if (tab === "tools" || tab === "mcp" || tab === "skills" || tab === "plugins") {
+      requestAction(() => {
+        setCurrentTab("extensions");
+        setExtensionTab(tab);
+        setVisitedTabs((prev) => new Set([...prev, "extensions"]));
+        onSelectTab(tab);
+      });
+      return;
+    }
+    requestAction(() => {
+      const normalized = getNormalizedActive(tab);
+      setCurrentTab(normalized);
+      setVisitedTabs((prev) => new Set([...prev, normalized]));
+      onSelectTab(normalized);
+    });
+  }, [onSelectTab, requestAction]);
+
+  const confirmDiscard = useCallback(() => {
+    setModelsDirty(false);
+    setModelsEditorKey((prev) => prev + 1);
+    setDiscardDialogOpen(false);
+    const action = pendingAction;
+    setPendingAction(null);
+    if (action) {
+      action();
+    }
+  }, [pendingAction]);
+
+  useEffect(() => {
+    const normalized = getNormalizedActive(activeTab);
+    setCurrentTab(normalized);
+    if (activeTab === "tools" || activeTab === "mcp" || activeTab === "skills" || activeTab === "plugins") {
+      setExtensionTab(activeTab);
+    }
+    setVisitedTabs((prev) => new Set([...prev, normalized]));
+  }, [activeTab]);
 
   const checkForUpdate = useCallback(async () => {
     setChecking(true);
     setMessage(null);
     try {
-      const response = await fetch("/api/omp-update", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "check" }) });
-      const data = (await response.json()) as UpdateState & { error?: string };
-      if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+      const response = await fetch("/api/omp/updates", { method: "POST" });
+      const data = await response.json() as UpdateState;
       setUpdate(data);
-      onOmpUpdateAvailabilityChange(data.updateAvailable);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      if (onOmpUpdateAvailabilityChange && typeof data.updateAvailable === "boolean") {
+        onOmpUpdateAvailabilityChange(data.updateAvailable);
+      }
+      if (!data.updateAvailable) {
+        setMessage(t("settingsConfig.latestVersion", { version: data.currentVersion ?? "current" }));
+      }
+    } catch {
+      setMessage(t("settingsConfig.updateCheckFailed"));
     } finally {
       setChecking(false);
     }
-  }, [onOmpUpdateAvailabilityChange]);
+  }, [onOmpUpdateAvailabilityChange, t]);
 
-  useEffect(() => {
-    void checkForUpdate();
-  }, [checkForUpdate]);
-
-  const checkForAppUpdate = useCallback(async (force = false) => {
+  const checkForAppUpdate = useCallback(async (manual = false) => {
     setCheckingAppUpdate(true);
     try {
-      const response = await fetch(force ? "/api/app-update?force=1" : "/api/app-update");
-      const data = (await response.json()) as UpdateState & { error?: string };
-      if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+      const response = await fetch("/api/ompgui/updates", { method: "POST" });
+      const data = await response.json() as UpdateState;
       setAppUpdate(data);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      if (manual && !data.updateAvailable) {
+        setMessage(t("settingsConfig.latestVersion", { version: data.currentVersion ?? "current" }));
+      }
+    } catch {
+      if (manual) {
+        setMessage(t("settingsConfig.appUpdateCheckFailed"));
+      }
     } finally {
       setCheckingAppUpdate(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
-    void checkForAppUpdate();
-  }, [checkForAppUpdate]);
+    if (currentTab === "system") {
+      void checkForUpdate();
+      void checkForAppUpdate(false);
+    }
+  }, [currentTab, checkForUpdate, checkForAppUpdate]);
 
   const restartSessions = useCallback(async () => {
     setRestarting(true);
+    setMessage(null);
     try {
-      const response = await fetch("/api/omp-update", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "restart" }) });
-      const data = (await response.json()) as { error?: string; sessionsRestarted?: number };
-      if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+      const response = await fetch("/api/omp/sessions/restart", { method: "POST" });
+      if (!response.ok) {
+        throw new Error("Failed to restart sessions");
+      }
+      setMessage(t("settingsConfig.sessionsRestarted"));
       onOmpSessionsRestarted();
-      setMessage(t("settingsConfig.restartSuccess", { count: data.sessionsRestarted ?? 0 }));
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+    } catch {
+      setMessage(t("settingsConfig.restartFailed"));
     } finally {
       setRestarting(false);
     }
   }, [onOmpSessionsRestarted, t]);
 
-  const currentTab = getNormalizedActive(activeTab);
-  const extensionTab: ExtensionsTab =
-    activeTab === "mcp"
-      ? "mcp"
-      : activeTab === "skills"
-        ? "skills"
-        : activeTab === "plugins"
-          ? "plugins"
-          : "tools";
+  const searchResults: SearchResult[] = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
 
-  const requestClose = useCallback(() => {
-    if (!modelsDirty) {
-      onClose();
-      return;
-    }
-    setPendingAction({ kind: "close" });
-    setDiscardDialogOpen(true);
-  }, [modelsDirty, onClose]);
-
-  const requestTabChange = useCallback((tab: SettingsTab) => {
-    if (tab === activeTab) return;
-    if (!modelsDirty) {
-      onSelectTab(tab);
-      return;
-    }
-    setPendingAction({ kind: "tab", tab });
-    setDiscardDialogOpen(true);
-  }, [activeTab, modelsDirty, onSelectTab]);
-
-  const confirmDiscard = useCallback(() => {
-    const action = pendingAction;
-    setPendingAction(null);
-    setDiscardDialogOpen(false);
-    setModelsDirty(false);
-    if (action?.kind === "tab") {
-      setModelsEditorKey((key) => key + 1);
-      onSelectTab(action.tab);
-    } else if (action?.kind === "close") {
-      onClose();
-    }
-  }, [onClose, onSelectTab, pendingAction]);
-
-  const requestCategoryChange = useCallback((tab: SettingsTab) => {
-    if (getNormalizedActive(tab) === currentTab) return;
-    requestTabChange(tab);
-  }, [currentTab, requestTabChange]);
-
-  const trimmedQuery = searchQuery.trim().toLowerCase();
-  const searchActive = trimmedQuery.length > 0;
-
-  const searchResults = useMemo<SearchResult[]>(() => {
-    if (!trimmedQuery) return [];
     const results: SearchResult[] = [];
-    for (const category of SETTINGS_CATEGORIES) {
-      const haystack = `${category.label} ${category.description}`.toLowerCase();
-      if (haystack.includes(trimmedQuery)) {
-        results.push({ id: `tab-${category.id}`, kind: "category", tab: category.id, label: category.label, description: category.description });
-      }
-    }
-    for (const setting of SETTING_INDEX) {
-      const label = setting.labelKey ? t(setting.labelKey) : setting.label;
-      const description = setting.descriptionKey ? t(setting.descriptionKey) : setting.description;
-      const section = setting.sectionKey ? t(setting.sectionKey) : setting.section;
-      const haystack = `${label} ${description} ${section}`.toLowerCase();
-      if (haystack.includes(trimmedQuery)) {
-        results.push({ id: slugify(setting.label), kind: "setting", tab: setting.tab, label, description, scope: setting.scope, section });
-      }
-    }
-    return results;
-  }, [trimmedQuery, t]);
 
-  const openSearchResult = useCallback((result: SearchResult) => {
-    requestTabChange(result.tab);
-    setHighlightId(result.kind === "setting" ? result.id : null);
+    // Search tabs/categories
+    for (const cat of SETTINGS_CATEGORIES) {
+      const localizedLabel = t(`settingsTabs.${cat.id}`) || cat.label;
+      const localizedDesc = t(`settingsTabs.${cat.id}Desc`) || cat.description;
+      if (localizedLabel.toLowerCase().includes(q) || localizedDesc.toLowerCase().includes(q) || cat.id.toLowerCase().includes(q)) {
+        results.push({
+          id: `cat-${cat.id}`,
+          kind: "category",
+          tab: cat.id,
+          label: localizedLabel,
+          description: localizedDesc,
+        });
+      }
+    }
+
+    // Search settings entries
+    for (const entry of SETTING_INDEX) {
+      const localizedLabel = (entry.labelKey ? t(entry.labelKey) : null) || entry.label;
+      const localizedDesc = (entry.descriptionKey ? t(entry.descriptionKey) : null) || entry.description;
+      const localizedSection = (entry.sectionKey ? t(entry.sectionKey) : null) || entry.section;
+      if (localizedLabel.toLowerCase().includes(q) || localizedDesc.toLowerCase().includes(q) || localizedSection.toLowerCase().includes(q)) {
+        results.push({
+          id: `setting-${entry.tab}-${slugify(entry.label)}`,
+          kind: "setting",
+          tab: entry.tab,
+          label: localizedLabel,
+          description: localizedDesc,
+          scope: entry.scope,
+          section: localizedSection,
+        });
+      }
+    }
+
+    return results;
+  }, [searchQuery, t]);
+
+  const handleSelectSearchResult = useCallback((result: SearchResult) => {
     setSearchQuery("");
+    requestTabChange(result.tab);
+    if (result.kind === "setting") {
+      setHighlightSettingId(slugify(result.label));
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = setTimeout(() => {
+        highlightTimerRef.current = null;
+        setHighlightSettingId(null);
+      }, 2500);
+    }
   }, [requestTabChange]);
 
   return (
     <>
-      <Dialog open onOpenChange={(open) => { if (!open) requestClose(); }}>
-      <DialogContent ariaLabel="Settings" style={{ width: isMobile ? "calc(100vw - 16px)" : 940, maxWidth: "calc(100vw - 16px)", height: isMobile ? "calc(100dvh - 16px)" : "82vh", maxHeight: "calc(100dvh - 16px)", padding: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: isMobile ? 8 : 14, padding: isMobile ? "10px 14px" : "12px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-panel)", flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <DialogTitle style={{ fontSize: 16, margin: 0, fontWeight: 600 }}>{t("settingsConfig.title")}</DialogTitle>
-            {nativeSavesInFlight > 0 ? (
-              <span style={{ fontSize: 11, color: "var(--accent)", padding: "2px 8px", borderRadius: 10, background: "var(--bg-subtle)", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                <RefreshCw size={11} className="spin" aria-hidden="true" /> {t("settingsConfig.saving")}
-              </span>
-            ) : (
-              <span style={{ fontSize: 11, color: "var(--text-dim)", padding: "2px 8px", borderRadius: 10, background: "var(--bg-subtle)" }}>
-                {t("settingsConfig.autoSaved")}
-              </span>
-            )}
-            <span
-              aria-live="polite"
-              title={nativeApplication.mode === "runtime-refresh" ? `${t("settingsConfig.activeSessionsUnchanged")}${nativeApplication.restartRequired ? ` · ${t("settingsConfig.restartRequired")}` : ""}` : nativeApplication.restartRequired ? t("settingsConfig.restartRequired") : undefined}
-              style={{ fontSize: 10.5, color: "var(--text-muted)", padding: "2px 7px", borderRadius: 10, background: "var(--bg-subtle)", whiteSpace: "nowrap" }}
-            >
-              {nativeApplication.mode === "runtime-refresh" ? t("settingsConfig.runtimeRefresh") : t("settingsConfig.newSessions")}
-              {nativeApplication.restartRequired ? ` · ${t("settingsConfig.restartRequired")}` : ""}
-            </span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, maxWidth: 360, justifyContent: "flex-end" }}>
-            <div style={{ position: "relative", width: "100%", maxWidth: 260 }}>
-              <Search size={13} aria-hidden="true" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+      <Dialog open={true} onOpenChange={(open) => { if (!open) requestClose(); }}>
+        <DialogContent
+          ariaLabel={t("settingsConfig.title")}
+          style={{
+            width: 860,
+            maxWidth: "96vw",
+            height: isMobile ? "92dvh" : "80vh",
+            maxHeight: "92dvh",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            padding: 0,
+            borderRadius: "var(--radius-modal)",
+            boxShadow: "var(--shadow-modal)",
+            background: "var(--bg)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: isMobile ? "12px 14px" : "16px 20px", borderBottom: "1px solid var(--border)", background: "var(--bg-panel)", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+              <DialogTitle style={{ margin: 0, fontSize: "var(--text-lg)", fontWeight: 650, whiteSpace: "nowrap" }}>{t("settingsConfig.title")}</DialogTitle>
+              {modelsDirty && (
+                <span style={{ fontSize: "var(--text-xs)", padding: "2px 6px", borderRadius: "calc(var(--radius-control) / 2)", background: "var(--status-warning-bg)", color: "var(--status-warning)", border: "1px solid var(--status-warning-border)" }}>
+                  {t("settingsConfig.unsavedChanges")}
+                </span>
+              )}
+            </div>
+
+            {/* Search input */}
+            <div style={{ position: "relative", flex: 1, maxWidth: 280, minWidth: 120 }}>
+              <Search size={13} aria-hidden="true" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--text-dim)", pointerEvents: "none" }} />
               <input
-                type="text"
-                aria-label={t("settingsConfig.searchAria")}
-                placeholder={t("settingsConfig.searchPlaceholder")}
+                type="search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") {
-                    setSearchQuery("");
-                    setHighlightId(null);
-                    (e.target as HTMLInputElement).blur();
-                  }
+                placeholder={t("settingsConfig.searchPlaceholder")}
+                aria-label={t("settingsConfig.searchPlaceholder")}
+                style={{
+                  width: "100%",
+                  height: 28,
+                  padding: "0 8px 0 28px",
+                  borderRadius: "var(--radius-control)",
+                  border: "1px solid var(--border)",
+                  background: "var(--bg)",
+                  color: "var(--text)",
+                  fontSize: "var(--text-sm)",
+                  outline: "none",
+                  boxSizing: "border-box",
                 }}
-                style={{ width: "100%", height: 28, padding: "0 8px 0 28px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg)", color: "var(--text)", fontSize: 12, outline: "none" }}
               />
             </div>
-            <button type="button" onClick={requestClose} aria-label={t("settingsConfig.close")} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
           </div>
-        </header>
 
-        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>
-          {searchActive ? (
-            <SearchResultsList results={searchResults} query={searchQuery.trim()} onSelect={openSearchResult} />
-          ) : (
-            <SettingsHighlightContext.Provider value={highlightId}>
-              {isMobile ? (
-                <SettingsTabs active={currentTab} onSelect={requestCategoryChange} layout="horizontal" />
-              ) : (
-                <SettingsTabs active={currentTab} onSelect={requestCategoryChange} layout="vertical" />
-              )}
-
-              <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflowY: "auto", background: "var(--bg)" }}>
-            {nativeSettingsError && (
-              <div role="alert" style={{ margin: 16, padding: "10px 14px", borderRadius: "var(--radius-card)", background: "var(--bg-panel)", border: "1px solid var(--status-error)", color: "var(--status-error)", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }}>
-                <AlertCircle size={14} aria-hidden="true" /> {nativeSettingsError}
-              </div>
-            )}
-
-            {/* GENERAL & UI TAB */}
+          <div style={{ display: "flex", flex: 1, minHeight: 0, flexDirection: isMobile ? "column" : "row" }}>
+            {searchQuery.trim() ? (
+              <SearchResultsList results={searchResults} query={searchQuery.trim()} onSelect={handleSelectSearchResult} />
+            ) : (
+              <SettingsHighlightContext.Provider value={highlightSettingId}>
+                <SettingsTabs active={currentTab} onSelect={requestTabChange} layout={isMobile ? "horizontal" : "vertical"} />
+                <div style={{ flex: 1, minWidth: 0, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+            {/* GENERAL TAB */}
             {currentTab === "general" && (
-              <div role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+              <div role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general" style={{ padding: isMobile ? "12px 14px" : 20, display: "flex", flexDirection: "column", gap: 16 }}>
                 <div>
-                  <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{t("settingsConfig.generalTitle")}</h3>
-                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>{t("settingsConfig.generalDescription")}</p>
+                  <h3 style={{ fontSize: "var(--text-base)", fontWeight: 600, margin: 0 }}>{t("settingsConfig.generalTitle")}</h3>
+                  <p style={{ margin: "4px 0 0", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>{t("settingsConfig.generalDescription")}</p>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
                   <NativeSetting label={t("settingsConfig.themeMode")} description={t("settingsConfig.themeModeDesc")} scope="UI">
-                    <div
-                      role="radiogroup"
-                      aria-label={t("settingsConfig.themeMode")}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 2,
-                        padding: 2,
-                        background: "var(--bg)",
-                        border: "1px solid var(--border)",
-                        borderRadius: "var(--radius-control)",
-                      }}
-                    >
+                    <div style={{ display: "inline-flex", padding: 2, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", gap: 2 }}>
                       {(["system", "light", "dark"] as const).map((mode) => {
                         const selected = preference === mode;
-                        const label = mode === "system"
-                          ? t("settingsConfig.themeModeSystem")
-                          : mode === "light"
-                          ? t("settingsConfig.themeModeLight")
-                          : t("settingsConfig.themeModeDark");
                         const Icon = mode === "system" ? Monitor : mode === "light" ? Sun : Moon;
+                        const label = mode === "system" ? t("settingsConfig.themeModeSystem") : mode === "light" ? t("settingsConfig.themeModeLight") : t("settingsConfig.themeModeDark");
                         return (
                           <button
                             key={mode}
                             type="button"
-                            className="ui-focus-ring"
-                            role="radio"
-                            aria-checked={selected}
+                            aria-label={label}
+                            aria-pressed={selected}
                             onClick={() => setTheme(mode)}
                             title={label}
+                            className="ui-focus-ring"
                             style={{
                               display: "inline-flex",
                               alignItems: "center",
@@ -702,17 +710,16 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                               height: 24,
                               padding: "0 8px",
                               border: "none",
-                              borderRadius: "calc(var(--radius-control) - 2px)",
+                              borderRadius: "calc(var(--radius-control) - var(--space-1))",
                               background: selected ? "var(--bg-selected)" : "transparent",
                               color: selected ? "var(--text)" : "var(--text-muted)",
                               fontWeight: selected ? 600 : 500,
-                              fontSize: 11,
+                              fontSize: "var(--text-sm)",
                               cursor: "pointer",
                               transition: "background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm)",
-                              outline: "none",
                             }}
                           >
-                            <Icon size={12} aria-hidden="true" style={{ color: selected ? "var(--accent)" : "currentColor", flexShrink: 0 }} />
+                            <Icon size={12} aria-hidden="true" />
                             <span>{label}</span>
                           </button>
                         );
@@ -720,33 +727,19 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                     </div>
                   </NativeSetting>
                   <NativeSetting label={t("settingsConfig.themePalette")} description={t("settingsConfig.themePaletteDesc")} scope="UI">
-                    <div
-                      role="radiogroup"
-                      aria-label={t("settingsConfig.themePalette")}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 2,
-                        padding: 2,
-                        background: "var(--bg)",
-                        border: "1px solid var(--border)",
-                        borderRadius: "var(--radius-control)",
-                      }}
-                    >
+                    <div style={{ display: "inline-flex", padding: 2, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", gap: 2 }}>
                       {(["warm", "omp"] as const).map((pal) => {
                         const selected = palette === pal;
-                        const label = pal === "warm"
-                          ? t("settingsConfig.paletteWarm")
-                          : t("settingsConfig.paletteOmp");
+                        const label = pal === "warm" ? t("settingsConfig.paletteWarm") : t("settingsConfig.paletteOmp");
                         return (
                           <button
                             key={pal}
                             type="button"
-                            className="ui-focus-ring"
-                            role="radio"
-                            aria-checked={selected}
+                            aria-label={label}
+                            aria-pressed={selected}
                             onClick={() => setPalette(pal)}
                             title={label}
+                            className="ui-focus-ring"
                             style={{
                               display: "inline-flex",
                               alignItems: "center",
@@ -754,14 +747,13 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                               height: 24,
                               padding: "0 8px",
                               border: "none",
-                              borderRadius: "calc(var(--radius-control) - 2px)",
+                              borderRadius: "calc(var(--radius-control) - var(--space-1))",
                               background: selected ? "var(--bg-selected)" : "transparent",
                               color: selected ? "var(--text)" : "var(--text-muted)",
                               fontWeight: selected ? 600 : 500,
-                              fontSize: 11,
+                              fontSize: "var(--text-sm)",
                               cursor: "pointer",
                               transition: "background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm)",
-                              outline: "none",
                             }}
                           >
                             <span
@@ -771,7 +763,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                                 alignItems: "center",
                                 gap: 2.5,
                                 padding: "2px 3px",
-                                borderRadius: 3,
+                                borderRadius: "calc(var(--radius-control) / 2)",
                                 background: "var(--bg-subtle)",
                                 flexShrink: 0,
                               }}
@@ -789,32 +781,39 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
                   <NativeSetting label={t("settingsConfig.toolCallsCollapsed")} description={t("settingsConfig.toolCallsCollapsedDesc")} scope="UI">
-                    <ToggleSwitch checked={toolCallsDefaultCollapsed} onChange={onToolCallsDefaultCollapsedChange} />
+                    <Switch
+                      checked={toolCallsDefaultCollapsed}
+                      onChange={(collapsed: boolean) => onToolCallsDefaultCollapsedChange(collapsed)}
+                      aria-label={t("settingsConfig.toolCallsCollapsed")}
+                    />
                   </NativeSetting>
                   <NativeSetting label={t("settingsConfig.completionSound")} description={t("settingsConfig.completionSoundDesc")} scope="UI">
-                    <ToggleSwitch
+                    <Switch
                       checked={soundEnabled}
-                      onChange={(next) => {
+                      onChange={(next: boolean) => {
                         setSoundEnabled(next);
                         persistSoundEnabled(next);
                         window.dispatchEvent(new CustomEvent("omp-sound-pref-change", { detail: next }));
                       }}
+                      aria-label={t("settingsConfig.completionSound")}
                     />
                   </NativeSetting>
                 </div>
                 <NativeSetting label={t("settingsConfig.submitBehavior")} description={t("settingsConfig.submitBehaviorDesc")} scope="UI">
-                  <select
-                    style={nativeSelectStyle}
+                  <Select
                     value={submitBehavior}
-                    onChange={(event) => {
-                      const next = event.target.value as SubmitDuringRunBehavior;
+                    onChange={(value: string) => {
+                      const next = value as SubmitDuringRunBehavior;
                       setSubmitDuringRunBehavior(next);
                       setSubmitBehavior(next);
                     }}
-                  >
-                    <option value="steer" style={nativeOptionStyle}>{t("settingsConfig.steerCurrent")}</option>
-                    <option value="queue" style={nativeOptionStyle}>{t("settingsConfig.queueFollowUp")}</option>
-                  </select>
+                    required
+                    options={[
+                      { value: "steer", label: t("settingsConfig.steerCurrent") },
+                      { value: "queue", label: t("settingsConfig.queueFollowUp") },
+                    ]}
+                    aria-label={t("settingsConfig.submitBehavior")}
+                  />
                 </NativeSetting>
               </div>
             )}
@@ -833,15 +832,17 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                   compact
                   hideDescription={isMobile}
                 >
-                  <select
-                    style={nativeSelectStyle}
+                  <Select
                     value={nativeSettings?.task?.eager ?? "default"}
-                    onChange={(event) => patchSection("task", { eager: event.target.value as NonNullable<NativeSettings["task"]>["eager"] })}
-                  >
-                    <option value="default" style={nativeOptionStyle}>{t("settingsConfig.delegationDefault")}</option>
-                    <option value="preferred" style={nativeOptionStyle}>{t("settingsConfig.delegationPreferred")}</option>
-                    <option value="always" style={nativeOptionStyle}>{t("settingsConfig.delegationAlways")}</option>
-                  </select>
+                    onChange={(value: string) => patchSection("task", { eager: value as NonNullable<NativeSettings["task"]>["eager"] })}
+                    required
+                    options={[
+                      { value: "default", label: t("settingsConfig.delegationDefault") },
+                      { value: "preferred", label: t("settingsConfig.delegationPreferred") },
+                      { value: "always", label: t("settingsConfig.delegationAlways") },
+                    ]}
+                    aria-label={t("settingsConfig.preferTaskDelegation")}
+                  />
                 </NativeSetting>
                 <AgentsConfig cwd={cwd ?? undefined} onSaved={onModelsSaved} />
               </div>
@@ -851,41 +852,47 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
             {currentTab === "safety" && (
               <div role="tabpanel" id="settings-panel-safety" aria-labelledby="settings-tab-safety" style={{ padding: isMobile ? "12px 14px" : 20, display: "flex", flexDirection: "column", gap: 16 }}>
                 <div>
-                  <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{t("settingsConfig.safetyTitle")}</h3>
-                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>{t("settingsConfig.safetyDescription")}</p>
+                  <h3 style={{ fontSize: "var(--text-base)", fontWeight: 600, margin: 0 }}>{t("settingsConfig.safetyTitle")}</h3>
+                  <p style={{ margin: "4px 0 0", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>{t("settingsConfig.safetyDescription")}</p>
                 </div>
                 <NativeSetting label={t("settingsConfig.approvalMode")} description={t("settingsConfig.approvalModeDesc")} scope="New sessions" compact hideDescription={isMobile}>
-                  <select
-                    style={nativeSelectStyle}
+                  <Select
                     value={nativeSettings?.tools?.approvalMode ?? "yolo"}
-                    onChange={(event) => patchSection("tools", { approvalMode: event.target.value as "always-ask" | "write" | "yolo" })}
-                  >
-                    <option value="always-ask" style={nativeOptionStyle}>{t("settingsConfig.approvalAlwaysAsk")}</option>
-                    <option value="write" style={nativeOptionStyle}>{t("settingsConfig.approvalWrite")}</option>
-                    <option value="yolo" style={nativeOptionStyle}>{t("settingsConfig.approvalYolo")}</option>
-                  </select>
+                    onChange={(value: string) => patchSection("tools", { approvalMode: value as "always-ask" | "write" | "yolo" })}
+                    required
+                    options={[
+                      { value: "always-ask", label: t("settingsConfig.approvalAlwaysAsk") },
+                      { value: "write", label: t("settingsConfig.approvalWrite") },
+                      { value: "yolo", label: t("settingsConfig.approvalYolo") },
+                    ]}
+                    aria-label={t("settingsConfig.approvalMode")}
+                  />
                 </NativeSetting>
                 <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
                   <NativeSetting label={t("settingsConfig.bashApproval")} description={t("settingsConfig.bashApprovalDesc")} scope="New sessions">
-                    <select
-                      style={nativeSelectStyle}
+                    <Select
                       value={nativeSettings?.tools?.approval?.bash ?? "prompt"}
-                      onChange={(event) => patchApproval({ bash: event.target.value as "allow" | "prompt" | "deny" })}
-                    >
-                      <option value="allow" style={nativeOptionStyle}>{t("settingsConfig.allow")}</option>
-                      <option value="prompt" style={nativeOptionStyle}>{t("settingsConfig.alwaysAsk")}</option>
-                      <option value="deny" style={nativeOptionStyle}>{t("settingsConfig.deny")}</option>
-                    </select>
+                      onChange={(value: string) => patchApproval({ bash: value as "allow" | "prompt" | "deny" })}
+                      required
+                      options={[
+                        { value: "allow", label: t("settingsConfig.allow") },
+                        { value: "prompt", label: t("settingsConfig.alwaysAsk") },
+                        { value: "deny", label: t("settingsConfig.deny") },
+                      ]}
+                      aria-label={t("settingsConfig.bashApproval")}
+                    />
                   </NativeSetting>
                   <NativeSetting label={t("settingsConfig.extensionApproval")} description={t("settingsConfig.extensionApprovalDesc")} scope="New sessions">
-                    <select
-                      style={nativeSelectStyle}
+                    <Select
                       value={nativeSettings?.tools?.approval?.extension ?? "prompt"}
-                      onChange={(event) => patchApproval({ extension: event.target.value as "allow" | "prompt" })}
-                    >
-                      <option value="prompt" style={nativeOptionStyle}>{t("settingsConfig.askEveryTime")}</option>
-                      <option value="allow" style={nativeOptionStyle}>{t("settingsConfig.autoApprove")}</option>
-                    </select>
+                      onChange={(value: string) => patchApproval({ extension: value as "allow" | "prompt" })}
+                      required
+                      options={[
+                        { value: "prompt", label: t("settingsConfig.askEveryTime") },
+                        { value: "allow", label: t("settingsConfig.autoApprove") },
+                      ]}
+                      aria-label={t("settingsConfig.extensionApproval")}
+                    />
                   </NativeSetting>
                 </div>
               </div>
@@ -895,53 +902,49 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
             {currentTab === "models" && (
               <div role="tabpanel" id="settings-panel-models" aria-labelledby="settings-tab-models" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
                 <div>
-                  <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{t("settingsConfig.modelsTitle")}</h3>
-                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>{t("settingsConfig.modelsDescription")}</p>
+                  <h3 style={{ fontSize: "var(--text-base)", fontWeight: 600, margin: 0 }}>{t("settingsConfig.modelsTitle")}</h3>
+                  <p style={{ margin: "4px 0 0", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>{t("settingsConfig.modelsDescription")}</p>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
                   <NativeSetting label={t("settingsConfig.reasoning")} description={t("settingsConfig.reasoningDesc")} scope="New sessions">
-                    <select
-                      style={nativeSelectStyle}
+                    <Select
                       value={nativeSettings?.defaultThinkingLevel ?? "high"}
-                      onChange={(e) => patchSettings({ defaultThinkingLevel: e.target.value as NativeSettings["defaultThinkingLevel"] })}
-                    >
-                      {["auto", "minimal", "low", "medium", "high", "xhigh", "max"].map((l) => (
-                        <option key={l} value={l} style={nativeOptionStyle}>{l}</option>
-                      ))}
-                    </select>
+                      onChange={(value: string) => patchSettings({ defaultThinkingLevel: value as NativeSettings["defaultThinkingLevel"] })}
+                      required
+                      options={["auto", "minimal", "low", "medium", "high", "xhigh", "max"]}
+                      aria-label={t("settingsConfig.reasoning")}
+                    />
                   </NativeSetting>
                   <NativeSetting label={t("settingsConfig.verbosity")} description={t("settingsConfig.verbosityDesc")} scope="New sessions">
-                    <select
-                      style={nativeSelectStyle}
+                    <Select
                       value={nativeSettings?.textVerbosity ?? "medium"}
-                      onChange={(e) => patchSettings({ textVerbosity: e.target.value as NativeSettings["textVerbosity"] })}
-                    >
-                      {["low", "medium", "high"].map((l) => (
-                        <option key={l} value={l} style={nativeOptionStyle}>{l}</option>
-                      ))}
-                    </select>
+                      onChange={(value: string) => patchSettings({ textVerbosity: value as NativeSettings["textVerbosity"] })}
+                      required
+                      options={["low", "medium", "high"]}
+                      aria-label={t("settingsConfig.verbosity")}
+                    />
                   </NativeSetting>
                   <NativeSetting label={t("settingsConfig.personality")} description={t("settingsConfig.personalityDesc")} scope="New sessions">
-                    <select
-                      style={nativeSelectStyle}
+                    <Select
                       value={nativeSettings?.personality ?? "default"}
-                      onChange={(e) => patchSettings({ personality: e.target.value as NativeSettings["personality"] })}
-                    >
-                      {["default", "friendly", "pragmatic", "none"].map((p) => (
-                        <option key={p} value={p} style={nativeOptionStyle}>{p}</option>
-                      ))}
-                    </select>
+                      onChange={(value: string) => patchSettings({ personality: value as NativeSettings["personality"] })}
+                      required
+                      options={["default", "friendly", "pragmatic", "none"]}
+                      aria-label={t("settingsConfig.personality")}
+                    />
                   </NativeSetting>
                   <NativeSetting label={t("settingsConfig.hideThinking")} description={t("settingsConfig.hideThinkingDesc")} scope="New sessions">
-                    <ToggleSwitch
+                    <Switch
                       checked={nativeSettings?.hideThinkingBlock ?? false}
-                      onChange={(checked) => patchSettings({ hideThinkingBlock: checked })}
+                      onChange={(checked: boolean) => patchSettings({ hideThinkingBlock: checked })}
+                      aria-label={t("settingsConfig.hideThinking")}
                     />
                   </NativeSetting>
                   <NativeSetting label={t("settingsConfig.externalThinking")} description={t("settingsConfig.externalThinkingDesc")} scope="New sessions">
-                    <ToggleSwitch
+                    <Switch
                       checked={nativeSettings?.externalThinking ?? false}
-                      onChange={(checked) => patchSettings({ externalThinking: checked })}
+                      onChange={(checked: boolean) => patchSettings({ externalThinking: checked })}
+                      aria-label={t("settingsConfig.externalThinking")}
                     />
                   </NativeSetting>
                 </div>
@@ -960,40 +963,44 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
               <div role="tabpanel" id="settings-panel-intelligence" aria-labelledby="settings-tab-intelligence" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 18 }}>
                 {/* Advisor Section */}
                 <section style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--text-md)", fontWeight: 600 }}>
                     <Sparkles size={14} aria-hidden="true" style={{ color: "var(--accent)" }} /> {t("settingsConfig.advisorReview")}
                   </div>
-                  <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>{t("settingsConfig.advisorReviewDesc")}</p>
+                  <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>{t("settingsConfig.advisorReviewDesc")}</p>
                   <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
                     <NativeSetting label={t("settingsConfig.enableAdvisor")} description={t("settingsConfig.enableAdvisorDesc")} scope="New sessions">
-                      <ToggleSwitch
+                      <Switch
                         checked={nativeSettings?.advisor?.enabled ?? advisorEnabled}
-                        onChange={(enabled) => {
+                        onChange={(enabled: boolean) => {
                           onAdvisorChange(enabled);
                           patchSection("advisor", { enabled });
                         }}
+                        aria-label={t("settingsConfig.enableAdvisor")}
                       />
                     </NativeSetting>
                     {(nativeSettings?.advisor?.enabled ?? advisorEnabled) && (
                       <NativeSetting label={t("settingsConfig.advisorBacklog")} description={t("settingsConfig.advisorBacklogDesc")} scope="New sessions">
-                        <select
-                          style={nativeSelectStyle}
+                        <Select
                           value={nativeSettings?.advisor?.syncBacklog ?? "off"}
-                          onChange={(e) => patchSection("advisor", { syncBacklog: e.target.value as "off" | "1" | "3" | "5" })}
-                        >
-                          <option value="off" style={nativeOptionStyle}>{t("settingsConfig.backlogOff")}</option>
-                          <option value="1" style={nativeOptionStyle}>{t("settingsConfig.backlog1")}</option>
-                          <option value="3" style={nativeOptionStyle}>{t("settingsConfig.backlog3")}</option>
-                          <option value="5" style={nativeOptionStyle}>{t("settingsConfig.backlog5")}</option>
-                        </select>
+                          onChange={(value: string) => patchSection("advisor", { syncBacklog: value as "off" | "1" | "3" | "5" })}
+                          required
+                          options={[
+                            { value: "off", label: t("settingsConfig.backlogOff") },
+                            { value: "1", label: t("settingsConfig.backlog1") },
+                            { value: "3", label: t("settingsConfig.backlog3") },
+                            { value: "5", label: t("settingsConfig.backlog5") },
+                          ]}
+                          aria-label={t("settingsConfig.advisorBacklog")}
+                        />
                       </NativeSetting>
                     )}
                   </div>
                   {(nativeSettings?.advisor?.enabled ?? advisorEnabled) && (
                     <NativeSetting label={t("settingsConfig.reviewSubagents")} description={t("settingsConfig.reviewSubagentsDesc")} scope="New sessions">
-                      <ToggleSwitch
+                      <Switch
                         checked={nativeSettings?.advisor?.subagents ?? false}
-                        onChange={(checked) => patchSection("advisor", { subagents: checked })}
+                        onChange={(checked: boolean) => patchSection("advisor", { subagents: checked })}
+                        aria-label={t("settingsConfig.reviewSubagents")}
                       />
                     </NativeSetting>
                   )}
@@ -1001,38 +1008,43 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
 
                 {/* Context Compaction Section */}
                 <section style={{ display: "flex", flexDirection: "column", gap: 10, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{t("settingsConfig.contextCompaction")}</div>
-                  <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>{t("settingsConfig.contextCompactionDesc")}</p>
+                  <div style={{ fontSize: "var(--text-md)", fontWeight: 600 }}>{t("settingsConfig.contextCompaction")}</div>
+                  <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>{t("settingsConfig.contextCompactionDesc")}</p>
                   <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
                     <NativeSetting label={t("settingsConfig.autoCompaction")} description={t("settingsConfig.autoCompactionDesc")} scope="New sessions">
-                      <ToggleSwitch
+                      <Switch
                         checked={nativeSettings?.compaction?.enabled ?? true}
-                        onChange={(checked) => patchSection("compaction", { enabled: checked })}
+                        onChange={(checked: boolean) => patchSection("compaction", { enabled: checked })}
+                        aria-label={t("settingsConfig.autoCompaction")}
                       />
                     </NativeSetting>
                     <NativeSetting label={t("settingsConfig.autoContinueCompaction")} description={t("settingsConfig.autoContinueCompactionDesc")} scope="New sessions">
-                      <ToggleSwitch
+                      <Switch
                         checked={nativeSettings?.compaction?.autoContinue ?? true}
-                        onChange={(checked) => patchSection("compaction", { autoContinue: checked })}
+                        onChange={(checked: boolean) => patchSection("compaction", { autoContinue: checked })}
+                        aria-label={t("settingsConfig.autoContinueCompaction")}
                       />
                     </NativeSetting>
                     <NativeSetting label={t("settingsConfig.compactionStrategy")} description={t("settingsConfig.compactionStrategyDesc")} scope="New sessions">
-                      <select
-                        style={nativeSelectStyle}
+                      <Select
                         value={nativeSettings?.compaction?.strategy ?? "snapcompact"}
-                        onChange={(e) => patchSection("compaction", { strategy: e.target.value as NonNullable<NativeSettings["compaction"]>["strategy"] })}
-                      >
-                        <option value="snapcompact" style={nativeOptionStyle}>Snapcompact</option>
-                        <option value="handoff" style={nativeOptionStyle}>Handoff</option>
-                        <option value="context-full" style={nativeOptionStyle}>Context full</option>
-                        <option value="shake" style={nativeOptionStyle}>Shake</option>
-                        <option value="off" style={nativeOptionStyle}>Off</option>
-                      </select>
+                        onChange={(value: string) => patchSection("compaction", { strategy: value as NonNullable<NativeSettings["compaction"]>["strategy"] })}
+                        required
+                        options={[
+                          { value: "snapcompact", label: "Snapcompact" },
+                          { value: "handoff", label: "Handoff" },
+                          { value: "context-full", label: "Context full" },
+                          { value: "shake", label: "Shake" },
+                          { value: "off", label: "Off" },
+                        ]}
+                        aria-label={t("settingsConfig.compactionStrategy")}
+                      />
                     </NativeSetting>
                     <NativeSetting label={t("settingsConfig.compactMidTurn")} description={t("settingsConfig.compactMidTurnDesc")} scope="New sessions">
-                      <ToggleSwitch
+                      <Switch
                         checked={nativeSettings?.compaction?.midTurnEnabled ?? true}
-                        onChange={(checked) => patchSection("compaction", { midTurnEnabled: checked })}
+                        onChange={(checked: boolean) => patchSection("compaction", { midTurnEnabled: checked })}
+                        aria-label={t("settingsConfig.compactMidTurn")}
                       />
                     </NativeSetting>
                   </div>
@@ -1040,54 +1052,62 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
 
                 {/* Memory & Auto-Learn Section */}
                 <section style={{ display: "flex", flexDirection: "column", gap: 10, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{t("settingsConfig.memoryAndAutoLearn")}</div>
-                  <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>{t("settingsConfig.memoryAndAutoLearnDesc")}</p>
+                  <div style={{ fontSize: "var(--text-md)", fontWeight: 600 }}>{t("settingsConfig.memoryAndAutoLearn")}</div>
+                  <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>{t("settingsConfig.memoryAndAutoLearnDesc")}</p>
                   <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
                     <NativeSetting label={t("settingsConfig.memoryBackend")} description={t("settingsConfig.memoryBackendDesc")} scope="New sessions">
-                      <select
-                        style={nativeSelectStyle}
+                      <Select
                         value={nativeSettings?.memory?.backend ?? "mnemopi"}
-                        onChange={(e) => patchSection("memory", { backend: e.target.value as NonNullable<NativeSettings["memory"]>["backend"] })}
-                      >
-                        <option value="off" style={nativeOptionStyle}>{t("settingsConfig.backlogOff")}</option>
-                        <option value="local" style={nativeOptionStyle}>{t("settingsConfig.memoryLocal")}</option>
-                        <option value="mnemopi" style={nativeOptionStyle}>{t("settingsConfig.memoryMnemopi")}</option>
-                        <option value="hindsight" style={nativeOptionStyle}>{t("settingsConfig.memoryHindsight")}</option>
-                      </select>
+                        onChange={(value: string) => patchSection("memory", { backend: value as NonNullable<NativeSettings["memory"]>["backend"] })}
+                        required
+                        options={[
+                          { value: "off", label: t("settingsConfig.backlogOff") },
+                          { value: "local", label: t("settingsConfig.memoryLocal") },
+                          { value: "mnemopi", label: t("settingsConfig.memoryMnemopi") },
+                          { value: "hindsight", label: t("settingsConfig.memoryHindsight") },
+                        ]}
+                        aria-label={t("settingsConfig.memoryBackend")}
+                      />
                     </NativeSetting>
                     <NativeSetting label={t("settingsConfig.enableAutolearn")} description={t("settingsConfig.enableAutolearnDesc")} scope="New sessions">
-                      <ToggleSwitch
+                      <Switch
                         checked={nativeSettings?.autolearn?.enabled ?? true}
-                        onChange={(checked) => patchSection("autolearn", { enabled: checked })}
+                        onChange={(checked: boolean) => patchSection("autolearn", { enabled: checked })}
+                        aria-label={t("settingsConfig.enableAutolearn")}
                       />
                     </NativeSetting>
                     <NativeSetting label={t("settingsConfig.privateCaptureTurn")} description={t("settingsConfig.privateCaptureTurnDesc")} scope="New sessions">
-                      <ToggleSwitch
+                      <Switch
                         checked={nativeSettings?.autolearn?.autoContinue ?? true}
-                        onChange={(checked) => patchSection("autolearn", { autoContinue: checked })}
+                        onChange={(checked: boolean) => patchSection("autolearn", { autoContinue: checked })}
+                        aria-label={t("settingsConfig.privateCaptureTurn")}
                       />
                     </NativeSetting>
                     <NativeSetting label={t("settingsConfig.memoryScope")} description={t("settingsConfig.memoryScopeDesc")} scope="New sessions">
-                      <select
-                        style={nativeSelectStyle}
+                      <Select
                         value={nativeSettings?.mnemopi?.scoping ?? "per-project"}
-                        onChange={(e) => patchSection("mnemopi", { scoping: e.target.value as NonNullable<NativeSettings["mnemopi"]>["scoping"] })}
-                      >
-                        <option value="per-project" style={nativeOptionStyle}>{t("settingsConfig.scopePerProject")}</option>
-                        <option value="per-project-tagged" style={nativeOptionStyle}>{t("settingsConfig.scopePerProjectTagged")}</option>
-                        <option value="global" style={nativeOptionStyle}>{t("settingsConfig.scopeGlobal")}</option>
-                      </select>
+                        onChange={(value: string) => patchSection("mnemopi", { scoping: value as NonNullable<NativeSettings["mnemopi"]>["scoping"] })}
+                        required
+                        options={[
+                          { value: "per-project", label: t("settingsConfig.scopePerProject") },
+                          { value: "per-project-tagged", label: t("settingsConfig.scopePerProjectTagged") },
+                          { value: "global", label: t("settingsConfig.scopeGlobal") },
+                        ]}
+                        aria-label={t("settingsConfig.memoryScope")}
+                      />
                     </NativeSetting>
                     <NativeSetting label={t("settingsConfig.autoRecall")} description={t("settingsConfig.autoRecallDesc")} scope="New sessions">
-                      <ToggleSwitch
+                      <Switch
                         checked={nativeSettings?.mnemopi?.autoRecall ?? true}
-                        onChange={(checked) => patchSection("mnemopi", { autoRecall: checked })}
+                        onChange={(checked: boolean) => patchSection("mnemopi", { autoRecall: checked })}
+                        aria-label={t("settingsConfig.autoRecall")}
                       />
                     </NativeSetting>
                     <NativeSetting label={t("settingsConfig.autoRetain")} description={t("settingsConfig.autoRetainDesc")} scope="New sessions">
-                      <ToggleSwitch
+                      <Switch
                         checked={nativeSettings?.mnemopi?.autoRetain ?? true}
-                        onChange={(checked) => patchSection("mnemopi", { autoRetain: checked })}
+                        onChange={(checked: boolean) => patchSection("mnemopi", { autoRetain: checked })}
+                        aria-label={t("settingsConfig.autoRetain")}
                       />
                     </NativeSetting>
                   </div>
@@ -1095,89 +1115,90 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
 
                 {/* Retry and fallback are edited here only; provider/model setup stays in ModelsConfig. */}
                 <section style={{ display: "flex", flexDirection: "column", gap: 10, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{t("settingsConfig.autoRetry")}</div>
-                  <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>{t("settingsConfig.autoRetryDesc")}</p>
+                  <div style={{ fontSize: "var(--text-md)", fontWeight: 600 }}>{t("settingsConfig.autoRetry")}</div>
+                  <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>{t("settingsConfig.autoRetryDesc")}</p>
                   <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
                     <NativeSetting label={t("settingsConfig.enableRetry")} description={t("settingsConfig.enableRetryDesc")} scope="New sessions">
-                      <ToggleSwitch
+                      <Switch
                         checked={retrySettings.enabled ?? NATIVE_RETRY_DEFAULTS.enabled}
-                        onChange={(checked) => patchSection("retry", { enabled: checked })}
+                        onChange={(checked: boolean) => patchSection("retry", { enabled: checked })}
+                        aria-label={t("settingsConfig.enableRetry")}
                       />
                     </NativeSetting>
                     <NativeSetting label={t("settingsConfig.maxAttempts")} description={t("settingsConfig.maxAttemptsDesc")} scope="New sessions">
-                      <select
-                        style={nativeSelectStyle}
+                      <Select
                         value={String(retrySettings.maxRetries ?? NATIVE_RETRY_DEFAULTS.maxRetries)}
-                        onChange={(e) => patchSection("retry", { maxRetries: Number(e.target.value) })}
-                      >
-                        {NATIVE_RETRY_COUNTS.map((n) => (
-                          <option key={n} value={n} style={nativeOptionStyle}>{n}</option>
-                        ))}
-                      </select>
+                        onChange={(value: string) => patchSection("retry", { maxRetries: Number(value) })}
+                        required
+                        options={NATIVE_RETRY_COUNTS.map(String)}
+                        aria-label={t("settingsConfig.maxAttempts")}
+                      />
                     </NativeSetting>
                     <NativeSetting label={t("settingsConfig.modelFallback")} description={t("settingsConfig.modelFallbackDesc")} scope="New sessions">
-                      <ToggleSwitch
+                      <Switch
                         checked={retrySettings.modelFallback ?? NATIVE_RETRY_DEFAULTS.modelFallback}
-                        onChange={(checked) => patchSection("retry", { modelFallback: checked })}
+                        onChange={(checked: boolean) => patchSection("retry", { modelFallback: checked })}
+                        aria-label={t("settingsConfig.modelFallback")}
                       />
                     </NativeSetting>
                     <NativeSetting label={t("settingsConfig.fallbackRevertPolicy")} description={t("settingsConfig.fallbackRevertPolicyDesc")} scope="New sessions">
-                      <select
-                        style={nativeSelectStyle}
+                      <Select
                         value={retrySettings.fallbackRevertPolicy ?? NATIVE_RETRY_DEFAULTS.fallbackRevertPolicy}
-                        onChange={(e) => patchSection("retry", { fallbackRevertPolicy: e.target.value as NonNullable<NativeSettings["retry"]>["fallbackRevertPolicy"] })}
-                      >
-                        <option value="cooldown-expiry" style={nativeOptionStyle}>{t("settingsConfig.fallbackRevertCooldown")}</option>
-                        <option value="never" style={nativeOptionStyle}>{t("settingsConfig.fallbackRevertNever")}</option>
-                      </select>
+                        onChange={(value: string) => patchSection("retry", { fallbackRevertPolicy: value as NonNullable<NativeSettings["retry"]>["fallbackRevertPolicy"] })}
+                        required
+                        options={[
+                          { value: "cooldown-expiry", label: t("settingsConfig.fallbackRevertCooldown") },
+                          { value: "never", label: t("settingsConfig.fallbackRevertNever") },
+                        ]}
+                        aria-label={t("settingsConfig.fallbackRevertPolicy")}
+                      />
                     </NativeSetting>
                   </div>
 
                   <section data-search-id={slugify("Fallback chain")} style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4, border: "1px solid var(--border)", borderRadius: "var(--radius-card)", overflow: "hidden" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 12px", background: "var(--bg-panel)", borderBottom: "1px solid var(--border)" }}>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "var(--text)", fontSize: 12.5, fontWeight: 600 }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "var(--text)", fontSize: "var(--text-base)", fontWeight: 600 }}>
                         {t("settingsConfig.fallbackChainFor")}
                         <span style={chipStyle}>{t("settingsConfig.newSessions")}</span>
                       </span>
-                      <select
+                      <Select
                         aria-label={t("settingsConfig.fallbackChainRole")}
                         value={fallbackRole}
-                        onChange={(event) => { setFallbackRole(event.target.value); setFallbackCandidate(""); }}
-                        style={{ ...nativeSelectStyle, minHeight: 28, padding: "3px 26px 3px 8px" }}
-                      >
-                        {NATIVE_MODEL_ROLES.map((role) => <option key={role} value={role} style={nativeOptionStyle}>{role}</option>)}
-                      </select>
+                        onChange={(value: string) => { setFallbackRole(value); setFallbackCandidate(""); }}
+                        required
+                        options={NATIVE_MODEL_ROLES}
+                        style={{ width: "auto", minWidth: 120 }}
+                      />
                     </div>
                     <div style={{ display: "flex", gap: 8, padding: "10px 12px" }}>
-                      <select
+                      <Select
                         aria-label={t("settingsConfig.selectFallbackModel")}
                         value={fallbackCandidate}
-                        onChange={(event) => setFallbackCandidate(event.target.value)}
-                        style={{ ...nativeSelectStyle, flex: 1, minWidth: 0 }}
-                      >
-                        <option value="" style={nativeOptionStyle}>{t("settingsConfig.selectFallbackModel")}</option>
-                        {fallbackModelOptions.filter((model) => !fallbackChain.includes(model)).map((model) => <option key={model} value={model} style={nativeOptionStyle}>{model}</option>)}
-                      </select>
+                        onChange={(value: string) => setFallbackCandidate(value)}
+                        placeholder={t("settingsConfig.selectFallbackModel")}
+                        options={fallbackModelOptions.filter((model) => !fallbackChain.includes(model))}
+                        style={{ flex: 1, minWidth: 0 }}
+                      />
                       <button
                         type="button"
                         disabled={!fallbackCandidate}
                         onClick={() => { updateFallbackChain([...fallbackChain, fallbackCandidate]); setFallbackCandidate(""); }}
-                        style={{ padding: "6px 10px", border: "none", borderRadius: "var(--radius-control)", background: "var(--accent)", color: "var(--on-accent)", cursor: fallbackCandidate ? "pointer" : "not-allowed", opacity: fallbackCandidate ? 1 : 0.5, fontSize: 12, whiteSpace: "nowrap" }}
+                        style={{ padding: "6px 10px", border: "none", borderRadius: "var(--radius-control)", background: "var(--accent)", color: "var(--on-accent)", cursor: fallbackCandidate ? "pointer" : "not-allowed", opacity: fallbackCandidate ? 1 : 0.5, fontSize: "var(--text-sm)", whiteSpace: "nowrap" }}
                       >
                         {t("settingsConfig.addFallback")}
                       </button>
                     </div>
                     {fallbackChain.length === 0 ? (
-                      <div style={{ padding: "0 12px 12px", color: "var(--text-dim)", fontSize: 11.5 }}>{t("settingsConfig.noFallbackChain")}</div>
+                      <div style={{ padding: "0 12px 12px", color: "var(--text-dim)", fontSize: "var(--text-sm)" }}>{t("settingsConfig.noFallbackChain")}</div>
                     ) : (
                       <div style={{ borderTop: "1px solid var(--border)" }}>
                         {fallbackChain.map((selector, index) => (
-                          <div key={`${selector}-${index}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", color: "var(--text-muted)", fontSize: 11.5 }}>
+                          <div key={`${selector}-${index}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
                             <span style={{ width: 18, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>{index + 1}</span>
                             <code style={{ flex: 1 }}>{selector}</code>
-                            <button type="button" aria-label={t("settingsConfig.moveFallbackUp", { model: selector })} title={t("settingsConfig.moveFallbackUp", { model: selector })} disabled={index === 0} onClick={() => { const next = [...fallbackChain]; const previous = next[index - 1]; next[index - 1] = next[index]; next[index] = previous; updateFallbackChain(next); }} className="ui-focus-ring" style={{ width: 24, height: 24, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "none", borderRadius: 4, background: "transparent", color: "var(--text-muted)", cursor: index === 0 ? "default" : "pointer" }}><span aria-hidden="true">↑</span></button>
-                            <button type="button" aria-label={t("settingsConfig.moveFallbackDown", { model: selector })} title={t("settingsConfig.moveFallbackDown", { model: selector })} disabled={index === fallbackChain.length - 1} onClick={() => { const next = [...fallbackChain]; const following = next[index + 1]; next[index + 1] = next[index]; next[index] = following; updateFallbackChain(next); }} className="ui-focus-ring" style={{ width: 24, height: 24, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "none", borderRadius: 4, background: "transparent", color: "var(--text-muted)", cursor: index === fallbackChain.length - 1 ? "default" : "pointer" }}><span aria-hidden="true">↓</span></button>
-                            <button type="button" aria-label={t("settingsConfig.removeFallback", { model: selector })} title={t("settingsConfig.removeFallback", { model: selector })} onClick={() => updateFallbackChain(fallbackChain.filter((value, valueIndex) => valueIndex !== index))} className="ui-focus-ring" style={{ width: 24, height: 24, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "none", borderRadius: 4, background: "transparent", color: "var(--text-muted)", cursor: "pointer" }}><span aria-hidden="true">×</span></button>
+                            <button type="button" aria-label={t("settingsConfig.moveFallbackUp", { model: selector })} title={t("settingsConfig.moveFallbackUp", { model: selector })} disabled={index === 0} onClick={() => { const next = [...fallbackChain]; const previous = next[index - 1]; next[index - 1] = next[index]; next[index] = previous; updateFallbackChain(next); }} className="ui-focus-ring" style={{ width: 24, height: 24, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "none", borderRadius: "calc(var(--radius-control) / 2)", background: "transparent", color: "var(--text-muted)", cursor: index === 0 ? "default" : "pointer" }}><span aria-hidden="true">↑</span></button>
+                            <button type="button" aria-label={t("settingsConfig.moveFallbackDown", { model: selector })} title={t("settingsConfig.moveFallbackDown", { model: selector })} disabled={index === fallbackChain.length - 1} onClick={() => { const next = [...fallbackChain]; const following = next[index + 1]; next[index + 1] = next[index]; next[index] = following; updateFallbackChain(next); }} className="ui-focus-ring" style={{ width: 24, height: 24, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "none", borderRadius: "calc(var(--radius-control) / 2)", background: "transparent", color: "var(--text-muted)", cursor: index === fallbackChain.length - 1 ? "default" : "pointer" }}><span aria-hidden="true">↓</span></button>
+                            <button type="button" aria-label={t("settingsConfig.removeFallback", { model: selector })} title={t("settingsConfig.removeFallback", { model: selector })} onClick={() => updateFallbackChain(fallbackChain.filter((value, valueIndex) => valueIndex !== index))} className="ui-focus-ring" style={{ width: 24, height: 24, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "none", borderRadius: "calc(var(--radius-control) / 2)", background: "transparent", color: "var(--text-muted)", cursor: "pointer" }}><span aria-hidden="true">×</span></button>
                           </div>
                         ))}
                       </div>
@@ -1191,8 +1212,8 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
             {currentTab === "extensions" && (
               <div role="tabpanel" id="settings-panel-extensions" aria-labelledby="settings-tab-extensions" style={{ display: "flex", height: "100%", minHeight: 0, flexDirection: "column", overflowY: "hidden", padding: 20, gap: 16 }}>
                 <div>
-                  <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{t("settingsTabs.extensions")}</h3>
-                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>{t("settingsTabs.extensionsDesc")}</p>
+                  <h3 style={{ fontSize: "var(--text-base)", fontWeight: 600, margin: 0 }}>{t("settingsTabs.extensions")}</h3>
+                  <p style={{ margin: "4px 0 0", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>{t("settingsTabs.extensionsDesc")}</p>
                 </div>
                 <ExtensionsTabs active={extensionTab} onSelect={requestTabChange} />
 
@@ -1209,49 +1230,51 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                   <div role="tabpanel" id="settings-extension-panel-mcp" aria-labelledby="settings-extension-tab-mcp" style={{ display: "flex", flex: 1, minHeight: 0, flexDirection: "column", overflowY: "auto", gap: 12 }}>
                     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 10 }}>
                       <NativeSetting label={t("settingsConfig.loadProjectMcp")} description={t("settingsConfig.loadProjectMcpDesc")} scope="New sessions">
-                        <ToggleSwitch
+                        <Switch
                           checked={nativeSettings?.mcp?.enableProjectConfig ?? true}
-                          onChange={(checked) => patchSection("mcp", { enableProjectConfig: checked })}
+                          onChange={(checked: boolean) => patchSection("mcp", { enableProjectConfig: checked })}
+                          aria-label={t("settingsConfig.loadProjectMcp")}
                         />
                       </NativeSetting>
                       <NativeSetting label={t("settingsConfig.renderMcpMarkdown")} description={t("settingsConfig.renderMcpMarkdownDesc")} scope="New sessions">
-                        <ToggleSwitch
+                        <Switch
                           checked={nativeSettings?.mcp?.renderMarkdownResults ?? true}
-                          onChange={(checked) => patchSection("mcp", { renderMarkdownResults: checked })}
+                          onChange={(checked: boolean) => patchSection("mcp", { renderMarkdownResults: checked })}
+                          aria-label={t("settingsConfig.renderMcpMarkdown")}
                         />
                       </NativeSetting>
                       <NativeSetting label={t("settingsConfig.mcpResourceUpdates")} description={t("settingsConfig.mcpResourceUpdatesDesc")} scope="New sessions">
-                        <ToggleSwitch
+                        <Switch
                           checked={nativeSettings?.mcp?.notifications ?? false}
-                          onChange={(checked) => patchSection("mcp", { notifications: checked })}
+                          onChange={(checked: boolean) => patchSection("mcp", { notifications: checked })}
+                          aria-label={t("settingsConfig.mcpResourceUpdates")}
                         />
                       </NativeSetting>
                     </div>
-                    <McpConfig cwd={cwd} sessionId={sessionId} />
-                    {!cwd && <p role="status" style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>{t("settingsConfig.noWorkspaceMcpHint")}</p>}
+                    <McpConfig cwd={cwd ?? null} sessionId={sessionId ?? undefined} />
+                    {!cwd && <p role="status" style={{ margin: 0, color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>{t("settingsConfig.noWorkspaceMcpHint")}</p>}
                   </div>
                 )}
 
                 {extensionTab === "skills" && (
                   <div role="tabpanel" id="settings-extension-panel-skills" aria-labelledby="settings-extension-tab-skills" style={{ display: "flex", flex: 1, minHeight: 0, flexDirection: "column", overflowY: "auto" }}>
-                    {cwd ? <SkillsConfig cwd={cwd} /> : <div role="status" style={{ padding: 16, border: "1px solid var(--border)", borderRadius: "var(--radius-card)", color: "var(--text-muted)", fontSize: 12 }}>{t("settingsConfig.workspaceRequired")}</div>}
+                    {cwd ? <SkillsConfig cwd={cwd} /> : <div role="status" style={{ padding: 16, border: "1px solid var(--border)", borderRadius: "var(--radius-card)", color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>{t("settingsConfig.workspaceRequired")}</div>}
                   </div>
                 )}
 
                 {extensionTab === "plugins" && (
                   <div role="tabpanel" id="settings-extension-panel-plugins" aria-labelledby="settings-extension-tab-plugins" style={{ display: "flex", flex: 1, minHeight: 0, flexDirection: "column", overflowY: "auto" }}>
-                    {cwd ? <PluginsConfig cwd={cwd} sessionId={sessionId} onReloaded={onPluginsReloaded} runtimeReady={runtimeReady} /> : <div role="status" style={{ padding: 16, border: "1px solid var(--border)", borderRadius: "var(--radius-card)", color: "var(--text-muted)", fontSize: 12 }}>{t("settingsConfig.workspaceRequired")}</div>}
+                    {cwd ? <PluginsConfig cwd={cwd} sessionId={sessionId ?? null} onReloaded={onPluginsReloaded} runtimeReady={runtimeReady} /> : <div role="status" style={{ padding: 16, border: "1px solid var(--border)", borderRadius: "var(--radius-card)", color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>{t("settingsConfig.workspaceRequired")}</div>}
                   </div>
                 )}
               </div>
             )}
 
-            {/* SYSTEM & UPDATES TAB */}
             {currentTab === "system" && (
               <div role="tabpanel" id="settings-panel-system" aria-labelledby="settings-tab-system" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 18 }}>
                 <div>
-                  <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{t("settingsConfig.systemUpdates")}</h3>
-                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>{t("settingsConfig.systemUpdatesDescription")}</p>
+                  <h3 style={{ fontSize: "var(--text-base)", fontWeight: 600, margin: 0 }}>{t("settingsConfig.systemUpdates")}</h3>
+                  <p style={{ margin: "4px 0 0", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>{t("settingsConfig.systemUpdatesDescription")}</p>
                 </div>
 
                 {/* Active session system prompt */}
@@ -1265,7 +1288,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                     display: "flex",
                     flexDirection: "column",
                     gap: "var(--space-4)",
-                    ...(highlightId === slugify("Active session system prompt") ? { borderColor: "var(--accent)", boxShadow: "0 0 0 2px var(--accent)" } : {}),
+                    ...(highlightSettingId === slugify("Active session system prompt") ? { borderColor: "var(--accent)", boxShadow: "0 0 0 2px var(--accent)" } : {}),
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "var(--space-4)", flexWrap: "wrap" }}>
@@ -1293,7 +1316,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                         fontSize: "var(--text-sm)",
                       }}
                     >
-                      <RefreshCw size={13} aria-hidden="true" className={systemPromptLoading ? "spin" : undefined} />
+                      <RefreshCw size={13} aria-hidden="true" className={systemPromptLoading ? "icon-spin" : undefined} />
                       {systemPromptLoading ? t("settingsConfig.systemPromptLoading") : systemPrompt === null ? t("settingsConfig.loadSystemPrompt") : t("settingsConfig.reloadSystemPrompt")}
                     </button>
                   </div>
@@ -1331,20 +1354,20 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                 <section style={{ padding: 14, border: "1px solid var(--border)", borderRadius: "var(--radius-card)", background: "var(--bg-panel)", display: "flex", flexDirection: "column", gap: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{t("settingsConfig.appLabel")}</div>
-                      <div style={{ marginTop: 4, color: appUpdate?.updateAvailable ? "var(--accent)" : "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                      <div style={{ fontSize: "var(--text-md)", fontWeight: 600 }}>{t("settingsConfig.appLabel")}</div>
+                      <div style={{ marginTop: 4, color: appUpdate?.updateAvailable ? "var(--accent)" : "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)" }}>
                         {checkingAppUpdate ? t("settingsConfig.checkingUpdates") : appUpdate?.updateAvailable ? t("appShell.updateVersion", { current: appUpdate.currentVersion ?? "?", available: appUpdate.availableVersion ?? "?" }) : appUpdate?.currentVersion ? t("settingsConfig.upToDate", { version: appUpdate.currentVersion }) : t("settingsConfig.versionUnavailable")}
                       </div>
                     </div>
-                    <button type="button" onClick={() => void checkForAppUpdate(true)} disabled={checkingAppUpdate} aria-label={t("settingsConfig.checkAppUpdates")} style={{ padding: "6px 10px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "transparent", color: "var(--text)", cursor: checkingAppUpdate ? "wait" : "pointer", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    <button type="button" onClick={() => void checkForAppUpdate(true)} disabled={checkingAppUpdate} aria-label={t("settingsConfig.checkAppUpdates")} style={{ padding: "6px 10px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "transparent", color: "var(--text)", cursor: checkingAppUpdate ? "wait" : "pointer", fontSize: "var(--text-sm)", display: "inline-flex", alignItems: "center", gap: 5 }}>
                       <RefreshCw size={13} aria-hidden="true" /> {t("settingsConfig.refresh")}
                     </button>
                   </div>
                   {appUpdate?.updateAvailable && (
                     <div style={{ marginTop: 6, padding: "10px 12px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg)", display: "flex", flexDirection: "column", gap: 6 }}>
-                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("settingsConfig.runAppUpdateCommand")}</div>
+                      <div style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>{t("settingsConfig.runAppUpdateCommand")}</div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <code style={{ flex: 1, fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--accent)", wordBreak: "break-all" }}>{appUpdate.updateCommand || "ompgui update"}</code>
+                        <code style={{ flex: 1, fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", color: "var(--accent)", wordBreak: "break-all" }}>{appUpdate.updateCommand || "ompgui update"}</code>
                         <button
                           type="button"
                           onClick={() => {
@@ -1352,7 +1375,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                               .then(() => setMessage(t("appShell.commandCopied")))
                               .catch(() => setMessage(t("appShell.commandCopyFailed")));
                           }}
-                          style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-subtle)", color: "var(--text)", cursor: "pointer", fontSize: 11 }}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-subtle)", color: "var(--text)", cursor: "pointer", fontSize: "var(--text-xs)" }}
                         >
                           <Copy size={12} aria-hidden="true" /> {t("appShell.copyCommand")}
                         </button>
@@ -1365,20 +1388,20 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                 <section style={{ padding: 14, border: "1px solid var(--border)", borderRadius: "var(--radius-card)", background: "var(--bg-panel)", display: "flex", flexDirection: "column", gap: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{t("settingsConfig.ompLabel")}</div>
-                      <div style={{ marginTop: 4, color: update?.updateAvailable ? "var(--accent)" : "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                      <div style={{ fontSize: "var(--text-md)", fontWeight: 600 }}>{t("settingsConfig.ompLabel")}</div>
+                      <div style={{ marginTop: 4, color: update?.updateAvailable ? "var(--accent)" : "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)" }}>
                         {checking ? t("settingsConfig.checkingUpdates") : update?.updateAvailable ? t("appShell.updateVersion", { current: update.currentVersion ?? "?", available: update.availableVersion ?? "?" }) : update?.currentVersion ? t("settingsConfig.upToDate", { version: update.currentVersion }) : t("settingsConfig.versionUnavailable")}
                       </div>
                     </div>
-                    <button type="button" onClick={() => void checkForUpdate()} disabled={checking} aria-label={t("settingsConfig.checkOmpUpdates")} style={{ padding: "6px 10px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "transparent", color: "var(--text)", cursor: checking ? "wait" : "pointer", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    <button type="button" onClick={() => void checkForUpdate()} disabled={checking} aria-label={t("settingsConfig.checkOmpUpdates")} style={{ padding: "6px 10px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "transparent", color: "var(--text)", cursor: checking ? "wait" : "pointer", fontSize: "var(--text-sm)", display: "inline-flex", alignItems: "center", gap: 5 }}>
                       <RefreshCw size={13} aria-hidden="true" /> {t("settingsConfig.refresh")}
                     </button>
                   </div>
                   {update?.updateAvailable && (
                     <div style={{ marginTop: 6, padding: "10px 12px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg)", display: "flex", flexDirection: "column", gap: 6 }}>
-                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("settingsConfig.runOmpUpdateCommand")}</div>
+                      <div style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>{t("settingsConfig.runOmpUpdateCommand")}</div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <code style={{ flex: 1, fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--accent)", wordBreak: "break-all" }}>{update.updateCommand || "omp update"}</code>
+                        <code style={{ flex: 1, fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", color: "var(--accent)", wordBreak: "break-all" }}>{update.updateCommand || "omp update"}</code>
                         <button
                           type="button"
                           onClick={() => {
@@ -1386,7 +1409,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                               .then(() => setMessage(t("appShell.commandCopied")))
                               .catch(() => setMessage(t("appShell.commandCopyFailed")));
                           }}
-                          style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-subtle)", color: "var(--text)", cursor: "pointer", fontSize: 11 }}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-subtle)", color: "var(--text)", cursor: "pointer", fontSize: "var(--text-xs)" }}
                         >
                           <Copy size={12} aria-hidden="true" /> {t("appShell.copyCommand")}
                         </button>
@@ -1398,7 +1421,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                       type="button"
                       onClick={() => void restartSessions()}
                       disabled={restarting}
-                      style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 12px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-subtle)", color: "var(--text)", cursor: restarting ? "wait" : "pointer", fontSize: 12 }}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 12px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-subtle)", color: "var(--text)", cursor: restarting ? "wait" : "pointer", fontSize: "var(--text-sm)" }}
                     >
                       <RotateCcw size={13} aria-hidden="true" /> {restarting ? t("settingsConfig.restarting") : t("settingsConfig.restartSessions")}
                     </button>
@@ -1406,12 +1429,12 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                       href="https://github.com/can1357/oh-my-pi/releases"
                       target="_blank"
                       rel="noreferrer"
-                      style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 12px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", color: "var(--text-muted)", textDecoration: "none", fontSize: 12 }}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 12px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", color: "var(--text-muted)", textDecoration: "none", fontSize: "var(--text-sm)" }}
                     >
                       <ExternalLink size={13} aria-hidden="true" /> {t("settingsConfig.changelog")}
                     </a>
                   </div>
-                  {message && <p role="status" style={{ margin: "4px 0 0", color: "var(--text-muted)", fontSize: 12, lineHeight: 1.5 }}>{message}</p>}
+                  {message && <p role="status" style={{ margin: "4px 0 0", color: "var(--text-muted)", fontSize: "var(--text-sm)", lineHeight: 1.5 }}>{message}</p>}
                 </section>
               </div>
             )}

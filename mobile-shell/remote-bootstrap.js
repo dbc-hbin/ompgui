@@ -6,6 +6,19 @@
   const query = new URLSearchParams(window.location.search);
   const offline = query.get("offline") === "1";
 
+  function syncViewportHeight() {
+    const root = document.documentElement;
+    const visual = window.visualViewport;
+    const height = visual ? visual.height + visual.offsetTop : window.innerHeight;
+    root.style.setProperty("--app-viewport-height", `${height}px`);
+  }
+  syncViewportHeight();
+  if (window.visualViewport) {
+    visualViewport.addEventListener("resize", syncViewportHeight);
+    visualViewport.addEventListener("scroll", syncViewportHeight);
+  }
+  window.addEventListener("resize", syncViewportHeight);
+
   function getOrigin() {
     try {
       const value = typeof bridge.getOrigin === "function" ? bridge.getOrigin() : null;

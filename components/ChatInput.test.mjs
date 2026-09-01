@@ -9,6 +9,7 @@ const jiti = createJiti(import.meta.url, {
   tsconfigPaths: true,
 });
 const { ChatInput, ModelErrorBanner, filterModelOptions, resolveMobileRunSubmitMode } = await jiti.import("./ChatInput.tsx");
+const { CHAT_COLUMN_MAX_WIDTH } = await jiti.import("../lib/chat-layout.ts");
 
 const noop = () => {};
 
@@ -326,7 +327,8 @@ test("renders shared horizontal padding and column width at composer root", () =
     }),
   );
 
-  assert.match(html, /padding-left:\s*16px/);
-  assert.match(html, /padding-right:\s*16px/);
-  assert.match(html, /max-width:\s*960px/);
+  assert.equal(CHAT_COLUMN_MAX_WIDTH, 744);
+  assert.match(html, /padding-left:max\(16px, env\(safe-area-inset-left, 0px\)\)/);
+  assert.match(html, /padding-right:max\(16px, env\(safe-area-inset-right, 0px\)\)/);
+  assert.match(html, new RegExp(`max-width:\\s*${CHAT_COLUMN_MAX_WIDTH}px`));
 });

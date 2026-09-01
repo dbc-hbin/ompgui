@@ -16,7 +16,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     title: "ompgui",
-    statusBarStyle: "default",
+    statusBarStyle: "black-translucent",
   },
   formatDetection: {
     telephone: false,
@@ -25,11 +25,13 @@ export const metadata: Metadata = {
 
 // theme-color adapts to light/dark so the browser chrome / iOS status bar
 // matches the active theme. `viewportFit: cover` lets us honor safe-area-inset
-// (used by DirectoryPicker footer) on notched devices.
+// on notched devices. `interactiveWidget: resizes-content` shrinks the layout
+// viewport with the IME. Pinch-zoom stays enabled (no scale cap).
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  interactiveWidget: "resizes-content",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#FAF9F6" },
     { media: "(prefers-color-scheme: dark)", color: "#1B1916" },
@@ -57,8 +59,13 @@ export default function RootLayout({
             __html: `(function(){try{var k="ompgui-lang",o="omp-lang",l=localStorage.getItem(k),v=localStorage.getItem(o);if(l!==null){if(v!==null)try{localStorage.removeItem(o)}catch(e){}}else if(v!==null){if(v==="en"||v==="zh-CN"||v==="ja"||v==="ko"){l=v;try{localStorage.setItem(k,v);localStorage.removeItem(o)}catch(e){}}else try{localStorage.removeItem(o)}catch(e){}}if(l!=="en"&&l!=="zh-CN"&&l!=="ja"&&l!=="ko"){var n=(navigator.language||"").toLowerCase();l=n.indexOf("zh")===0?"zh-CN":n.indexOf("ja")===0?"ja":n.indexOf("ko")===0?"ko":"en"}document.documentElement.lang=l}catch(e){}})();`,
           }}
         />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var r=document.documentElement;function s(){var v=window.visualViewport;r.style.setProperty("--app-viewport-height",(v?v.height+v.offsetTop:window.innerHeight)+"px")}r.style.setProperty("--app-viewport-height","100dvh");s();if(window.visualViewport){visualViewport.addEventListener("resize",s);visualViewport.addEventListener("scroll",s)}window.addEventListener("resize",s)}catch(e){}})();`,
+          }}
+        />
       </head>
-      <body translate="no" className="notranslate" style={{ height: "100dvh", display: "flex", flexDirection: "column" }}>
+      <body translate="no" className="notranslate" style={{ height: "var(--app-viewport-height, 100dvh)", display: "flex", flexDirection: "column" }}>
         {children}
       </body>
     </html>

@@ -114,23 +114,26 @@ export function SettingsTabs({
                 display: "flex",
                 alignItems: "flex-start",
                 gap: 10,
-                padding: "9px 10px",
-                border: "none",
+                minHeight: "var(--control-touch, 44px)",
+                padding: "8px 10px",
+                border: selected ? "1px solid var(--accent)" : "1px solid transparent",
                 borderRadius: "var(--radius-control)",
                 background: selected ? "var(--bg-selected)" : "transparent",
                 color: selected ? "var(--text)" : "var(--text-muted)",
                 cursor: "pointer",
                 textAlign: "left",
-                transition: "background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm)",
+                transition: "background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm), border-color var(--dur-fast) var(--ease-out-warm)",
                 width: "100%",
+                boxSizing: "border-box",
+                touchAction: "manipulation",
               }}
             >
               <Icon size={16} aria-hidden="true" style={{ marginTop: 2, flexShrink: 0, color: selected ? "var(--accent)" : "currentColor" }} />
               <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
-                <div style={{ fontSize: 12.5, fontWeight: selected ? 600 : 500, lineHeight: 1.3, color: selected ? "var(--text)" : "inherit" }}>
+                <div style={{ fontSize: "var(--text-base)", fontWeight: selected ? 600 : 500, lineHeight: 1.3, color: selected ? "var(--text)" : "inherit" }}>
                   {localizedLabel}
                 </div>
-                <div style={{ fontSize: 10.5, color: "var(--text-dim)", lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <div style={{ fontSize: "var(--text-sm)", color: "var(--text-dim)", lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {localizedDesc}
                 </div>
               </div>
@@ -177,24 +180,27 @@ export function SettingsTabs({
               display: "inline-flex",
               alignItems: "flex-start",
               gap: 7,
+              minHeight: "var(--control-touch, 44px)",
               padding: "6px 10px",
               border: selected ? "1px solid var(--accent)" : "1px solid var(--border)",
               borderRadius: "var(--radius-control)",
-              background: selected ? "color-mix(in srgb, var(--accent) 12%, var(--bg-selected))" : "var(--bg)",
+              background: selected ? "var(--bg-selected)" : "var(--bg)",
               color: selected ? "var(--text)" : "var(--text-muted)",
               fontWeight: selected ? 600 : 500,
               cursor: "pointer",
-              fontSize: 12,
+              fontSize: "var(--text-sm)",
               whiteSpace: "nowrap",
               textAlign: "left",
               flexShrink: 0,
+              boxSizing: "border-box",
+              touchAction: "manipulation",
               transition: "all var(--dur-fast) var(--ease-out-warm)",
             }}
           >
             <Icon size={14} aria-hidden="true" style={{ marginTop: 2, flexShrink: 0, color: selected ? "var(--accent)" : "currentColor" }} />
             <span style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
-              <span style={{ fontWeight: selected ? 600 : 500, fontSize: 12, color: selected ? "var(--text)" : "inherit" }}>{localizedLabel}</span>
-              <span style={{ fontSize: 10, color: "var(--text-dim)", lineHeight: 1.25, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>{localizedDesc}</span>
+              <span style={{ fontWeight: selected ? 600 : 500, fontSize: "var(--text-base)", color: selected ? "var(--text)" : "inherit" }}>{localizedLabel}</span>
+              <span style={{ fontSize: "var(--text-sm)", color: "var(--text-dim)", lineHeight: 1.25, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>{localizedDesc}</span>
             </span>
           </button>
         );
@@ -224,7 +230,17 @@ export function ExtensionsTabs({ active, onSelect }: { active: ExtensionsTab; on
       role="tablist"
       aria-label={t("settingsConfig.extensionsTabsAria")}
       aria-orientation="horizontal"
-      style={{ display: "flex", gap: 4, padding: 4, border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg-panel)", alignSelf: "flex-start", maxWidth: "100%", overflowX: "auto" }}
+      style={{
+        display: "flex",
+        gap: 4,
+        padding: 4,
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius-control)",
+        background: "var(--bg-panel)",
+        alignSelf: "flex-start",
+        maxWidth: "100%",
+        overflowX: "auto",
+      }}
     >
       {EXTENSION_TABS.map((tab) => {
         const selected = tab.id === active;
@@ -242,7 +258,24 @@ export function ExtensionsTabs({ active, onSelect }: { active: ExtensionsTab; on
             tabIndex={selected ? 0 : -1}
             onClick={() => onSelect(tab.id)}
             onKeyDown={onKeyDown}
-            style={{ padding: "6px 10px", border: selected ? "1px solid var(--accent)" : "1px solid transparent", borderRadius: "calc(var(--radius-control) - 1px)", background: selected ? "var(--bg-selected)" : "transparent", color: selected ? "var(--text)" : "var(--text-muted)", fontSize: 12, fontWeight: selected ? 600 : 500, cursor: "pointer", whiteSpace: "nowrap" }}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: "var(--control-touch, 44px)",
+              padding: "6px 12px",
+              border: selected ? "1px solid var(--accent)" : "1px solid transparent",
+              borderRadius: "calc(var(--radius-control) - var(--space-1))",
+              background: selected ? "var(--bg-selected)" : "transparent",
+              color: selected ? "var(--text)" : "var(--text-muted)",
+              fontSize: "var(--text-sm)",
+              fontWeight: selected ? 600 : 500,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+              boxSizing: "border-box",
+              touchAction: "manipulation",
+              transition: "all var(--dur-fast) var(--ease-out-warm)",
+            }}
           >
             {label}
           </button>

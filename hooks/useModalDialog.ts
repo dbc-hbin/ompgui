@@ -25,6 +25,8 @@ export interface ModalDialogOptions {
   onClose: () => void;
   /** Set false while the dialog markup is not yet mounted (e.g. portal target pending). */
   active?: boolean;
+  /** Re-register when the rendered panel instance or layout changes. */
+  identity?: string | number | boolean;
 }
 
 /**
@@ -34,7 +36,7 @@ export interface ModalDialogOptions {
  * container. Attach the returned ref to the dialog panel and give that
  * element tabIndex={-1} (plus role="dialog" / aria-modal / a label).
  */
-export function useModalDialog<T extends HTMLElement>({ onClose, active = true }: ModalDialogOptions) {
+export function useModalDialog<T extends HTMLElement>({ onClose, active = true, identity }: ModalDialogOptions) {
   const containerRef = useRef<T | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -42,7 +44,7 @@ export function useModalDialog<T extends HTMLElement>({ onClose, active = true }
   useEffect(() => {
     if (!active) return;
     const container = containerRef.current;
-    if (!container) return;
+    if (!container || !container.isConnected) return;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialogStack.push(container);
 
@@ -86,7 +88,7 @@ export function useModalDialog<T extends HTMLElement>({ onClose, active = true }
       if (index !== -1) dialogStack.splice(index, 1);
       if (opener && opener.isConnected) opener.focus();
     };
-  }, [active]);
+  }, [active, identity]);
 
   return containerRef;
 }

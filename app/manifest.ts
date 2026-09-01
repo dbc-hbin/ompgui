@@ -7,8 +7,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Web UI for the oh-my-pi (omp) coding agent",
     start_url: "/",
     display: "standalone",
-    background_color: "#0f0a14",
-    theme_color: "#0f0a14",
+    background_color: "#FAF9F6",
+    theme_color: "#1B1916",
     icons: [
       {
         src: "/icon.svg",
@@ -20,6 +20,13 @@ export default function manifest(): MetadataRoute.Manifest {
         src: "/apple-icon.png",
         sizes: "180x180",
         type: "image/png",
+        purpose: "any",
+      },
+      {
+        src: "/apple-icon.png",
+        sizes: "180x180",
+        type: "image/png",
+        purpose: "maskable",
       },
     ],
   };

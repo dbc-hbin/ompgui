@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useRef, useEffect, useMemo, useCallback, type ComponentProps, type CSSProperties } from "react";
+import { memo, useState, useRef, useEffect, useMemo, useCallback, type ComponentProps } from "react";
 import { Copy, Check, GitFork, CornerUpLeft, ChevronRight, Brain } from "lucide-react";
 import { MarkdownBody } from "./MarkdownBody";
 import { ClickableImage } from "./ImageLightbox";
@@ -13,6 +13,7 @@ import { Tooltip, Collapsible, CollapsibleTrigger, CollapsiblePanel } from "./ui
 import { useCopyFeedback } from "@/hooks/useCopyFeedback";
 import { SubagentStatusIcon } from "./SubagentStatusIcon";
 import { formatCost, formatDuration, formatTokens, shortModel } from "@/lib/subagent-format";
+import { createVisibilityPausedInterval } from "@/lib/visibility-timers";
 import type {
   AgentMessage,
   UserMessage,
@@ -30,27 +31,11 @@ import type {
 const MAX_THINKING_CACHE_ENTRIES = 100;
 const thinkingContentCache = new Map<string, Promise<string>>();
 const MAX_MARKDOWN_CHARS = 100_000;
+export const LIVE_STREAM_STATS_INTERVAL_MS = 1_000;
 
 // Cap the user "sent" bubble's height so an abnormally long message does not
 // push the conversation off screen; overflow scrolls inside the bubble.
 const USER_BUBBLE_MAX_HEIGHT = 300;
-
-const MESSAGE_ACTION_BUTTON_STYLE: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: "var(--space-2)",
-  padding: "calc(var(--space-3) / 2) var(--space-4)",
-  height: "calc(var(--control-height-sm) - var(--space-2))",
-  minHeight: "calc(var(--control-height-sm) - var(--space-2))",
-  background: "none",
-  border: "none",
-  borderRadius: "calc(var(--radius-control) - var(--space-3) / 2)",
-  cursor: "pointer",
-  fontSize: "var(--text-sm)",
-  fontWeight: 400,
-  whiteSpace: "nowrap",
-  transition: "color var(--dur-fast) var(--ease-out-warm)",
-};
 
 function formatMessageSize(chars: number): string {
   return chars >= 1_000_000 ? `${(chars / 1_000_000).toFixed(1)} MB` : `${Math.round(chars / 1_000)} KB`;
@@ -77,7 +62,7 @@ export function SafeMarkdownBody({ children, className, ...props }: ComponentPro
   }
 
   return (
-    <div className={className} style={{ maxHeight: 420, overflow: "auto", fontSize: "var(--text-md)", lineHeight: 1.5 }}>
+    <div className={className} style={{ maxHeight: 420, overflow: "auto", fontSize: "var(--text-base, 14px)", lineHeight: 1.5 }}>
       <pre style={{ margin: 0, padding: "var(--space-4) var(--control-padding-inline)", whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
         {children}
       </pre>
@@ -237,6 +222,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 
   return (
     <div
+      className="chat-message-container chat-user-message"
       style={{ marginBottom: 18, display: "flex", flexDirection: "column", alignItems: "flex-end", paddingRight: 6 }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -248,12 +234,12 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
             maxWidth: "100%",
             minWidth: 0,
             background: "var(--user-bg)",
-            border: "1px solid color-mix(in srgb, var(--accent) 28%, transparent)",
+            border: "1px solid var(--border)",
             borderRadius: "var(--radius-card)",
-            boxShadow: "var(--shadow-card)",
+            boxShadow: "none",
             padding: "var(--space-4) var(--space-5)",
-            fontSize: "var(--text-lg)",
-            lineHeight: 1.6,
+            fontSize: "var(--text-base, 14px)",
+            lineHeight: 1.5,
             color: "var(--text)",
             wordBreak: "break-word",
             maxHeight: USER_BUBBLE_MAX_HEIGHT,
@@ -278,7 +264,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                     key={i}
                     src={src}
                     alt=""
-                    style={{ maxWidth: 240, maxHeight: 240, borderRadius: 6, objectFit: "contain", display: "block", border: "1px solid color-mix(in srgb, var(--accent) 18%, transparent)" }}
+                    style={{ maxWidth: 240, maxHeight: 240, borderRadius: 6, objectFit: "contain", display: "block", border: "1px solid var(--border)" }}
                   />
                 );
               })}
@@ -289,87 +275,76 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 
         {/* Bottom row: action buttons + timestamp — inside the bubble's column,
             spanning its width, so the timestamp aligns with its right edge. */}
-        {(time || canFork || canNavigate || true) && (
-          <div style={{
-            display: "flex", alignItems: "center", justifyContent: "flex-end",
-            gap: "var(--space-3)", marginTop: 3, width: "100%",
-          }}>
+        {(time || canFork || canNavigate || content) && (
           <div
+            className="chat-action-row"
             style={{
-              display: "flex", gap: "calc(var(--space-3) / 2)",
-              opacity: hovered || actionsActive ? 1 : 0,
-              pointerEvents: hovered || actionsActive ? "auto" : "none",
-              transition: "opacity var(--dur-fast) var(--ease-out-warm)",
+              justifyContent: "flex-end",
+              marginTop: 3,
+              width: "100%",
+              flexWrap: "wrap",
             }}
-            onFocusCapture={() => setActionsActive(true)}
-            onBlurCapture={() => setActionsActive(false)}
           >
-            <Tooltip content={t("messageView.copyMessage")}>
-              <button
-                onClick={() => copyContent(content)}
-                aria-label={t("messageView.copyMessage")}
-                style={{
-                  ...MESSAGE_ACTION_BUTTON_STYLE,
-                  color: copied ? "var(--accent)" : "var(--text-dim)",
-                }}
-                onMouseEnter={(e) => { if (!copied) e.currentTarget.style.color = "var(--accent)"; }}
-                onMouseLeave={(e) => { if (!copied) e.currentTarget.style.color = "var(--text-dim)"; }}
-              >
-                {copied ? <Check size={11} strokeWidth={1.8} /> : <Copy size={11} strokeWidth={1.8} />}
-                {copied ? t("messageView.copied") : t("messageView.copy")}
-              </button>
-            </Tooltip>
-          </div>
-          {(canFork || canNavigate) && (
             <div
-              style={{
-                display: "flex", gap: "calc(var(--space-3) / 2)",
-                opacity: (hovered || actionsActive || forking) ? 1 : 0,
-                pointerEvents: (hovered || actionsActive || forking) ? "auto" : "none",
-                transition: "opacity var(--dur-fast) var(--ease-out-warm)",
-              }}
+              className={`chat-action-group${hovered || actionsActive || copied ? " is-visible" : ""}`}
               onFocusCapture={() => setActionsActive(true)}
               onBlurCapture={() => setActionsActive(false)}
             >
-              {canNavigate && (
-                <Tooltip content={t("messageView.editFromHereTitle")}>
-                  <button
-                    onClick={() => { onNavigate!(prevAssistantEntryId!); onEditContent?.(content); }}
-                    aria-label={t("messageView.editFromHereTitle")}
-                    style={{
-                      ...MESSAGE_ACTION_BUTTON_STYLE,
-                      color: "var(--text-dim)",
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
-                  >
-                    <CornerUpLeft size={11} strokeWidth={1.8} />
-                    {t("messageView.editFromHere")}
-                  </button>
-                </Tooltip>
-              )}
-              {canFork && (
-                <Tooltip content={forking ? t("messageView.creatingSession") : t("messageView.newSessionTitle")}>
-                  <button
-                    onClick={() => { onFork!(entryId!); }}
-                    disabled={forking}
-                    aria-label={forking ? t("messageView.creatingSession") : t("messageView.newSessionTitle")}
-                    style={{
-                      ...MESSAGE_ACTION_BUTTON_STYLE,
-                      color: forking ? "var(--accent)" : "var(--text-dim)",
-                      cursor: forking ? "not-allowed" : "pointer",
-                    }}
-                    onMouseEnter={(e) => { if (!forking) e.currentTarget.style.color = "var(--accent)"; }}
-                    onMouseLeave={(e) => { if (!forking) e.currentTarget.style.color = "var(--text-dim)"; }}
-                  >
-                    <GitFork size={11} strokeWidth={1.8} />
-                    {forking ? t("messageView.creating") : t("messageView.newSession")}
-                  </button>
-                </Tooltip>
-              )}
+              <Tooltip content={t("messageView.copyMessage")}>
+                <button
+                  type="button"
+                  onClick={() => copyContent(content)}
+                  aria-label={t("messageView.copyMessage")}
+                  className={`chat-action-btn${copied ? " is-active" : ""}`}
+                  style={{
+                    color: copied ? "var(--accent)" : undefined,
+                  }}
+                >
+                  {copied ? <Check size={14} strokeWidth={1.75} /> : <Copy size={14} strokeWidth={1.75} />}
+                  <span>{copied ? t("messageView.copied") : t("messageView.copy")}</span>
+                </button>
+              </Tooltip>
             </div>
-          )}
-          {time && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-dim)" }}>{time}</span>}
+            {(canFork || canNavigate) && (
+              <div
+                className={`chat-action-group${hovered || actionsActive || forking ? " is-visible" : ""}`}
+                onFocusCapture={() => setActionsActive(true)}
+                onBlurCapture={() => setActionsActive(false)}
+              >
+                {canNavigate && (
+                  <Tooltip content={t("messageView.editFromHereTitle")}>
+                    <button
+                      type="button"
+                      onClick={() => { onNavigate!(prevAssistantEntryId!); onEditContent?.(content); }}
+                      aria-label={t("messageView.editFromHereTitle")}
+                      className="chat-action-btn"
+                    >
+                      <CornerUpLeft size={14} strokeWidth={1.75} />
+                      <span>{t("messageView.editFromHere")}</span>
+                    </button>
+                  </Tooltip>
+                )}
+                {canFork && (
+                  <Tooltip content={forking ? t("messageView.creatingSession") : t("messageView.newSessionTitle")}>
+                    <button
+                      type="button"
+                      onClick={() => { onFork!(entryId!); }}
+                      disabled={forking}
+                      aria-label={forking ? t("messageView.creatingSession") : t("messageView.newSessionTitle")}
+                      className={`chat-action-btn${forking ? " is-active" : ""}`}
+                      style={{
+                        color: forking ? "var(--accent)" : undefined,
+                        cursor: forking ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      <GitFork size={14} strokeWidth={1.75} />
+                      <span>{forking ? t("messageView.creating") : t("messageView.newSession")}</span>
+                    </button>
+                  </Tooltip>
+                )}
+              </div>
+            )}
+            {time && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-dim)" }}>{time}</span>}
           </div>
         )}
       </div>
@@ -505,8 +480,7 @@ function AssistantMessageView({
       const elapsed = (now - streamStartRef.current) / 1000;
       if (elapsed > 0.5) setTps(chars / 4 / elapsed);
     };
-    const id = setInterval(tick, 300);
-    return () => clearInterval(id);
+    return createVisibilityPausedInterval(tick, LIVE_STREAM_STATS_INTERVAL_MS);
   }, [isStreaming]);
 
   if (blocks.length === 0 && !isStreaming) return null;
@@ -580,35 +554,39 @@ function AssistantMessageView({
         ))}
       </div>
 
-      <div style={{
-        display: "flex", alignItems: "center", gap: "var(--space-4)", marginTop: "var(--space-2)",
-      }}>
+      <div
+        className="chat-action-row"
+        style={{
+          gap: "var(--space-4)",
+          marginTop: "var(--space-2)",
+        }}
+      >
         {message.usage && !isStreaming && (
           <div style={{ fontSize: "var(--text-sm)", color: "var(--text-dim)" }}>
             {formatUsage(message.usage, t, locale)}
           </div>
         )}
         {textContent && !isStreaming && (
-          <Tooltip content={t("messageView.copyMessage")}>
-            <button
-              onClick={() => copyContent(textContent)}
-              aria-label={t("messageView.copyMessage")}
-              style={{
-                ...MESSAGE_ACTION_BUTTON_STYLE,
-                color: copied ? "var(--accent)" : "var(--text-dim)",
-                opacity: (hovered || actionsActive) ? 1 : 0,
-                pointerEvents: (hovered || actionsActive) ? "auto" : "none",
-                transition: "opacity var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm)",
-              }}
-              onFocus={() => setActionsActive(true)}
-              onBlur={() => setActionsActive(false)}
-              onMouseEnter={(e) => { if (!copied) e.currentTarget.style.color = "var(--accent)"; }}
-              onMouseLeave={(e) => { if (!copied) e.currentTarget.style.color = "var(--text-dim)"; }}
-            >
-              {copied ? <Check size={11} strokeWidth={1.8} /> : <Copy size={11} strokeWidth={1.8} />}
-              {copied ? t("messageView.copied") : t("messageView.copy")}
-            </button>
-          </Tooltip>
+          <div
+            className={`chat-action-group${hovered || actionsActive || copied ? " is-visible" : ""}`}
+            onFocusCapture={() => setActionsActive(true)}
+            onBlurCapture={() => setActionsActive(false)}
+          >
+            <Tooltip content={t("messageView.copyMessage")}>
+              <button
+                type="button"
+                onClick={() => copyContent(textContent)}
+                aria-label={t("messageView.copyMessage")}
+                className={`chat-action-btn${copied ? " is-active" : ""}`}
+                style={{
+                  color: copied ? "var(--accent)" : undefined,
+                }}
+              >
+                {copied ? <Check size={14} strokeWidth={1.75} /> : <Copy size={14} strokeWidth={1.75} />}
+                <span>{copied ? t("messageView.copied") : t("messageView.copy")}</span>
+              </button>
+            </Tooltip>
+          </div>
         )}
         {time && !isStreaming && (
           <span style={{ fontSize: "var(--text-xs)", color: "var(--text-dim)", marginLeft: "auto" }}>{time}</span>
@@ -681,7 +659,7 @@ const ThinkingBlock = memo(function ThinkingBlock({ block, duration, sessionId, 
     <div
       style={{
         border: "1px solid var(--border)",
-        borderRadius: 6,
+        borderRadius: "var(--radius-control)",
         overflow: "hidden",
         fontSize: "var(--text-base)",
       }}
@@ -706,14 +684,14 @@ const ThinkingBlock = memo(function ThinkingBlock({ block, duration, sessionId, 
             textAlign: "left",
           }}
         >
-          <Brain size={11} strokeWidth={1.8} style={{ flexShrink: 0 }} />
+          <Brain size={14} strokeWidth={1.75} style={{ flexShrink: 0 }} />
           <span>{t("messageView.thinking")}</span>
           {duration !== undefined && (
             <span style={{ marginLeft: "auto", fontSize: "var(--text-sm)", color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>{t("messageView.durationSeconds", { seconds: duration })}</span>
           )}
           <ChevronRight
-            size={10}
-            strokeWidth={1.6}
+            size={12}
+            strokeWidth={2}
             style={{
               flexShrink: 0,
               marginLeft: duration === undefined ? "auto" : 4,
@@ -727,7 +705,7 @@ const ThinkingBlock = memo(function ThinkingBlock({ block, duration, sessionId, 
             padding: "var(--space-4) var(--control-padding-inline)",
             color: error ? "var(--status-error)" : "var(--text-muted)",
             fontSize: "var(--text-md)",
-            lineHeight: 1.6,
+            lineHeight: 1.5,
             whiteSpace: "pre-wrap",
             background: "var(--bg-panel)",
             borderTop: "1px solid var(--border)",
@@ -769,11 +747,11 @@ const ToolCallBlock = memo(function ToolCallBlock({ block, result, duration, isS
   return (
     <div
       style={{
-        borderRadius: 7,
+        borderRadius: "var(--radius-control)",
         overflow: "hidden",
         fontSize: "var(--text-md)",
-        border: isError ? "1px solid color-mix(in srgb, var(--status-error) 45%, transparent)" : "1px solid color-mix(in srgb, var(--status-success) 25%, transparent)",
-        background: isError ? "color-mix(in srgb, var(--status-error) 5%, transparent)" : "color-mix(in srgb, var(--status-success) 4%, transparent)",
+        border: isError ? "1px solid var(--status-error)" : "1px solid var(--border)",
+        background: isError ? "color-mix(in srgb, var(--status-error) 5%, transparent)" : "var(--bg-subtle)",
       }}
     >
       <Collapsible
@@ -785,7 +763,7 @@ const ToolCallBlock = memo(function ToolCallBlock({ block, result, duration, isS
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 7,
+            gap: "var(--space-3)",
             width: "100%",
             padding: "var(--space-3) var(--control-padding-inline)",
             background: "none",
@@ -798,7 +776,7 @@ const ToolCallBlock = memo(function ToolCallBlock({ block, result, duration, isS
             minWidth: 0,
           }}
         >
-          <span style={{ color: isError ? "var(--status-error)" : "var(--status-success)", fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: "var(--text-sm)", flexShrink: 0 }}>
+          <span style={{ color: isError ? "var(--status-error)" : "var(--text)", fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: "var(--text-sm)", flexShrink: 0 }}>
             {block.toolName}
           </span>
           <span style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
@@ -808,8 +786,8 @@ const ToolCallBlock = memo(function ToolCallBlock({ block, result, duration, isS
             <span style={{ fontSize: "var(--text-sm)", color: "var(--text-dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{t("messageView.durationSeconds", { seconds: duration })}</span>
           )}
           <ChevronRight
-            size={10}
-            strokeWidth={1.6}
+            size={12}
+            strokeWidth={2}
             style={{
               flexShrink: 0,
               transform: expanded ? "rotate(90deg)" : "none",
@@ -829,7 +807,7 @@ const ToolCallBlock = memo(function ToolCallBlock({ block, result, duration, isS
               lineHeight: 1.5,
               overflow: "auto",
               backgroundColor: "var(--bg-subtle)",
-              borderTop: isError ? "1px solid color-mix(in srgb, var(--status-error) 25%, transparent)" : "1px solid color-mix(in srgb, var(--status-success) 20%, transparent)",
+              borderTop: isError ? "1px solid var(--status-error)" : "1px solid var(--border)",
               whiteSpace: "pre-wrap",
               wordBreak: "break-all",
             }}
@@ -982,7 +960,7 @@ function PairedDiffResult({ diff }: {
   return (
     <div
       style={{
-        borderTop: "1px solid color-mix(in srgb, var(--status-success) 15%, transparent)",
+        borderTop: "1px solid var(--border)",
         background: "var(--bg)",
       }}
     >
@@ -1225,7 +1203,7 @@ function PairedResult({ text, isEmpty, isError }: {
   return (
     <div
       style={{
-        borderTop: `1px solid ${isError ? "color-mix(in srgb, var(--status-error) 30%, transparent)" : "color-mix(in srgb, var(--status-success) 15%, transparent)"}`,
+        borderTop: isError ? "1px solid var(--status-error)" : "1px solid var(--border)",
         background: isError ? "color-mix(in srgb, var(--status-error) 4%, transparent)" : "var(--bg-subtle)",
       }}
     >
@@ -1425,9 +1403,8 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
         )}
 
         <div
+          className="chat-action-row"
           style={{
-            display: "flex",
-            alignItems: "center",
             gap: "var(--space-4)",
             padding: "4px 9px",
             borderTop: "1px solid var(--border)",
@@ -1436,38 +1413,38 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
         >
           {text || detailsText ? (
             <button
+              type="button"
               onClick={() => copyContent(displayText || detailsText)}
+              aria-label={copied ? t("messageView.copied") : t("messageView.copy")}
+              className={`chat-action-btn${copied ? " is-active" : ""}`}
               style={{
-                padding: "3px 7px",
-                border: "none",
-                background: "none",
-                color: copied ? "var(--accent)" : "var(--text-dim)",
-                cursor: "pointer",
-                fontSize: "var(--text-sm)",
+                color: copied ? "var(--accent)" : undefined,
               }}
             >
-              {copied ? t("messageView.copied") : t("messageView.copy")}
+              {copied ? <Check size={14} strokeWidth={1.75} /> : <Copy size={14} strokeWidth={1.75} />}
+              <span>{copied ? t("messageView.copied") : t("messageView.copy")}</span>
             </button>
           ) : null}
           {(hasDetails || isHiddenDisplay) && (
             <button
+              type="button"
               onClick={() => {
                 if (isHiddenDisplay) setContentExpanded((v) => !v);
                 else setDetailsExpanded((v) => !v);
               }}
-              style={{
-                marginLeft: "auto",
-                padding: "3px 7px",
-                border: "none",
-                background: "none",
-                color: "var(--text-dim)",
-                cursor: "pointer",
-                fontSize: "var(--text-sm)",
-              }}
-            >
-              {isHiddenDisplay
+              aria-label={isHiddenDisplay
                 ? (contentExpanded ? t("messageView.collapse") : t("messageView.expand"))
                 : (detailsExpanded ? t("messageView.hideDetails") : t("messageView.showDetails"))}
+              className="chat-action-btn"
+              style={{
+                marginLeft: "auto",
+              }}
+            >
+              <span>
+                {isHiddenDisplay
+                  ? (contentExpanded ? t("messageView.collapse") : t("messageView.expand"))
+                  : (detailsExpanded ? t("messageView.hideDetails") : t("messageView.showDetails"))}
+              </span>
             </button>
           )}
         </div>

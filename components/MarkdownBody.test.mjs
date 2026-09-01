@@ -9,13 +9,18 @@ const jiti = createJiti(import.meta.url, {
   tsconfigPaths: true,
 });
 const { MarkdownBody } = await jiti.import("./MarkdownBody.tsx");
-const { normalizeDisplayMath, loadMathMarkdownPlugins } = await jiti.import("../lib/markdown.ts");
+const {
+  normalizeDisplayMath,
+  loadMathMarkdownPlugins,
+  splitStableMarkdownPrefix,
+} = await jiti.import("../lib/markdown.ts");
 
-function renderMarkdown(markdown) {
+function renderMarkdown(markdown, props = {}) {
   return renderToStaticMarkup(
     React.createElement(MarkdownBody, {
       cwd: "/home/me/project",
       onOpenFile() {},
+      ...props,
     }, markdown),
   );
 }
@@ -91,4 +96,48 @@ test("does not normalize escaped delimiters or link destinations", () => {
 
   assert.equal(normalizeDisplayMath(escaped), escaped);
   assert.equal(normalizeDisplayMath(link), link);
+});
+
+const STREAM_FIXTURES = {
+  fences: "Intro.\n\n```js\nconst n = 1;\n```\n\nOutro.",
+  tables: "Before.\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nAfter.",
+  math: "Before.\n\n$$\nx + y\n$$\n\nAfter.",
+  html: "Before.\n\n<div>\nhello\n</div>\n\nAfter.",
+  lists: "Before.\n\n- one\n- two\n\nAfter.",
+  blockquotes: "Before.\n\n> quoted\n> still\n\nAfter.",
+  cjk: "5~7U는 약 100~200倍입니다。\n\n다음 문단입니다.",
+};
+
+test("completed streaming output matches the full markdown pipeline", async () => {
+  await loadMathMarkdownPlugins();
+  for (const [name, markdown] of Object.entries(STREAM_FIXTURES)) {
+    const full = renderMarkdown(markdown);
+    const streaming = renderMarkdown(markdown, { isStreaming: true });
+    const completed = renderMarkdown(markdown, { isStreaming: false });
+    assert.equal(completed, full, name);
+    assert.equal(streaming, full, `${name} streaming`);
+  }
+
+  const referenced = "See [docs][ref].\n\n[ref]: https://example.com/docs\n\nDone.";
+  assert.equal(
+    renderMarkdown(referenced, { isStreaming: true }),
+    renderMarkdown(referenced),
+  );
+});
+
+test("does not reparse a long stable prefix on tail-only streaming updates", () => {
+  const prefix = "Stable paragraph about rendering cost.\n\n".repeat(80);
+  let stableParses = 0;
+  let lastStable = null;
+  for (const tail of ["tai", "tail", "tail grows"]) {
+    const { stable } = splitStableMarkdownPrefix(`${prefix}${tail}`);
+    assert.equal(stable, prefix);
+    if (stable !== lastStable) {
+      lastStable = stable;
+      stableParses++;
+      normalizeDisplayMath(stable);
+    }
+  }
+  assert.ok(prefix.length > 1000);
+  assert.equal(stableParses, 1);
 });

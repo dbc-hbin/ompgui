@@ -1,12 +1,37 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ensureLanguageRegistered, isLanguageRegistered, SyntaxHighlighter, vs, vscDarkPlus } from "@/lib/syntax-highlight";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import {
+  COARSE_POINTER_MEDIA_QUERY,
+  countCodeLines,
+  ensureLanguageRegistered,
+  isLanguageRegistered,
+  shouldShowCodeLineNumbers,
+  SyntaxHighlighter,
+  vs,
+  vscDarkPlus,
+} from "@/lib/syntax-highlight";
 import { useTheme } from "@/hooks/useTheme";
 
 interface Props {
   code: string;
   lang: string;
+}
+
+function subscribeCoarsePointer(cb: () => void): () => void {
+  if (typeof window === "undefined" || !window.matchMedia) return () => {};
+  const mql = window.matchMedia(COARSE_POINTER_MEDIA_QUERY);
+  mql.addEventListener("change", cb);
+  return () => mql.removeEventListener("change", cb);
+}
+
+function getCoarsePointerSnapshot(): boolean {
+  if (typeof window === "undefined" || !window.matchMedia) return false;
+  return window.matchMedia(COARSE_POINTER_MEDIA_QUERY).matches;
+}
+
+function getCoarsePointerServerSnapshot(): boolean {
+  return false;
 }
 
 function PlainCode({ code }: { code: string }) {
@@ -31,7 +56,16 @@ function PlainCode({ code }: { code: string }) {
 
 export function SyntaxHighlightedCode({ code, lang }: Props) {
   const { isDark } = useTheme();
+  const isCoarsePointer = useSyncExternalStore(
+    subscribeCoarsePointer,
+    getCoarsePointerSnapshot,
+    getCoarsePointerServerSnapshot,
+  );
   const [ready, setReady] = useState(() => isLanguageRegistered(lang));
+  const showLineNumbers = shouldShowCodeLineNumbers({
+    isCoarsePointer,
+    lineCount: countCodeLines(code),
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -51,8 +85,8 @@ export function SyntaxHighlightedCode({ code, lang }: Props) {
     <SyntaxHighlighter
       language={lang || "text"}
       style={isDark ? vscDarkPlus : vs}
-      showLineNumbers
-      lineNumberStyle={{ color: "var(--text-dim)", fontStyle: "normal" }}
+      showLineNumbers={showLineNumbers}
+      lineNumberStyle={showLineNumbers ? { color: "var(--text-dim)", fontStyle: "normal" } : undefined}
       customStyle={{
         margin: 0,
         padding: "var(--code-padding-block) var(--code-padding-inline)",

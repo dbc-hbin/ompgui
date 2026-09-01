@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ompgui Remote</string>
+    <string name="shell_exit_title">ompgui에서 나가시겠어요?</string>
+    <string name="shell_exit_message">앱이 종료됩니다.</string>
+    <string name="shell_exit_confirm">나가기</string>
+    <string name="shell_exit_cancel">머물기</string>
+</resources>

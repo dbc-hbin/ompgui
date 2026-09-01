@@ -6,6 +6,7 @@ import { useI18n } from "@/lib/i18n";
 import { isSafeExternalUrl } from "@/lib/safe-url";
 import { omitUntouchedModelDrafts } from "@/lib/models-config-drafts";
 import { formatApiError } from "@/lib/i18n/api-error";
+import { invalidateClientModels, loadClientModels } from "@/lib/client-model-store";
 import {
   Dialog,
   DialogContent,
@@ -1765,16 +1766,15 @@ export function ModelsConfig({ onSaved, onDirtyChange }: { onSaved?: () => void;
       .catch(() => {});
   }, []);
 
-  const loadRuntimeModels = useCallback(async () => {
+  const loadRuntimeModels = useCallback(async (options?: { force?: boolean }) => {
     setRuntimeModelsLoading(true);
     try {
-      const response = await fetch("/api/models", { cache: "no-store" });
-      const data = response.ok ? await response.json() as { modelList?: RuntimeModelEntry[]; connectedProviders?: ConnectedProvider[] } : null;
-      setRuntimeModels(data?.modelList ?? []);
-      setConnectedProviders(data?.connectedProviders ?? []);
+      if (options?.force) invalidateClientModels();
+      const data = await loadClientModels("", { force: options?.force });
+      setRuntimeModels(data.modelList ?? []);
+      setConnectedProviders(data.connectedProviders ?? []);
     } catch {
-      setRuntimeModels([]);
-      setConnectedProviders([]);
+      // Keep the last successful runtime list; a failed refresh is not an empty registry.
     } finally {
       setRuntimeModelsLoading(false);
     }
@@ -1861,7 +1861,7 @@ export function ModelsConfig({ onSaved, onDirtyChange }: { onSaved?: () => void;
     const response = await fetch("/api/providers/enable", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider }) });
     const data = await response.json() as { error?: string };
     if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
-    await loadRuntimeModels();
+    await loadRuntimeModels({ force: true });
   }, [loadRuntimeModels]);
 
   const addCustomProvider = useCallback(() => {
@@ -1996,7 +1996,7 @@ export function ModelsConfig({ onSaved, onDirtyChange }: { onSaved?: () => void;
           onDirtyChange?.(false);
           await loadConfig(submittedFingerprint);
         }
-        await loadRuntimeModels();
+        await loadRuntimeModels({ force: true });
         loadApiKeyProviders();
         onSaved?.();
         // The parent callback may reset its persisted-save indicator; restore
@@ -2029,7 +2029,7 @@ export function ModelsConfig({ onSaved, onDirtyChange }: { onSaved?: () => void;
     if (selection.type === "oauth") {
       const p = oauthProviders.find((p) => p.id === selection.providerId);
       if (!p) return null;
-      return <OAuthDetail key={p.id} provider={p} onRefresh={() => { loadOAuthProviders(); loadApiKeyProviders(); void loadRuntimeModels(); }} />;
+      return <OAuthDetail key={p.id} provider={p} onRefresh={() => { loadOAuthProviders(); loadApiKeyProviders(); void loadRuntimeModels({ force: true }); }} />;
     }
     if (selection.type === "apikey") {
       const p = apiKeyProviders.find((p) => p.id === selection.providerId);
@@ -2037,7 +2037,7 @@ export function ModelsConfig({ onSaved, onDirtyChange }: { onSaved?: () => void;
       return <ApiKeyDetail key={p.id} provider={p} />;
     }
     if (selection.type === "roles") return <ModelRolesDetail models={runtimeModels} />;
-    if (selection.type === "registry") return <NativeRegistryDetail models={runtimeModels} connectedProviders={connectedProviders} onChanged={loadRuntimeModels} />;
+    if (selection.type === "registry") return <NativeRegistryDetail models={runtimeModels} connectedProviders={connectedProviders} onChanged={() => loadRuntimeModels({ force: true })} />;
     if (selection.type === "picker") return (
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "var(--space-5)" }}>
@@ -2045,7 +2045,7 @@ export function ModelsConfig({ onSaved, onDirtyChange }: { onSaved?: () => void;
             <SectionTitle>Composer Model Picker</SectionTitle>
             <p style={{ margin: "4px 0 0", color: "var(--text-muted)", fontSize: "var(--text-md)", lineHeight: 1.5 }}>Choose which native OMP models are available in the composer. This changes only omp-web&apos;s picker, not OMP&apos;s model registry.</p>
           </div>
-          <button type="button" onClick={() => void loadRuntimeModels()} disabled={runtimeModelsLoading} title="Refresh OMP runtime models" style={{ padding: 7, border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "transparent", color: "var(--text-muted)", cursor: runtimeModelsLoading ? "wait" : "pointer" }}><RefreshCw size={14} aria-hidden="true" /></button>
+          <button type="button" onClick={() => void loadRuntimeModels({ force: true })} disabled={runtimeModelsLoading} title="Refresh OMP runtime models" style={{ padding: 7, border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "transparent", color: "var(--text-muted)", cursor: runtimeModelsLoading ? "wait" : "pointer" }}><RefreshCw size={14} aria-hidden="true" /></button>
         </div>
         {runtimeModelsLoading ? <div style={{ color: "var(--text-muted)", fontSize: "var(--text-md)" }}>Loading OMP runtime models...</div> : Object.entries(runtimeModelsByProvider).map(([provider, models]) => {
           const providerVisible = models.every((model) => visibleModelKeys === null || visibleModelKeys.has(`${model.provider}:${model.id}`));

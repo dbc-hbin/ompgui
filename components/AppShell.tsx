@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -10,18 +10,21 @@ import { toast } from "./ui/toast";
 import { TabBar, type Tab } from "./TabBar";
 import { BranchNavigator } from "./BranchNavigator";
 import { LanguageSwitcher } from "./LanguageSwitcher";
-import { Check, History, Info, Menu, Moon, PanelLeft, PanelRight, Sun, Terminal, Wand2 } from "lucide-react";
+import { Check, History, Info, Menu, Moon, PanelLeft, PanelRight, Search, Sun, Terminal, Wand2 } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
 import { formatCompactNumber, formatPercent, getCacheHitRate } from "@/lib/format";
 import { translate, useI18n } from "@/lib/i18n";
 import { formatApiError } from "@/lib/i18n/api-error";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { getOverlayDepth, subscribeOverlayStack } from "@/hooks/overlay-stack";
 import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
 import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import { getInitialNavigation } from "@/lib/initial-navigation";
 import { comparableProjectPath } from "@/lib/comparable-path";
 import { showCompletionNotification } from "@/lib/browser-notifications";
+import { getSessionListSnapshot, loadSessionList, subscribeSessionList } from "@/lib/client-session-store";
+import { createUrlRestoredSession } from "@/lib/url-session-restore";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
@@ -53,6 +56,15 @@ const RIGHT_PANEL_WIDTH_STORAGE_KEY = "ompgui:right-panel-width";
 const RIGHT_PANEL_MIN_WIDTH = 300;
 const RIGHT_PANEL_MAX_WIDTH = 960;
 const RIGHT_PANEL_DEFAULT_WIDTH = 520;
+const OVERLAY_HISTORY_GUARD = { ompguiOverlayGuard: true as const };
+
+function isOverlayHistoryGuard(state: unknown): boolean {
+  return Boolean(
+    state &&
+    typeof state === "object" &&
+    (state as { ompguiOverlayGuard?: unknown }).ompguiOverlayGuard === true,
+  );
+}
 
 function clampSidebarWidth(width: number): number {
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
@@ -156,6 +168,12 @@ function ModalLoadingFallback() {
   );
 }
 
+declare global {
+  interface Window {
+    ompguiConsumeBack?: () => boolean;
+  }
+}
+
 type SessionCopyField = "file" | "id";
 type AutoNameStatus =
   | { kind: "idle" }
@@ -177,7 +195,49 @@ export function AppShell() {
   const { isDark, preference, toggleTheme } = useTheme();
   const { t, locale } = useI18n();
   const isMobile = useIsMobile();
-  const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const updateViewportMetrics = () => {
+      const vv = window.visualViewport;
+      if (vv) {
+        const height = Math.round(vv.height + vv.offsetTop);
+        document.documentElement.style.setProperty("--app-viewport-height", `${height}px`);
+        document.documentElement.style.setProperty("--app-viewport-offset-top", `${Math.round(vv.offsetTop)}px`);
+      } else {
+        document.documentElement.style.setProperty("--app-viewport-height", "100dvh");
+        document.documentElement.style.setProperty("--app-viewport-offset-top", "0px");
+      }
+    };
+
+    updateViewportMetrics();
+
+    const vv = window.visualViewport;
+    if (vv) {
+      vv.addEventListener("resize", updateViewportMetrics);
+      vv.addEventListener("scroll", updateViewportMetrics);
+      window.addEventListener("resize", updateViewportMetrics);
+      return () => {
+        vv.removeEventListener("resize", updateViewportMetrics);
+        vv.removeEventListener("scroll", updateViewportMetrics);
+        window.removeEventListener("resize", updateViewportMetrics);
+        document.documentElement.style.removeProperty("--app-viewport-height");
+        document.documentElement.style.removeProperty("--app-viewport-offset-top");
+      };
+    } else {
+      window.addEventListener("resize", updateViewportMetrics);
+      return () => {
+        window.removeEventListener("resize", updateViewportMetrics);
+        document.documentElement.style.removeProperty("--app-viewport-height");
+        document.documentElement.style.removeProperty("--app-viewport-offset-top");
+      };
+    }
+  }, []);
+  const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(() => (
+    initialNavigation.sessionId ? createUrlRestoredSession(initialNavigation.sessionId) : null
+  ));
   // When user clicks +, we only store the cwd — no fake session id
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
   const [initialCwdStatus, setInitialCwdStatus] = useState<"idle" | "validating" | "ready" | "error">(
@@ -553,6 +613,104 @@ export function AppShell() {
   const rightPanelResizeHandlersRef = useRef<{ onMove: (event: PointerEvent) => void; onUp: () => void } | null>(null);
   const rightPanelWidthMountedRef = useRef(false);
 
+  // Priority-ordered back button handler:
+  // 1. Open modals / sheets / popovers / command palette
+  // 2. Mobile sidebar drawer
+  // 3. Mobile file panel
+  // 4. Return false -> native in-origin history / exit confirmation
+  const consumeBack = useCallback((): boolean => {
+    const overlayBack = new Event("ompgui:overlay-back", { cancelable: true });
+    window.dispatchEvent(overlayBack);
+    if (overlayBack.defaultPrevented) {
+      return true;
+    }
+    if (commandPaletteOpen) {
+      setCommandPaletteOpen(false);
+      return true;
+    }
+    if (settingsTab !== null) {
+      setSettingsTab(null);
+      return true;
+    }
+    if (usageOpen) {
+      setUsageOpen(false);
+      return true;
+    }
+    if (activeTopPanel !== null) {
+      setActiveTopPanel(null);
+      return true;
+    }
+    if (isMobile && sidebarOpen) {
+      setSidebarOpen(false);
+      return true;
+    }
+    if (isMobile && rightPanelOpen) {
+      setRightPanelOpen(false);
+      return true;
+    }
+    return false;
+  }, [commandPaletteOpen, settingsTab, usageOpen, activeTopPanel, isMobile, sidebarOpen, rightPanelOpen]);
+
+  const overlayDepth = useSyncExternalStore(subscribeOverlayStack, getOverlayDepth, () => 0);
+  const skipOverlayPopRef = useRef(false);
+  const hasConsumableLayer =
+    overlayDepth > 0 ||
+    commandPaletteOpen ||
+    settingsTab !== null ||
+    usageOpen ||
+    activeTopPanel !== null ||
+    (isMobile && sidebarOpen) ||
+    (isMobile && rightPanelOpen);
+
+  useEffect(() => {
+    const handler = () => consumeBack();
+    window.ompguiConsumeBack = handler;
+
+    const onCustomBack = (event: Event) => {
+      if (consumeBack()) {
+        event.preventDefault();
+      }
+    };
+
+    const onPopState = () => {
+      if (skipOverlayPopRef.current) {
+        skipOverlayPopRef.current = false;
+        return;
+      }
+      if (consumeBack()) {
+        history.pushState(OVERLAY_HISTORY_GUARD, "", window.location.href);
+      }
+    };
+
+    window.addEventListener("ompgui:back", onCustomBack);
+    window.addEventListener("popstate", onPopState);
+
+    return () => {
+      if (window.ompguiConsumeBack === handler) {
+        delete window.ompguiConsumeBack;
+      }
+      window.removeEventListener("ompgui:back", onCustomBack);
+      window.removeEventListener("popstate", onPopState);
+    };
+  }, [consumeBack]);
+
+  // Overlay Back must not use next/navigation `router.back()` / `router.push()`:
+  // those APIs are for route history. A same-URL History sentinel absorbs the
+  // already-committed popstate without changing the App Router location.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (hasConsumableLayer) {
+      if (!isOverlayHistoryGuard(history.state)) {
+        history.pushState(OVERLAY_HISTORY_GUARD, "", window.location.href);
+      }
+      return;
+    }
+    if (isOverlayHistoryGuard(history.state)) {
+      skipOverlayPopRef.current = true;
+      history.back();
+    }
+  }, [hasConsumableLayer]);
+
   useEffect(() => {
     setRightPanelWidth(loadRightPanelWidth());
   }, []);
@@ -649,7 +807,7 @@ export function AppShell() {
   // True once the initial ?session= URL param has been resolved (or confirmed absent)
   const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !initialSessionId);
   // Suppresses sessionKey bump in handleCwdChange during the initial URL restore
-  const suppressCwdBumpRef = useRef(false);
+  const suppressCwdBumpRef = useRef(Boolean(initialSessionId));
 
   useEffect(() => {
     const requestedCwd = initialNavigation.requestedCwd;
@@ -726,11 +884,14 @@ export function AppShell() {
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
     handleSessionIntent();
     setNewSessionCwd(null);
+    const sameId = activeSessionIdRef.current === session.id;
     setSelectedSession(session);
-    setSessionKey((k) => k + 1);
-    setRuntimeReady(false);
-    setSystemPrompt(null);
-    setSystemPromptLoading(false);
+    if (!(isRestore && sameId)) {
+      setSessionKey((k) => k + 1);
+      setRuntimeReady(false);
+      setSystemPrompt(null);
+      setSystemPromptLoading(false);
+    }
     setInitialSessionRestored(true);
     // On mobile, collapse the overlay drawer so the chat is revealed after pick.
     if (isMobile && !isRestore) setSidebarOpen(false);
@@ -769,18 +930,42 @@ export function AppShell() {
 
   // Client-built transient SessionInfo (new session / fork) lacks the
   // server-computed projectRoot, which the same-project check in
-  // handleCwdChange relies on. Hydrate it from the session list so switching
-  // worktrees right after creating a session doesn't close the chat.
+  // handleCwdChange relies on. Hydrate it from the shared session list so
+  // switching worktrees right after creating a session doesn't close the chat.
   const hydrateSelectedSession = useCallback((sessionId: string) => {
-    void fetch("/api/sessions")
-      .then((r) => (r.ok ? (r.json() as Promise<{ sessions: SessionInfo[] }>) : null))
-      .then((d) => {
-        const full = d?.sessions.find((s) => s.id === sessionId);
-        if (!full) return;
-        setSelectedSession((prev) => (prev && prev.id === sessionId && !prev.projectRoot ? full : prev));
-      })
-      .catch(() => {});
+    const apply = (sessions: SessionInfo[]) => {
+      const full = sessions.find((session) => session.id === sessionId);
+      if (!full) return;
+      setSelectedSession((prev) => (prev && prev.id === sessionId && !prev.projectRoot ? full : prev));
+    };
+    apply(getSessionListSnapshot().sessions);
+    void loadSessionList().then((snapshot) => apply(snapshot.sessions));
   }, []);
+
+  useEffect(() => {
+    const sessionId = selectedSession?.id;
+    if (!sessionId) return;
+    const apply = (sessions: SessionInfo[]) => {
+      const full = sessions.find((session) => session.id === sessionId);
+      if (!full) return;
+      setSelectedSession((prev) => {
+        if (!prev || prev.id !== sessionId) return prev;
+        if (
+          prev.path === full.path
+          && prev.cwd === full.cwd
+          && prev.name === full.name
+          && prev.projectRoot === full.projectRoot
+          && prev.messageCount === full.messageCount
+          && prev.firstMessage === full.firstMessage
+        ) {
+          return prev;
+        }
+        return { ...prev, ...full };
+      });
+    };
+    apply(getSessionListSnapshot().sessions);
+    return subscribeSessionList((snapshot) => apply(snapshot.sessions));
+  }, [selectedSession?.id]);
 
   // Called by ChatWindow when a new session gets its real id from pi
   const handleSessionCreated = useCallback((session: SessionInfo) => {
@@ -959,6 +1144,8 @@ export function AppShell() {
   const sidebarContent = (
     <>
       <CommandPalette
+        open={commandPaletteOpen}
+        onOpenChange={setCommandPaletteOpen}
         onSelectSession={handleSelectSession}
         onNewSession={() => handleNewSession(activeCwd ?? "")}
       />
@@ -1053,7 +1240,7 @@ export function AppShell() {
         }
       }
     `}</style>
-    <div style={{ display: "flex", height: "100dvh", overflow: "hidden", background: "var(--bg)" }}>
+    <div style={{ display: "flex", height: "var(--app-viewport-height, 100dvh)", overflow: "hidden", background: "var(--bg)" }}>
       {/* Mobile overlay backdrop */}
       <div
         className={`sidebar-overlay-backdrop${mobileSidebarReady ? "" : " sidebar-mobile-pending"}`}
@@ -1121,7 +1308,7 @@ export function AppShell() {
       <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         {/* Top bar: compact icon-led control bar */}
         <div ref={topBarRef} className="shell-topbar">
-        {/* Utility group: sidebar, theme, language */}
+        {/* Utility group: sidebar, search/palette, theme, language */}
         <div className="shell-toolbar-utility" style={{ paddingLeft: isMobile ? "var(--space-2)" : "var(--space-4)" }}>
           <button
             onClick={handleSidebarToggle}
@@ -1130,6 +1317,15 @@ export function AppShell() {
             className="shell-toolbar-btn ui-focus-ring"
           >
             {sidebarOpen ? <PanelLeft size={16} strokeWidth={1.8} aria-hidden="true" /> : <Menu size={16} strokeWidth={1.8} aria-hidden="true" />}
+          </button>
+          <button
+            type="button"
+            onClick={() => setCommandPaletteOpen(true)}
+            title={t("commandPalette.label")}
+            aria-label={t("commandPalette.label")}
+            className="shell-toolbar-btn ui-focus-ring"
+          >
+            <Search size={16} strokeWidth={1.8} aria-hidden="true" />
           </button>
           <button
             onClick={(e) => {

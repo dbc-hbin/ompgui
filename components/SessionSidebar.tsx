@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, useDeferredValue, type CSSProperties, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
+import { memo, useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, useDeferredValue, useSyncExternalStore, type CSSProperties, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import type { ManagedProject, SessionInfo } from "@/lib/types";
 import { translate, useI18n } from "@/lib/i18n";
@@ -16,6 +16,19 @@ import { clearLastOpenSession, setLastOpenSession, workspaceKeyOf } from "@/lib/
 import { groupSessionsByProject, projectActivityCounts, sortManagedProjects } from "@/lib/project-ordering";
 import { comparableProjectPath } from "@/lib/comparable-path";
 import { publishSessionChange } from "@/lib/session-change-bus";
+import {
+  getSessionListSnapshot,
+  invalidateSessionList,
+  loadSessionList,
+  subscribeSessionList,
+} from "@/lib/client-session-store";
+import {
+  nextDocumentNetworkState,
+  readDocumentNetworkStatus,
+  shouldFetchSessionList,
+} from "@/lib/document-network-lifecycle";
+import { parseRunningEventsFrame } from "@/lib/running-session-events";
+import { pickSessionForRestore, shouldOpenRestoredSessionImmediately } from "@/lib/url-session-restore";
 import { Archive, Check, ChevronDown, ChevronRight, FileUp, Folder, Gauge, GitBranch, MoreHorizontal, Plus, RefreshCw, Search, Settings2, SlidersHorizontal, Trash2, Upload } from "lucide-react";
 
 declare global {
@@ -528,9 +541,12 @@ function OmpGuiTitle() {
 }
 export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectSession, onSessionIntent, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, onSessionRestored, selectedCwd: selectedCwdProp, sidebarVisible = true, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, explorerRefreshing, onExplorerRefreshDone, onAtMention, onAtMentions, onOpenSettings, onOpenUsage, updateAvailable }: Props) {
   const { t } = useI18n();
-  const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const sessionList = useSyncExternalStore(subscribeSessionList, getSessionListSnapshot, getSessionListSnapshot);
+  const allSessions = sessionList.sessions;
+  const loading = sessionList.status === "loading" || sessionList.status === "idle";
+  const error = sessionList.error
+    ? translate("sessionSidebar.loadFailed", { detail: sessionList.error })
+    : null;
   const [selectedCwd, setSelectedCwd] = useState<string | null>(null);
   const [homeDir, setHomeDir] = useState<string>("");
   // Managed + session-discovered projects (server-merged, hidden excluded).
@@ -588,20 +604,11 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
   const sessionRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileExplorerRef = useRef<FileExplorerHandle>(null);
 
-  // Running SSE is established independently of the initial session-list
-  // request. Buffer refresh hints from that first snapshot (and the derived
-  // running-set effect) until the request settles instead of aborting it.
-  const initialSessionsLoadPendingRef = useRef(false);
-  const bufferedSessionRefreshRef = useRef(false);
   const pendingRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const sessionsEtagRef = useRef<string | null>(null);
-  const sessionsAbortRef = useRef<AbortController | null>(null);
   // A monotonically increasing lifecycle token fences async work from an
   // earlier Strict Mode setup as well as work that settles after unmount.
   const sessionsLifecycleRef = useRef(0);
   const sessionsDisposedRef = useRef(true);
-  const initialLoadDone = useRef(false);
 
   useEffect(() => {
     const lifecycle = sessionsLifecycleRef.current + 1;
@@ -611,9 +618,6 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
     return () => {
       if (sessionsLifecycleRef.current !== lifecycle) return;
       sessionsDisposedRef.current = true;
-      initialLoadDone.current = false;
-      initialSessionsLoadPendingRef.current = false;
-      bufferedSessionRefreshRef.current = false;
       if (pendingRefreshRef.current) {
         clearTimeout(pendingRefreshRef.current);
         pendingRefreshRef.current = null;
@@ -622,8 +626,6 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
         clearTimeout(sessionRefreshTimerRef.current);
         sessionRefreshTimerRef.current = null;
       }
-      sessionsAbortRef.current?.abort();
-      sessionsAbortRef.current = null;
     };
   }, []);
 
@@ -631,85 +633,41 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
     const lifecycle = sessionsLifecycleRef.current;
     const isActive = () => !sessionsDisposedRef.current && sessionsLifecycleRef.current === lifecycle;
     if (!isActive()) return;
-    if (showLoading) {
-      initialSessionsLoadPendingRef.current = true;
-    } else if (initialSessionsLoadPendingRef.current) {
-      // An explicit/non-buffered load intentionally supersedes the initial
-      // request; do not let its stale finally block flush a second refresh.
-      initialSessionsLoadPendingRef.current = false;
-      bufferedSessionRefreshRef.current = false;
-    }
+    if (!shouldFetchSessionList(readDocumentNetworkStatus(document, navigator))) return;
 
-    sessionsAbortRef.current?.abort();
-    const controller = new AbortController();
-    sessionsAbortRef.current = controller;
-    try {
-      if (showLoading) setLoading(true);
-      const headers: Record<string, string> = {};
-      if (sessionsEtagRef.current) headers["If-None-Match"] = sessionsEtagRef.current;
-      const res = await fetch("/api/sessions", { headers, signal: controller.signal });
-      if (!isActive()) return;
-      if (res.status === 304) return;
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const etag = res.headers.get("ETag");
-      if (etag) sessionsEtagRef.current = etag;
-      const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[] };
-      if (!isActive()) return;
-      setAllSessions(data.sessions);
-      // Treat the fetched running set as an initial fallback only. Once SSE is
-      // live it owns this state, so a slow fetch can't revive a stale snapshot.
-      if (!sseAuthoritativeRef.current) {
-        setRunningSessionIds(new Set(data.runningSessionIds ?? []));
-      }
-      // Drop unread markers for sessions that no longer exist (e.g. deleted).
-      const existingIds = new Set(data.sessions.map((s) => s.id));
-      setUnreadSessionIds((prev) => {
-        if (prev.size === 0) return prev;
-        const next = new Set([...prev].filter((id) => existingIds.has(id)));
-        return next.size === prev.size ? prev : next;
-      });
-      setError(null);
-      if (!showLoading) {
-        setSessionRefreshDone(true);
-        if (sessionRefreshTimerRef.current) clearTimeout(sessionRefreshTimerRef.current);
-        sessionRefreshTimerRef.current = null;
-        const refreshTimer = setTimeout(() => {
-          if (sessionRefreshTimerRef.current === refreshTimer) sessionRefreshTimerRef.current = null;
-          if (!isActive()) return;
-          setSessionRefreshDone(false);
-        }, 2000);
-        sessionRefreshTimerRef.current = refreshTimer;
-      }
-    } catch (e) {
-      if ((e as Error)?.name === "AbortError" || !isActive()) return;
-      setError(translate("sessionSidebar.loadFailed", { detail: e instanceof Error ? e.message : String(e) }));
-    } finally {
-      if (!isActive()) return;
-      if (showLoading) {
-        setLoading(false);
-        if (sessionsAbortRef.current === controller) {
-          initialSessionsLoadPendingRef.current = false;
-          if (bufferedSessionRefreshRef.current) {
-            bufferedSessionRefreshRef.current = false;
-            if (!pendingRefreshRef.current) {
-              const refreshTimer = setTimeout(() => {
-                if (pendingRefreshRef.current === refreshTimer) pendingRefreshRef.current = null;
-                if (!isActive()) return;
-                void loadSessions(false);
-              }, 300);
-              pendingRefreshRef.current = refreshTimer;
-            }
-          }
-        }
-      }
+    const snapshot = await loadSessionList();
+    if (!isActive()) return;
+    if (!sseAuthoritativeRef.current) {
+      setRunningSessionIds(new Set(snapshot.runningSessionIds));
+    }
+    if (!showLoading && snapshot.status === "ready") {
+      setSessionRefreshDone(true);
+      if (sessionRefreshTimerRef.current) clearTimeout(sessionRefreshTimerRef.current);
+      sessionRefreshTimerRef.current = null;
+      const refreshTimer = setTimeout(() => {
+        if (sessionRefreshTimerRef.current === refreshTimer) sessionRefreshTimerRef.current = null;
+        if (!isActive()) return;
+        setSessionRefreshDone(false);
+      }, 2000);
+      sessionRefreshTimerRef.current = refreshTimer;
     }
   }, []);
 
+  const initialLoadDone = useRef(false);
   useEffect(() => {
     const isFirst = !initialLoadDone.current;
     initialLoadDone.current = true;
-    loadSessions(isFirst);
+    void loadSessions(isFirst);
   }, [loadSessions, refreshKey]);
+
+  useEffect(() => {
+    const existingIds = new Set(allSessions.map((session) => session.id));
+    setUnreadSessionIds((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set([...prev].filter((id) => existingIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [allSessions]);
 
   const loadProjects = useCallback(async () => {
     try {
@@ -729,8 +687,24 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
   }, [loadProjects, refreshKey]);
 
   useEffect(() => {
-    const interval = setInterval(() => setRelativeTimeNow(Date.now()), 60_000);
-    return () => clearInterval(interval);
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const sync = () => {
+      if (document.visibilityState === "hidden") {
+        if (interval) {
+          clearInterval(interval);
+          interval = null;
+        }
+        return;
+      }
+      if (!interval) interval = setInterval(() => setRelativeTimeNow(Date.now()), 60_000);
+      setRelativeTimeNow(Date.now());
+    };
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      if (interval) clearInterval(interval);
+      document.removeEventListener("visibilitychange", sync);
+    };
   }, []);
 
   // Persist expansion state; null means nothing was stored yet.
@@ -746,16 +720,10 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
   }, [unreadSessionIds]);
 
   // Debounce refresh bursts (agent_start + session_info_update + file-appear signal can fire within 250ms).
-  // During the initial list request, retain only the fact that a refresh is
-  // needed; the request's finally block schedules one refresh after it settles.
   const scheduleRefresh = useCallback(() => {
     const lifecycle = sessionsLifecycleRef.current;
     const isActive = () => !sessionsDisposedRef.current && sessionsLifecycleRef.current === lifecycle;
     if (!isActive()) return;
-    if (initialSessionsLoadPendingRef.current) {
-      bufferedSessionRefreshRef.current = true;
-      return;
-    }
     if (pendingRefreshRef.current) return;
     const refreshTimer = setTimeout(() => {
       if (pendingRefreshRef.current === refreshTimer) pendingRefreshRef.current = null;
@@ -766,55 +734,73 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
   }, [loadSessions]);
 
   useEffect(() => {
-    // Live running status and session-list invalidations arrive via SSE; the
-    // sidebar never has to poll while an agent is working.
     const lifecycle = sessionsLifecycleRef.current;
     const isActive = () => !sessionsDisposedRef.current && sessionsLifecycleRef.current === lifecycle;
-    const source = new EventSource("/api/agent/running/events");
+    let source: EventSource | null = null;
+    let networkActive = false;
 
-    source.onmessage = (e) => {
-      if (!isActive()) return;
-      try {
-        const data = JSON.parse(e.data) as {
-          type?: string;
-          runningSessionIds?: unknown;
-          sessionIds?: unknown;
-          refreshSessionList?: boolean;
-        };
-        if (data.type === "sessions-changed") {
-          const sessionIds = Array.isArray(data.sessionIds)
-            ? data.sessionIds.filter((id): id is string => typeof id === "string")
-            : [];
-          if (data.refreshSessionList === true) {
-            publishSessionChange({
-              type: "sessions-changed",
-              sessionIds,
-              refreshSessionList: true,
-            });
-            scheduleRefresh();
-          }
-          return;
-        }
-        if (data.type === "running") {
-          sseAuthoritativeRef.current = true;
-          const runningSessionIds = Array.isArray(data.runningSessionIds)
-            ? data.runningSessionIds.filter((id): id is string => typeof id === "string")
-            : [];
-          setRunningSessionIds(new Set(runningSessionIds));
-          if (data.refreshSessionList === true) scheduleRefresh();
-        }
-      } catch {
-        // ignore malformed frames
-      }
+    const disconnect = () => {
+      if (!source) return;
+      source.close();
+      source = null;
     };
 
-    // On error EventSource auto-reconnects; keep the last known state meanwhile.
+    const connect = () => {
+      if (source) return;
+      source = new EventSource("/api/agent/running/events");
+      source.onmessage = (event) => {
+        if (!isActive()) return;
+        try {
+          const frame = parseRunningEventsFrame(JSON.parse(event.data) as unknown);
+          if (frame.type === "sessions-changed") {
+            if (frame.refreshSessionList) {
+              publishSessionChange({
+                type: "sessions-changed",
+                sessionIds: frame.sessionIds,
+                refreshSessionList: true,
+              });
+              invalidateSessionList();
+              scheduleRefresh();
+            }
+            return;
+          }
+          if (frame.type === "running") {
+            sseAuthoritativeRef.current = true;
+            setRunningSessionIds(new Set(frame.runningSessionIds));
+            if (frame.refreshSessionList) scheduleRefresh();
+          }
+        } catch {
+          // ignore malformed frames
+        }
+      };
+    };
+
+    const sync = () => {
+      if (!isActive()) return;
+      const next = readDocumentNetworkStatus(document, navigator);
+      const transition = nextDocumentNetworkState(networkActive, next);
+      networkActive = transition.active;
+      if (!transition.active) {
+        disconnect();
+        return;
+      }
+      connect();
+      if (transition.catchUp) void loadSessions(true);
+    };
+
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    window.addEventListener("online", sync);
+    window.addEventListener("offline", sync);
     return () => {
       if (pendingRefreshRef.current) {
         clearTimeout(pendingRefreshRef.current);
         pendingRefreshRef.current = null;
       }
-      source.close();
+      disconnect();
+      document.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("online", sync);
+      window.removeEventListener("offline", sync);
     };
   }, [loadSessions, scheduleRefresh]);
 
@@ -1166,46 +1152,64 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
   // the list a few times before declaring the restore failed.
   const restoreRetryRef = useRef(0);
   const restoreRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (restoreRetryTimerRef.current) {
-      clearTimeout(restoreRetryTimerRef.current);
-      restoreRetryTimerRef.current = null;
-    }
-  }, []);
+  const restoreRetryAliveRef = useRef(true);
+  const restoreRetryScopeRef = useRef(0);
+  const [restoreRetryEpoch, setRestoreRetryEpoch] = useState(0);
+  useEffect(() => {
+    restoreRetryAliveRef.current = true;
+    const scope = ++restoreRetryScopeRef.current;
+    return () => {
+      restoreRetryAliveRef.current = false;
+      restoreRetryScopeRef.current = scope + 1;
+      if (restoreRetryTimerRef.current) {
+        clearTimeout(restoreRetryTimerRef.current);
+        restoreRetryTimerRef.current = null;
+      }
+    };
+  }, [initialSessionId, skipInitialProjectSelection]);
 
   // Auto-select cwd and restore session from URL on first load
   useEffect(() => {
     if (skipInitialProjectSelection) return;
 
-    // If restoring a session, set cwd to match that session
-    if (initialSessionId && !restoredRef.current) {
-      if (allSessions.length === 0) return; // wait for sessions to load
-      const target = allSessions.find((s) => s.id === initialSessionId);
-      if (target) {
-        restoreRetryRef.current = 0;
+    if (initialSessionId) {
+      if (shouldOpenRestoredSessionImmediately(initialSessionId, restoredRef.current)) {
         restoredRef.current = true;
-        setSelectedCwd(target.cwd);
-        expandProject(workspaceKeyOf(target));
+        const target = pickSessionForRestore(initialSessionId, allSessions);
+        if (target.cwd) {
+          setSelectedCwd(target.cwd);
+          expandProject(workspaceKeyOf(target));
+        }
         onSelectSession(target, true);
+      }
+
+      const listed = allSessions.find((session) => session.id === initialSessionId);
+      if (listed) {
+        restoreRetryRef.current = 0;
+        if (listed.cwd) {
+          setSelectedCwd(listed.cwd);
+          expandProject(workspaceKeyOf(listed));
+        }
         return;
       }
+      if (sessionList.status === "loading" || sessionList.status === "idle") return;
+      if (restoreRetryTimerRef.current) return;
       if (restoreRetryRef.current < INITIAL_RESTORE_MAX_ATTEMPTS) {
         restoreRetryRef.current += 1;
-        if (restoreRetryTimerRef.current) {
-          clearTimeout(restoreRetryTimerRef.current);
-          restoreRetryTimerRef.current = null;
-        }
+        const scope = restoreRetryScopeRef.current;
         restoreRetryTimerRef.current = setTimeout(() => {
           restoreRetryTimerRef.current = null;
-          void loadSessions(false);
+          void Promise.resolve(loadSessions(false)).finally(() => {
+            if (!restoreRetryAliveRef.current || restoreRetryScopeRef.current !== scope) return;
+            setRestoreRetryEpoch((epoch) => epoch + 1);
+          });
         }, INITIAL_RESTORE_RETRY_MS);
         return;
       }
-      restoreRetryRef.current = 0;
-      restoredRef.current = true;
-      // Session not found — notify parent so it can show the placeholder
       onInitialRestoreDone?.();
+      return;
     }
+
     // No restore target: activate the top project (most recently added) so New
     // Session and Explorer have a context. When projects have not loaded yet
     // the ordering is provisional — re-pick once they arrive, unless the user
@@ -1216,7 +1220,7 @@ export function SessionSidebar({ selectedSessionId, optimisticSession, onSelectS
     setSelectedCwd(top.path);
     expandProject(top.path);
     provisionalSelectionRef.current = allSessions.length === 0;
-  }, [allSessions, selectedCwd, initialSessionId, skipInitialProjectSelection, onSelectSession, onInitialRestoreDone, sortedProjects, expandProject, loadSessions]);
+  }, [allSessions, selectedCwd, initialSessionId, skipInitialProjectSelection, onSelectSession, onInitialRestoreDone, sortedProjects, expandProject, loadSessions, sessionList.status, restoreRetryEpoch]);
 
   // Default expansion: when the user has never stored an expansion choice,
   // expand only the active project.

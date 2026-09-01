@@ -9,9 +9,18 @@
 import { Dialog as BaseDialog } from "@base-ui/react/dialog";
 import { Tooltip as BaseTooltip } from "@base-ui/react/tooltip";
 import { Collapsible as BaseCollapsible } from "@base-ui/react/collapsible";
-import type React from "react";
+import React, { useSyncExternalStore } from "react";
+import { useOverlayBack } from "@/hooks/overlay-stack";
 
 /* ---------------------------------- Dialog --------------------------------- */
+
+function OverlayBackBridge({ open, onOpenChange }: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  useOverlayBack(open, () => onOpenChange(false));
+  return null;
+}
 
 export function Dialog({ open, onOpenChange, children }: {
   open: boolean;
@@ -20,6 +29,7 @@ export function Dialog({ open, onOpenChange, children }: {
 }) {
   return (
     <BaseDialog.Root open={open} onOpenChange={onOpenChange}>
+      <OverlayBackBridge open={open} onOpenChange={onOpenChange} />
       {children}
     </BaseDialog.Root>
   );
@@ -89,34 +99,68 @@ export const DialogClose = BaseDialog.Close;
 
 /* ---------------------------------- Tooltip -------------------------------- */
 
+const COARSE_POINTER_QUERY = "(hover: none), (pointer: coarse)";
+
+function subscribeCoarse(cb: () => void): () => void {
+  if (typeof window === "undefined" || !window.matchMedia) return () => {};
+  const mql = window.matchMedia(COARSE_POINTER_QUERY);
+  mql.addEventListener("change", cb);
+  return () => mql.removeEventListener("change", cb);
+}
+
+function getCoarseSnapshot(): boolean {
+  if (typeof window === "undefined" || !window.matchMedia) return false;
+  return window.matchMedia(COARSE_POINTER_QUERY).matches;
+}
+
+function getCoarseServerSnapshot(): boolean {
+  return false;
+}
+
+function useIsCoarsePointer(): boolean {
+  return useSyncExternalStore(subscribeCoarse, getCoarseSnapshot, getCoarseServerSnapshot);
+}
+
 export function Tooltip({ content, children, side = "top" }: {
   content: React.ReactNode;
   children: React.ReactElement;
   side?: "top" | "bottom" | "left" | "right";
 }) {
+  const isCoarse = useIsCoarsePointer();
+  const child = children as React.ReactElement<{
+    "aria-label"?: string;
+    "aria-labelledby"?: string;
+  }>;
+  const childProps = child.props;
+  const trigger = isCoarse && typeof content === "string" && !childProps["aria-label"] && !childProps["aria-labelledby"]
+    ? React.cloneElement(child, { "aria-label": content })
+    : child;
+
   return (
     <BaseTooltip.Provider delay={350} closeDelay={0}>
-      <BaseTooltip.Root>
-        <BaseTooltip.Trigger render={children} />
-        <BaseTooltip.Portal>
-          <BaseTooltip.Positioner side={side} sideOffset={6} style={{ zIndex: "var(--z-tooltip)" }}>
-            <BaseTooltip.Popup
-              style={{
-                background: "var(--bg-panel)",
-                color: "var(--text)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-control)",
-                boxShadow: "var(--shadow-pop)",
-                padding: "var(--space-2) calc(var(--space-4) + var(--space-1) / 2)",
-                fontSize: "var(--text-md)",
-                lineHeight: 1.4,
-                maxWidth: 260,
-              }}
-            >
-              {content}
-            </BaseTooltip.Popup>
-          </BaseTooltip.Positioner>
-        </BaseTooltip.Portal>
+      <BaseTooltip.Root disabled={isCoarse || !content}>
+        <BaseTooltip.Trigger render={trigger} />
+        {isCoarse || !content ? null : (
+          <BaseTooltip.Portal>
+            <BaseTooltip.Positioner side={side} sideOffset={6} style={{ zIndex: "var(--z-tooltip)" }}>
+              <BaseTooltip.Popup
+                style={{
+                  background: "var(--bg-panel)",
+                  color: "var(--text)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-control)",
+                  boxShadow: "var(--shadow-pop)",
+                  padding: "var(--space-2) calc(var(--space-4) + var(--space-1) / 2)",
+                  fontSize: "var(--text-md)",
+                  lineHeight: 1.4,
+                  maxWidth: 260,
+                }}
+              >
+                {content}
+              </BaseTooltip.Popup>
+            </BaseTooltip.Positioner>
+          </BaseTooltip.Portal>
+        )}
       </BaseTooltip.Root>
     </BaseTooltip.Provider>
   );

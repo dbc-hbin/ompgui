@@ -109,6 +109,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               flexShrink: 0,
               userSelect: "none",
               position: "relative",
+              touchAction: "manipulation",
               transition: `background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm)`,
             }}
           >

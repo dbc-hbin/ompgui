@@ -179,8 +179,8 @@ html[data-palette="omp"].dark {
   --on-accent: #FFFFFF;
   --overlay-backdrop: color-mix(in srgb, var(--text) 24%, transparent);
   --border-muted: #3D424A;
-  --border-accent: #178FB9;
-  --focus-ring-color: #0088FA;
+  --border-accent: #FEBC38;
+  --focus-ring-color: #FEBC38;
   --custom-message-bg: #2A2530;
   --tool-pending-bg: #1D2129;
   --tool-success-bg: #161A1F;
@@ -195,6 +195,8 @@ html[data-palette="omp"].dark {
 
 /* Shape / elevation / motion tokens (warm-humanistic system). */
 :root {
+  --app-viewport-height: 100dvh;
+  --app-viewport-offset-top: 0px;
   --radius-control: 8px;
   --radius-card: 12px;
   --radius-modal: 16px;
@@ -216,12 +218,12 @@ html[data-palette="omp"].dark {
   --space-5: 12px;
   --space-6: 16px;
   --space-8: 24px;
-  --text-xs: 10px;
-  --text-sm: 11px;
-  --text-md: 12px;
-  --text-base: 13px;
-  --text-lg: 14px;
-  --text-xl: 17px;
+  --text-xs: 12px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
   --composer-ring-size: 26px;
   --composer-control-h: var(--control-height-sm);
   --composer-attachment-w: var(--control-height-sm);
@@ -314,7 +316,31 @@ html, body {
 }
 
 body {
-  height: 100dvh;
+  height: var(--app-viewport-height, 100dvh);
+}
+
+html,
+button,
+a,
+input,
+textarea,
+select {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:active:not(:disabled),
+a:active {
+  opacity: 0.85;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 1px;
 }
 
 /* Thin custom scrollbars (WebKit/Blink). Firefox uses scrollbar-color below. */
@@ -344,9 +370,9 @@ body {
 /* Keyboard focus ring that only shows for keyboard navigation, not mouse clicks.
    Components set their own :focus-visible where a tighter ring is wanted. */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-control);
 }
 /* Remove the default outline only when focus is NOT from the keyboard. */
 :focus:not(:focus-visible) {
@@ -372,8 +398,8 @@ pre, code {
 
 /* react-markdown output styles */
 .markdown-body {
-  font-size: 14px;
-  line-height: 1.7;
+  font-size: var(--text-base, 14px);
+  line-height: 1.5;
   color: var(--text);
   word-break: break-word;
 }
@@ -423,11 +449,11 @@ pre, code {
   max-width: 100%;
   height: auto;
   margin: 8px 0;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
 }
 .markdown-body .markdown-inline-code {
   background: color-mix(in srgb, var(--bg-panel) 62%, var(--bg));
-  border-radius: 5px;
+  border-radius: calc(var(--radius-control) - var(--space-1));
   padding: 1px 5px;
   color: var(--text);
   font-family: var(--font-mono);
@@ -475,7 +501,7 @@ pre, code {
 }
 .markdown-body blockquote {
   border-left: 3px solid color-mix(in srgb, var(--border) 75%, var(--text-muted));
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
   margin: 6px 0;
   padding: 6px 11px;
   background: var(--bg-subtle);
@@ -487,13 +513,13 @@ pre, code {
   overflow-x: auto;
   overflow-y: hidden;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
 }
 .markdown-body table {
   border-collapse: separate;
   border-spacing: 0;
   min-width: 100%;
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 .markdown-body th, .markdown-body td {
   border: 0;
@@ -580,7 +606,7 @@ pre, code {
 
 /* Subagent transcript dialog — compact text sizing for raw agent output */
 .markdown-subagent-text {
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.55;
 }
 .markdown-subagent-text p { margin: 0 0 6px; }
@@ -613,7 +639,7 @@ pre, code {
   padding-top: 8px;
   border-top: 1px solid var(--border);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 .compaction-file-details summary {
   cursor: pointer;
@@ -626,7 +652,7 @@ pre, code {
 .compaction-file-title {
   margin-bottom: 4px;
   color: var(--text);
-  font-size: 11px;
+  font-size: var(--text-sm);
   font-weight: 650;
 }
 .compaction-file-list {
@@ -635,10 +661,10 @@ pre, code {
   padding: 7px 8px;
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: var(--bg-panel);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-sm);
   line-height: 1.45;
   list-style: none;
 }
@@ -653,7 +679,7 @@ pre, code {
   position: relative;
   margin: 6px 0;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   overflow: hidden;
   background: var(--bg);
   box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 42%, transparent);
@@ -663,7 +689,7 @@ pre, code {
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--text-sm);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -681,13 +707,13 @@ pre, code {
 }
 .markdown-code-action {
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: calc(var(--radius-control) - var(--space-1));
   padding: 2px 7px;
   background: var(--bg);
   color: var(--text-muted);
   cursor: pointer;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--text-sm);
   line-height: 1.25;
 }
 .markdown-code-action:hover:not(:disabled) {
@@ -796,7 +822,7 @@ pre, code {
   overflow: hidden;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-sm);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -813,7 +839,7 @@ pre, code {
   height: 24px;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-control);
   background: var(--bg);
 }
 .mermaid-zoom-stepper button,
@@ -840,7 +866,7 @@ pre, code {
 .mermaid-zoom-icon-button {
   flex: 0 0 24px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-control);
 }
 .mermaid-zoom-stepper button:hover:not(:disabled),
 .mermaid-zoom-icon-button:hover {
@@ -861,7 +887,7 @@ pre, code {
   height: 22px;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 22px;
   text-align: center;
   user-select: none;
@@ -877,7 +903,7 @@ pre, code {
 .mermaid-zoom-canvas {
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-card);
   background: var(--bg-panel);
   margin: 0 auto;
   transition: transform var(--dur-fast) var(--ease-out-warm);
@@ -895,7 +921,7 @@ pre, code {
   }
 
   .mermaid-zoom-title {
-    font-size: 10px;
+    font-size: var(--text-sm);
   }
 
   .mermaid-zoom-viewport {
@@ -925,7 +951,7 @@ pre, code {
 .image-clickable:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
 }
 
 .image-lightbox-dialog {
@@ -961,7 +987,7 @@ pre, code {
   overflow: hidden;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-sm);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -978,7 +1004,7 @@ pre, code {
   height: 24px;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-control);
   background: var(--bg);
 }
 .image-lightbox-stepper button,
@@ -1005,7 +1031,7 @@ pre, code {
 .image-lightbox-icon-button {
   flex: 0 0 24px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-control);
 }
 .image-lightbox-stepper button:hover:not(:disabled),
 .image-lightbox-icon-button:hover {
@@ -1026,7 +1052,7 @@ pre, code {
   height: 22px;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 22px;
   text-align: center;
   user-select: none;
@@ -1054,7 +1080,7 @@ pre, code {
   }
 
   .image-lightbox-title {
-    font-size: 10px;
+    font-size: var(--text-sm);
   }
 
   .image-lightbox-viewport {
@@ -1112,7 +1138,7 @@ pre, code {
   height: 24px;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-control);
 }
 
 .file-viewer-mode-button {
@@ -1121,7 +1147,7 @@ pre, code {
   border: 0;
   border-left: 1px solid var(--border);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--text-sm);
   font-weight: 500;
   letter-spacing: 0;
   cursor: pointer;
@@ -1146,7 +1172,7 @@ pre, code {
   box-sizing: border-box;
   flex: 0 0 24px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -1201,7 +1227,7 @@ pre, code {
 .session-item-icon-button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
-  border-radius: 4px;
+  border-radius: var(--radius-control);
 }
 
 .sidebar-project-header > button:focus-visible,
@@ -1229,7 +1255,7 @@ pre, code {
 .sidebar-menu-item:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
 }
 
 /* Project navigation: give each workspace a quiet, tactile surface. The
@@ -1304,12 +1330,9 @@ pre, code {
   .composer-control-shelf > button {
     height: 28px !important;
     padding-inline: 8px !important;
-    border-radius: 6px !important;
-    font-size: 11px !important;
+    border-radius: var(--radius-control) !important;
+    font-size: var(--text-sm) !important;
   }
-}
-@media (prefers-reduced-motion: reduce) {
-  .sidebar-project-sessions, .sidebar-project-worktree, .composer-control-shelf { animation: none; }
 }
 
 @media (max-width: 640px) {
@@ -1337,11 +1360,11 @@ pre, code {
 .markdown-file-preview pre {
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-card);
   padding: 12px 16px;
   overflow-x: auto;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-md);
   margin: 12px 0;
 }
 .markdown-file-preview code {
@@ -1401,7 +1424,8 @@ span.token.table {
 }
 
 /* Loading shimmer / skeleton placeholder.
-   Usage: <div className="skeleton" /> — fills its box with an animated sheen. */
+   Usage: <div className="skeleton" /> — fills its box with an animated sheen.
+   Reusable 3-line text skeleton: <div className="skeleton-lines" /> */
 @keyframes skeleton-shimmer {
   0%   { background-position: -150% 0; }
   100% { background-position: 150% 0; }
@@ -1415,8 +1439,34 @@ span.token.table {
   );
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.6s ease-in-out infinite;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
 }
+
+.skeleton-lines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+}
+.skeleton-line {
+  display: block;
+  height: 12px;
+  border-radius: var(--radius-control);
+  background: linear-gradient(
+    90deg,
+    var(--bg-subtle) 0%,
+    color-mix(in srgb, var(--text-dim) 10%, var(--bg-subtle)) 50%,
+    var(--bg-subtle) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+}
+.skeleton-line:nth-child(1) { width: 85%; }
+.skeleton-line:nth-child(2) { width: 65%; }
+.skeleton-line:nth-child(3) { width: 45%; }
+.skeleton-lines > .skeleton:nth-child(1) { width: 85%; }
+.skeleton-lines > .skeleton:nth-child(2) { width: 65%; }
+.skeleton-lines > .skeleton:nth-child(3) { width: 45%; }
 
 /* Chat input shell: warm focus glow when the textarea inside receives focus. */
 .chat-input-shell:focus-within {
@@ -1440,6 +1490,20 @@ span.token.table {
 @keyframes ui-slide-up {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes ui-sheet-slide-up {
+  from {
+    transform: translateY(100%);
+    opacity: 0.8;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+@keyframes ui-sheet-backdrop-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 .animate-fade-in    { animation: ui-fade-in   var(--dur-fast) var(--ease-out-warm) both; }
 .animate-scale-in   { animation: ui-scale-in var(--dur-med) var(--ease-out-warm) both; }
@@ -1542,13 +1606,96 @@ html.dark .dropdown-surface :is(select, option) {
 .chat-message-card {
   animation: chat-message-in var(--dur-med) var(--ease-out-warm) both;
   transition: border-color var(--dur-fast) var(--ease-out-warm),
-              box-shadow var(--dur-fast) var(--ease-out-warm),
               transform var(--dur-fast) var(--ease-out-warm);
 }
 .chat-message-card:hover {
-  border-color: color-mix(in srgb, var(--accent) 22%, var(--border)) !important;
-  box-shadow: var(--shadow-card) !important;
   transform: none;
+}
+
+/* Transcript message action rows & buttons */
+.chat-action-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.chat-action-group {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--space-3) / 2);
+}
+
+.chat-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: calc(var(--space-3) / 2) var(--space-4);
+  height: calc(var(--control-height-sm) - var(--space-2));
+  min-height: calc(var(--control-height-sm) - var(--space-2));
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--radius-control) - var(--space-3) / 2);
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  white-space: nowrap;
+  touch-action: manipulation;
+  transition: color var(--dur-fast) var(--ease-out-warm),
+              background-color var(--dur-fast) var(--ease-out-warm),
+              opacity var(--dur-fast) var(--ease-out-warm);
+}
+
+.chat-action-btn:hover {
+  color: var(--accent);
+}
+
+.chat-action-btn:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 1px;
+  color: var(--accent);
+}
+
+.chat-action-btn[disabled] {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.chat-action-btn.is-active {
+  color: var(--accent);
+}
+
+/* Fine-pointer (desktop): subtle, reveal on hover / focus-within / active state */
+@media (hover: hover) and (pointer: fine) {
+  .chat-action-group {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur-fast) var(--ease-out-warm);
+  }
+  .chat-action-group.is-visible,
+  .chat-message-container:hover .chat-action-group,
+  .chat-message-container:focus-within .chat-action-group,
+  .chat-message:hover .chat-action-group,
+  .chat-message:focus-within .chat-action-group,
+  .chat-action-group:focus-within {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* Coarse pointer (touch) or mobile viewports (<= 640px): always visible with >=44px hit targets */
+@media (hover: none), (pointer: coarse), (max-width: 640px) {
+  .chat-action-group {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+  .chat-action-btn {
+    min-height: var(--control-touch, 44px);
+    min-width: var(--control-touch, 44px);
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-md);
+  }
 }
 
 /* Unboxed assistant message: entrance animation only. Tool-call and
@@ -1692,7 +1839,7 @@ html.dark .dropdown-surface :is(select, option) {
   height: 28px;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--text);
   cursor: pointer;
@@ -1778,7 +1925,7 @@ html.dark .dropdown-surface :is(select, option) {
   overflow: hidden;
   border: none;
   background: none;
-  font-size: 11px;
+  font-size: var(--text-sm);
   color: var(--text-muted);
   white-space: nowrap;
   cursor: pointer;
@@ -1822,34 +1969,72 @@ html.dark .dropdown-surface :is(select, option) {
 }
 @media (max-width: 640px) {
   :root {
-    --shell-topbar-height: 44px;
+    --shell-topbar-height: calc(44px + env(safe-area-inset-top, 0px));
+    --shell-file-toggle-size: 38px;
     --composer-ring-size: 28px;
-    --composer-control-h: var(--control-height);
-    --composer-attachment-w: 36px;
-    --composer-thinking-max-w: 66px;
-    --composer-send-size: 34px;
-    --composer-shell-padding: var(--space-5) var(--space-5) var(--space-2) calc(var(--space-5) + var(--space-1));
+    --composer-control-h: 44px;
+    --composer-attachment-w: 44px;
+    --composer-thinking-max-w: 72px;
+    --composer-send-size: 44px;
+    --control-touch: 44px;
+    --control-touch-icon: 44px;
+    --composer-shell-padding: var(--space-5) max(var(--space-5), env(safe-area-inset-right, 0px)) var(--space-2) max(calc(var(--space-5) + var(--space-1)), env(safe-area-inset-left, 0px));
+  }
+  .shell-topbar {
+    height: var(--shell-topbar-height);
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: calc(var(--shell-file-toggle-size) + var(--space-3) + env(safe-area-inset-right, 0px));
+  }
+  .shell-file-toggle {
+    top: calc(env(safe-area-inset-top, 0px) + (44px - var(--shell-file-toggle-size)) / 2);
+    right: calc(env(safe-area-inset-right, 0px) + 4px);
+    min-width: 44px;
+    min-height: 44px;
+    width: 44px;
+    height: 44px;
   }
   .shell-toolbar-utility,
   .shell-session-actions {
-    gap: var(--space-3);
+    gap: var(--space-2);
   }
   .shell-stats-btn {
     order: 3;
+    padding: 0 var(--space-3);
+    min-width: 44px;
+    min-height: 44px;
   }
   .shell-session-actions {
     order: 4;
   }
+  .shell-session-actions button {
+    min-width: 44px;
+    min-height: 44px;
+  }
   .shell-toolbar-btn {
-    width: var(--control-touch-icon);
-    height: var(--control-touch-icon);
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
   }
   .shell-toolbar-divider {
-    margin: 0 var(--space-3);
+    margin: 0 var(--space-2);
   }
-  .shell-stats-btn {
-    padding: 0 var(--space-4);
-    min-width: var(--control-touch-icon);
+  .tabbar-scroll {
+    height: 44px !important;
+  }
+  .tabbar-tab {
+    height: 44px !important;
+    min-height: 44px !important;
+  }
+  .tabbar-close {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+  .chat-input-textarea {
+    font-size: 16px !important;
   }
 }
 
@@ -1864,12 +2049,12 @@ html.dark .dropdown-surface :is(select, option) {
   padding: 2px 8px;
   margin-left: -8px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-align: left;
   transition: background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm);
 }
@@ -1938,7 +2123,8 @@ html.dark .dropdown-surface :is(select, option) {
   /* Honor the OS "reduce motion" preference across the board:
      - no smooth scrolling
      - collapse entrance/exit animations to (near) instant
-     - drop transitions on decorative surfaces (keep them functional/instant) */
+     - drop transitions on decorative surfaces (keep them functional/instant)
+     - stop live pulse halo, text pulses, spinners, and shimmer animations */
   html {
     scroll-behavior: auto;
   }
@@ -1952,9 +2138,23 @@ html.dark .dropdown-surface :is(select, option) {
   }
   /* Skeletons still need to convey "loading" without motion — switch to a
      static dimmed fill so the affordance survives. */
-  .skeleton {
-    animation: none;
-    background: var(--bg-subtle);
+  .skeleton,
+  .skeleton-line,
+  .skeleton-lines > .skeleton {
+    animation: none !important;
+    background: var(--bg-subtle) !important;
+  }
+  .live-pulse::after {
+    display: none !important;
+    animation: none !important;
+  }
+  .mermaid-block-loading,
+  .mermaid-block-loading::after {
+    animation: none !important;
+  }
+  .chat-message--live::before {
+    animation: none !important;
+    opacity: 0.3 !important;
   }
 }
 
@@ -2258,7 +2458,7 @@ html.dark .dropdown-surface :is(select, option) {
   }
   .composer-toolbar {
     display: grid !important;
-    grid-template-columns: var(--composer-attachment-w, 36px) minmax(0, 1fr) minmax(0, var(--composer-thinking-max-w, 66px)) var(--composer-ring-size, 28px) var(--composer-send-size, 34px);
+    grid-template-columns: var(--composer-attachment-w, 44px) minmax(0, 1fr) minmax(0, var(--composer-thinking-max-w, 72px)) var(--composer-ring-size, 28px) var(--composer-send-size, 44px);
     align-items: center;
     gap: var(--space-3, 6px) !important;
   }
@@ -2266,8 +2466,10 @@ html.dark .dropdown-surface :is(select, option) {
     order: 1;
     grid-column: 1;
     grid-row: 1;
-    width: var(--composer-attachment-w, 36px) !important;
+    width: var(--composer-attachment-w, 44px) !important;
     height: var(--composer-control-h, 44px) !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
     border-radius: var(--radius-control) !important;
     touch-action: manipulation;
   }
@@ -2281,9 +2483,10 @@ html.dark .dropdown-surface :is(select, option) {
     width: 100%;
     max-width: none !important;
     height: var(--composer-control-h, 44px) !important;
+    min-height: 44px !important;
     padding-inline: var(--space-4, 8px) !important;
     border-radius: var(--radius-control) !important;
-    font-size: var(--text-base, 13px) !important;
+    font-size: var(--text-base, 14px) !important;
     touch-action: manipulation;
   }
   .composer-thinking-control {
@@ -2291,19 +2494,20 @@ html.dark .dropdown-surface :is(select, option) {
     grid-column: 3;
     grid-row: 1;
     min-width: 0;
-    max-width: var(--composer-thinking-max-w, 66px);
+    max-width: var(--composer-thinking-max-w, 72px);
   }
   /* Keep the effort picker compact: icon + label only, no minimum width —
      every pixel here is taken from the model chip next to it. */
   .composer-thinking-button {
     width: 100%;
     height: var(--composer-control-h, 44px) !important;
-    min-width: 0;
+    min-height: 44px !important;
+    min-width: 44px !important;
     justify-content: center;
     gap: var(--space-1, 2px) !important;
     padding-inline: var(--space-2, 4px) !important;
     border-radius: var(--radius-control) !important;
-    font-size: var(--text-md, 12px) !important;
+    font-size: var(--text-md, 13px) !important;
     overflow: hidden;
     touch-action: manipulation;
   }
@@ -2311,13 +2515,14 @@ html.dark .dropdown-surface :is(select, option) {
     order: 5;
     grid-column: 5;
     grid-row: 1;
-    width: var(--composer-send-size, 34px);
-    min-width: var(--composer-send-size, 34px);
+    width: var(--composer-send-size, 44px) !important;
+    min-width: var(--composer-send-size, 44px) !important;
     height: var(--composer-control-h, 44px) !important;
+    min-height: 44px !important;
     justify-content: center;
     padding-inline: 0 !important;
     border-radius: var(--radius-control) !important;
-    font-size: var(--text-base, 13px) !important;
+    font-size: var(--text-base, 14px) !important;
     touch-action: manipulation;
   }
   .composer-primary-label {
@@ -2351,6 +2556,10 @@ html.dark .dropdown-surface :is(select, option) {
     bottom: 0;
     width: var(--sidebar-mobile-width);
     max-width: 85vw;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
     transition: transform var(--dur-slow) var(--ease-out-warm), box-shadow var(--dur-slow) var(--ease-out-warm);
   }
   .sidebar-container.sidebar-open {
@@ -2370,6 +2579,11 @@ html.dark .dropdown-surface :is(select, option) {
   .right-panel-container.right-panel-open {
     width: 100%;
     min-width: 0;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   .right-panel-container.right-panel-closed {
     width: 0 !important;
@@ -3507,17 +3721,6 @@ html.dark .dropdown-surface :is(select, option) {
   .sidebar-session-confirm-button,
   .sidebar-session-cancel-button {
     min-height: var(--control-touch);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sidebar-project-sessions,
-  .sidebar-session-collapse,
-  .sidebar-project-header,
-  .sidebar-search-input,
-  .sidebar-new-session,
-  .sidebar-settings-row {
-    transition: none;
   }
 }
 

@@ -7,6 +7,12 @@ interface Props {
   messages: AgentMessage[];
   scrollContainer: RefObject<HTMLDivElement | null>;
   messageRefs: RefObject<(HTMLDivElement | null)[]>;
+  /** Changes when the lazy render window moves, even if node count/height do not. */
+  layoutKey?: string;
+}
+
+export function minimapMeasureKey(messageCount: number, windowStart: number, windowEnd: number): string {
+  return `${messageCount}:${windowStart}:${windowEnd}`;
 }
 
 const MINIMAP_WIDTH = 20;
@@ -63,7 +69,7 @@ interface NodeInfo {
   index: number;
 }
 
-export const ChatMinimap = memo(function ChatMinimap({ messages, scrollContainer, messageRefs }: Props) {
+export const ChatMinimap = memo(function ChatMinimap({ messages, scrollContainer, messageRefs, layoutKey }: Props) {
   const [scrollRatio, setScrollRatio] = useState(0);
   const [viewportRatio, setViewportRatio] = useState(1);
   const [visible, setVisible] = useState(false);
@@ -104,45 +110,50 @@ export const ChatMinimap = memo(function ChatMinimap({ messages, scrollContainer
 
   // --- 节流 DOM 测量（仅消息变化/尺寸变化时触发，最多 150ms 一次）---
   const measureThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const applyNodeMeasure = useCallback(() => {
+    const scrollEl = scrollContainer.current;
+    if (!scrollEl) return;
+    const totalH = scrollEl.scrollHeight;
+    if (totalH <= 0) return;
+
+    const refs = messageRefs.current;
+    const newNodes: NodeInfo[] = [];
+    let refIndex = 0;
+    const allMessages = allMessagesRef.current;
+    // Same scroll container for every node — read its geometry once instead
+    // of per message (the loop scales with transcript length).
+    const containerRect = scrollEl.getBoundingClientRect();
+
+    for (let i = 0; i < allMessages.length; i++) {
+      const msg = allMessages[i];
+      if (msg.role !== "user" && msg.role !== "assistant") continue;
+      const el = refs?.[refIndex];
+      refIndex++;
+      if (!hasTextContent(msg)) continue;
+      // Windowed transcripts leave unmounted message refs null or detached.
+      if (el?.isConnected) {
+        const elRect = el.getBoundingClientRect();
+        const top = elRect.top - containerRect.top + scrollEl.scrollTop;
+        const h = elRect.height;
+        newNodes.push({
+          topRatio: top / totalH,
+          heightRatio: h / totalH,
+          msg,
+          index: newNodes.length,
+        });
+      }
+    }
+    setNodes(newNodes);
+  }, [scrollContainer, messageRefs]);
+
   const measureNodes = useCallback(() => {
     // 节流：150ms 内忽略重复调用
     if (measureThrottleRef.current) return;
     measureThrottleRef.current = setTimeout(() => {
       measureThrottleRef.current = null;
-      const scrollEl = scrollContainer.current;
-      if (!scrollEl) return;
-      const totalH = scrollEl.scrollHeight;
-      if (totalH <= 0) return;
-
-      const refs = messageRefs.current;
-      const newNodes: NodeInfo[] = [];
-      let refIndex = 0;
-      const allMessages = allMessagesRef.current;
-      // Same scroll container for every node — read its geometry once instead
-      // of per message (the loop scales with transcript length).
-      const containerRect = scrollEl.getBoundingClientRect();
-
-      for (let i = 0; i < allMessages.length; i++) {
-        const msg = allMessages[i];
-        if (msg.role !== "user" && msg.role !== "assistant") continue;
-        const el = refs?.[refIndex];
-        refIndex++;
-        if (!hasTextContent(msg)) continue;
-        if (el) {
-          const elRect = el.getBoundingClientRect();
-          const top = elRect.top - containerRect.top + scrollEl.scrollTop;
-          const h = elRect.height;
-          newNodes.push({
-            topRatio: top / totalH,
-            heightRatio: h / totalH,
-            msg,
-            index: newNodes.length,
-          });
-        }
-      }
-      setNodes(newNodes);
+      applyNodeMeasure();
     }, 150);
-  }, [scrollContainer, messageRefs]);
+  }, [applyNodeMeasure]);
 
   // scroll 事件 → 只更新视口，不碰 DOM。rAF-coalesce like the mousemove
   // handler: writing three state values on every scroll event re-renders all
@@ -192,14 +203,20 @@ export const ChatMinimap = memo(function ChatMinimap({ messages, scrollContainer
     };
   }, [scrollContainer, measureNodes, updateScroll]);
 
-  // Wait briefly for new message DOM before syncing layout.
+  // Wait briefly for new message DOM before syncing layout. `layoutKey` covers
+  // equal-size render-window shifts that keep node count and container height.
+  // Bypass the resize throttle so a same-size page shift is never dropped.
   useEffect(() => {
     const t = setTimeout(() => {
+      if (measureThrottleRef.current) {
+        clearTimeout(measureThrottleRef.current);
+        measureThrottleRef.current = null;
+      }
       updateScroll();
-      measureNodes();
+      applyNodeMeasure();
     }, 50);
     return () => clearTimeout(t);
-  }, [messages.length, measureNodes, updateScroll]);
+  }, [messages.length, layoutKey, applyNodeMeasure, updateScroll]);
 
   // Cancel any pending mousemove flush when the component unmounts.
   useEffect(() => {
