@@ -2416,7 +2416,6 @@ html.dark .dropdown-surface :is(select, option) {
   direction: rtl;
   text-align: left;
   unicode-bidi: plaintext;
-  font-size: var(--text-base);
   line-height: 1.2;
 }
 .model-option-name {
@@ -2456,9 +2455,6 @@ html.dark .dropdown-surface :is(select, option) {
 
 /* Mobile sidebar: slide in/out as overlay */
 @media (max-width: 640px) {
-  .composer-model-name {
-    font-size: var(--text-lg);
-  }
   .chat-stats-center {
     display: none !important;
   }
