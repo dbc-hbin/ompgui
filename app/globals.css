@@ -1974,7 +1974,7 @@ html.dark .dropdown-surface :is(select, option) {
     --shell-topbar-height: calc(44px + env(safe-area-inset-top, 0px));
     --shell-file-toggle-size: 38px;
     --composer-ring-size: 28px;
-    --composer-control-h: var(--control-height-lg);
+    --composer-control-h: var(--control-height);
     --composer-thinking-max-w: 66px;
     --control-touch: 44px;
     --control-touch-icon: 44px;
@@ -2268,7 +2268,8 @@ html.dark .dropdown-surface :is(select, option) {
   border: none;
   border-radius: var(--radius-control);
   color: var(--text-muted);
-  font-size: var(--text-md);
+  /* Pre-0.6.0 chip scale: 12px desktop, 13px mobile model override below. */
+  font-size: var(--text-sm);
   transition: background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm);
 }
 .composer-model-button {
@@ -2493,7 +2494,7 @@ html.dark .dropdown-surface :is(select, option) {
     min-height: var(--composer-control-h) !important;
     padding-inline: var(--space-4) !important;
     border-radius: var(--radius-control) !important;
-    font-size: var(--text-base) !important;
+    font-size: var(--text-md) !important;
     touch-action: manipulation;
   }
   .composer-thinking-control {
