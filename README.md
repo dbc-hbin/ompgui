@@ -2,7 +2,7 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-> **Android APK (Android 12+)** — Use the Kotlin companion app to connect to a remote ompgui server, with a read-only offline snapshot of the latest session. [Download ompgui Remote v0.6.3](https://github.com/dbc-hbin/ompgui/releases/download/v0.6.3/ompgui-remote-v0.6.3.apk) · [Release notes](https://github.com/dbc-hbin/ompgui/releases/tag/v0.6.3)
+> **Android APK (Android 12+)** — Use the Kotlin companion app to connect to a remote ompgui server, with a read-only offline snapshot of the latest session. [Download ompgui Remote v0.6.4](https://github.com/dbc-hbin/ompgui/releases/download/v0.6.4/ompgui-remote-v0.6.4.apk) · [Release notes](https://github.com/dbc-hbin/ompgui/releases/tag/v0.6.4)
 
 Local web UI for the [oh-my-pi (omp) coding agent](https://github.com/can1357/oh-my-pi). ompgui reads your local omp session files and gives you a browser workspace for session browsing, real-time chat, model configuration, skill management, and project file preview.
 
