@@ -13,6 +13,10 @@ test("globals.css defines --app-viewport-height, touch-action, and compact token
   assert.match(css, /@keyframes ui-sheet-slide-up/);
   assert.match(css, /@keyframes ui-sheet-backdrop-in/);
   assert.match(css, /--shell-topbar-height:\s*calc\(44px \+ env\(safe-area-inset-top,\s*0px\)\);/);
+  // File-panel toggle must share the toolbar-button size so it sits on the
+  // same baseline (28px desktop, 44px mobile) instead of a one-off 30/38px.
+  assert.match(css, /--shell-file-toggle-size:\s*28px;/);
+  assert.match(css, /--shell-file-toggle-size:\s*44px;/);
   // Composer attach/send are deliberately compact on both breakpoints:
   // 28px ghost attach, 32px circular primary send (Paseo-style hierarchy).
   assert.match(css, /--composer-attachment-w:\s*var\(--control-height-sm\);/);
@@ -28,6 +32,7 @@ test("AppShell binds visualViewport to --app-viewport-height and exposes window.
   assert.match(appShell, /ompguiConsumeBack/);
   assert.match(appShell, /CommandPalette/);
   assert.match(appShell, /Search/);
+  assert.match(appShell, /shell-toolbar-btn shell-file-toggle/);
 });
 
 test("consumeBack asks open descendant overlays via cancelable ompgui:overlay-back before shell layers", async () => {

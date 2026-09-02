@@ -145,3 +145,34 @@ export function restoreScrollTop(scrollHeight: number, savedDistance: number): n
 export function getNextVisibleCount(currentVisibleCount: number, pageSize = VISIBLE_PAGE_SIZE): number {
   return currentVisibleCount + pageSize;
 }
+
+export type HistoryLoadMode = "auto" | "click-above";
+
+/**
+ * Decide how the top sentinel should load older messages.
+ *
+ * Fresh opens render the sentinel at scrollTop = 0 before the initial
+ * scroll-to-bottom. Auto-loading then races that scroll and can pin the
+ * viewport to the first page. Load at exact-top only after the user (or
+ * the initial follow-scroll) has left the top once — then use click-above
+ * so prepended messages actually come into view instead of staying hidden
+ * above the restored anchor.
+ */
+export function historyLoadModeFromSentinel(options: {
+  intersecting: boolean;
+  scrollTop: number;
+  hasLeftTop: boolean;
+}): HistoryLoadMode | null {
+  if (!options.intersecting) return null;
+  if (options.scrollTop > 0) return "auto";
+  if (options.hasLeftTop) return "click-above";
+  return null;
+}
+
+export function shouldLoadOlderAtExactTop(options: {
+  scrollTop: number;
+  hasLeftTop: boolean;
+  hasMoreAbove: boolean;
+}): boolean {
+  return options.hasLeftTop && options.hasMoreAbove && options.scrollTop <= 0;
+}

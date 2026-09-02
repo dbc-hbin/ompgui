@@ -1873,7 +1873,7 @@ export function AppShell() {
       title={rightPanelOpen ? t("appShell.hideFilePanel") : t("appShell.showFilePanel")}
       aria-label={rightPanelOpen ? t("appShell.hideFilePanel") : t("appShell.showFilePanel")}
       aria-pressed={rightPanelOpen}
-      className="shell-file-toggle ui-focus-ring"
+      className="shell-toolbar-btn shell-file-toggle ui-focus-ring"
     >
       <PanelRight size={16} strokeWidth={1.8} aria-hidden="true" />
     </button>

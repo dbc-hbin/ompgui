@@ -203,11 +203,10 @@ html[data-palette="omp"].dark {
   --control-height-sm: 28px;
   --control-height: 32px;
   --control-height-lg: 36px;
-  /* Shell chrome metrics: the top bar and its floating file-panel toggle
-     share one height token so they never drift apart. Mobile (≤640px)
-     bumps both via the media query next to .shell-toolbar-btn. */
+  /* Shell chrome metrics: the floating file-panel toggle matches
+     .shell-toolbar-btn — 28px inside the 36px bar, 44px on mobile. */
   --shell-topbar-height: 36px;
-  --shell-file-toggle-size: calc(var(--shell-topbar-height) - 6px);
+  --shell-file-toggle-size: 28px;
   /* Shared touch, spacing, and type metrics for compact controls. */
   --control-touch: 44px;
   --control-touch-icon: 40px;
@@ -1909,7 +1908,7 @@ html.dark .dropdown-surface :is(select, option) {
   height: var(--shell-topbar-height);
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
-  padding-right: calc(var(--shell-file-toggle-size) + var(--space-3));
+  padding-right: calc(var(--shell-file-toggle-size) + var(--space-2) + (var(--shell-topbar-height) - var(--shell-file-toggle-size)) / 2);
 }
 /* Session info / stats button: desktop shows the token + cost chips, mobile
    shows a single info icon. It never shrinks, so lower-priority actions
@@ -1942,37 +1941,21 @@ html.dark .dropdown-surface :is(select, option) {
   background: var(--bg-selected);
   color: var(--text);
 }
-/* File panel toggle: floats over the top bar's right corner. It must stay
+/* File panel toggle: floats over the top bar's right corner so it stays
    reachable on mobile, where an open panel takes the full width and the top
-   bar itself scrolls out of layout; transparent chrome instead of the old
-   boxed L-frame. */
+   bar itself is off-layout. Visual chrome comes from .shell-toolbar-btn. */
 .shell-file-toggle {
   position: fixed;
   top: calc((var(--shell-topbar-height) - var(--shell-file-toggle-size)) / 2);
   right: calc((var(--shell-topbar-height) - var(--shell-file-toggle-size)) / 2);
   z-index: var(--z-file-toggle);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: var(--shell-file-toggle-size);
   height: var(--shell-file-toggle-size);
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm);
-}
-.shell-file-toggle:hover,
-.shell-file-toggle[aria-pressed="true"] {
-  background: var(--bg-hover);
-  color: var(--text);
 }
 @media (max-width: 640px) {
   :root {
     --shell-topbar-height: calc(44px + env(safe-area-inset-top, 0px));
-    --shell-file-toggle-size: 38px;
+    --shell-file-toggle-size: 44px;
     --composer-ring-size: 28px;
     --composer-control-h: var(--control-height);
     --composer-thinking-max-w: 66px;
@@ -1984,15 +1967,15 @@ html.dark .dropdown-surface :is(select, option) {
     height: var(--shell-topbar-height);
     padding-top: env(safe-area-inset-top, 0px);
     padding-left: env(safe-area-inset-left, 0px);
-    padding-right: calc(var(--shell-file-toggle-size) + var(--space-3) + env(safe-area-inset-right, 0px));
+    padding-right: calc(var(--shell-file-toggle-size) + var(--space-2) + env(safe-area-inset-right, 0px));
   }
   .shell-file-toggle {
-    top: calc(env(safe-area-inset-top, 0px) + (44px - var(--shell-file-toggle-size)) / 2);
-    right: calc(env(safe-area-inset-right, 0px) + 4px);
-    min-width: 44px;
-    min-height: 44px;
-    width: 44px;
-    height: 44px;
+    top: env(safe-area-inset-top, 0px);
+    right: env(safe-area-inset-right, 0px);
+    min-width: var(--shell-file-toggle-size);
+    min-height: var(--shell-file-toggle-size);
+    width: var(--shell-file-toggle-size);
+    height: var(--shell-file-toggle-size);
   }
   .shell-toolbar-utility,
   .shell-session-actions {

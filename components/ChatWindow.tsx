@@ -1,7 +1,7 @@
 "use client";
 import { registerAbortHandler } from "@/hooks/useKeyboardShortcuts";
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage } from "@/lib/types";
 import { translate, useI18n } from "@/lib/i18n";
 import { splitFinalAssistantBlocks } from "@/lib/message-display";
@@ -32,6 +32,8 @@ import {
   shiftRenderWindowDown,
   shiftRenderWindowUp,
   commitResolvedRenderWindow,
+  historyLoadModeFromSentinel,
+  shouldLoadOlderAtExactTop,
   type RenderWindow,
 } from "@/lib/chat-lazy-load";
 import {
@@ -208,6 +210,7 @@ const CommittedTranscript = memo(function CommittedTranscript({
   const [followingEnd, setFollowingEnd] = useState(true);
   const topSentinelRef = useRef<HTMLButtonElement>(null);
   const bottomSentinelRef = useRef<HTMLButtonElement>(null);
+  const hasLeftTopRef = useRef(false);
   const pendingAnchorRef = useRef<{
     index: number;
     previousTop: number;
@@ -361,6 +364,7 @@ const CommittedTranscript = memo(function CommittedTranscript({
   useEffect(() => {
     setRequestedWindow(initialRenderWindow(0));
     setFollowingEnd(true);
+    hasLeftTopRef.current = false;
   }, [sessionKey]);
 
   useLayoutEffect(() => {
@@ -399,6 +403,7 @@ const CommittedTranscript = memo(function CommittedTranscript({
     let raf: number | null = null;
     const update = () => {
       raf = null;
+      if (container.scrollTop > 0) hasLeftTopRef.current = true;
       const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 96;
       if (!atBottom) {
         const resolved = resolvedWindowRef.current;
@@ -408,6 +413,13 @@ const CommittedTranscript = memo(function CommittedTranscript({
             : resolved
         ));
         setFollowingEnd(false);
+        if (shouldLoadOlderAtExactTop({
+          scrollTop: container.scrollTop,
+          hasLeftTop: hasLeftTopRef.current,
+          hasMoreAbove: resolved.hasMoreAbove,
+        })) {
+          loadOlder("click-above");
+        }
         return;
       }
       if (resolvedWindowRef.current.endIndex >= planLength) {
@@ -423,7 +435,7 @@ const CommittedTranscript = memo(function CommittedTranscript({
       container.removeEventListener("scroll", onScroll);
       if (raf !== null) cancelAnimationFrame(raf);
     };
-  }, [scrollContainerRef, planLength, sessionKey, startIndex, endIndex]);
+  }, [scrollContainerRef, planLength, sessionKey, startIndex, endIndex, loadOlder]);
 
   useEffect(() => {
     const sentinel = topSentinelRef.current;
@@ -431,9 +443,12 @@ const CommittedTranscript = memo(function CommittedTranscript({
     if (!sentinel || !container) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting && container.scrollTop > 0) {
-          loadOlder("auto");
-        }
+        const mode = historyLoadModeFromSentinel({
+          intersecting: Boolean(entries[0]?.isIntersecting),
+          scrollTop: container.scrollTop,
+          hasLeftTop: hasLeftTopRef.current,
+        });
+        if (mode) loadOlder(mode);
       },
       { root: container, rootMargin: LOAD_MORE_ROOT_MARGIN, threshold: 0 },
     );
@@ -462,8 +477,9 @@ const CommittedTranscript = memo(function CommittedTranscript({
           ref={topSentinelRef}
           type="button"
           onClick={() => loadOlder("click-above")}
-          className="py-3 w-full text-center text-xs text-text-muted hover:text-text transition-colors cursor-pointer"
+          className="py-3 w-full min-h-[44px] text-center text-xs text-text-muted hover:text-text transition-colors cursor-pointer inline-flex items-center justify-center gap-1"
         >
+          <ChevronUp size={12} strokeWidth={1.8} aria-hidden="true" />
           {t("chatWindow.scrollUpToLoad", { count: startIndex })}
         </button>
       )}
@@ -477,9 +493,10 @@ const CommittedTranscript = memo(function CommittedTranscript({
           ref={bottomSentinelRef}
           type="button"
           onClick={loadNewer}
-          className="py-3 w-full text-center text-xs text-text-muted hover:text-text transition-colors cursor-pointer"
+          className="py-3 w-full min-h-[44px] text-center text-xs text-text-muted hover:text-text transition-colors cursor-pointer inline-flex items-center justify-center gap-1"
         >
           {t("chatWindow.scrollDownToLoad", { count: planLength - endIndex })}
+          <ChevronDown size={12} strokeWidth={1.8} aria-hidden="true" />
         </button>
       )}
     </>
