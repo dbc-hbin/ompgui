@@ -1,6 +1,5 @@
 package com.dbchbin.ompgui.remote
 
-import android.net.Uri
 import java.net.URI
 import java.net.URISyntaxException
 import java.util.Locale
@@ -43,8 +42,8 @@ object OriginValidator {
         return "$scheme://$host${if (port >= 0) ":$port" else ""}"
     }
 
-    fun isAllowedNavigation(configuredOrigin: String?, target: Uri?): Boolean =
-        configuredOrigin != null && target != null && configuredOrigin == normalize(target.toString())
+    fun isAllowedNavigation(configuredOrigin: String?, targetUrl: String?): Boolean =
+        configuredOrigin != null && targetUrl != null && configuredOrigin == normalize(targetUrl)
 
     fun isLoopbackHost(host: String?): Boolean = when (host?.lowercase(Locale.ROOT)) {
         "localhost", "127.0.0.1", "::1", "0:0:0:0:0:0:0:1" -> true

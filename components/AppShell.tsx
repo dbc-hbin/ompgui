@@ -1309,7 +1309,7 @@ export function AppShell() {
         {/* Top bar: compact icon-led control bar */}
         <div ref={topBarRef} className="shell-topbar">
         {/* Utility group: sidebar, search/palette, theme, language */}
-        <div className="shell-toolbar-utility" style={{ paddingLeft: isMobile ? "var(--space-2)" : "var(--space-4)" }}>
+        <div className="shell-toolbar-utility" style={{ paddingLeft: isMobile ? 0 : "var(--space-4)" }}>
           <button
             onClick={handleSidebarToggle}
             title={sidebarOpen ? t("appShell.hideSidebar") : t("appShell.showSidebar")}
@@ -1335,6 +1335,7 @@ export function AppShell() {
             title={preference === "system" ? t("appShell.systemTheme") : (isDark ? t("appShell.switchToSystemTheme") : t("appShell.switchToDarkMode"))}
             aria-label={preference === "system" ? t("appShell.systemTheme") : (isDark ? t("appShell.switchToSystemTheme") : t("appShell.switchToDarkMode"))}
             aria-pressed={isDark}
+            data-theme-toggle=""
             className="shell-toolbar-btn ui-focus-ring"
           >
             {isDark ? <Sun size={16} strokeWidth={1.8} aria-hidden="true" /> : <Moon size={16} strokeWidth={1.8} aria-hidden="true" />}

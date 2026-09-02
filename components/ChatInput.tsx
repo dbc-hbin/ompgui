@@ -1478,12 +1478,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     () => selectableThinkingLevels(availableThinkingLevels),
     [availableThinkingLevels],
   );
-  // A run starting mid-interaction must not leave the reasoning menu
-  // open: the level only applies to the next prompt, and the trigger is
-  // disabled while streaming.
-  useEffect(() => {
-    if (isStreaming) setThinkingDropdownOpen(false);
-  }, [isStreaming]);
+  // The reasoning selector stays usable mid-run on purpose: omp applies the
+  // level to the next prompt (or steer/follow-up), so changing it while a
+  // turn streams is meaningful.
 
   useEffect(() => {
     if (!hasContextRing) {
@@ -2335,7 +2332,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
           <div className="composer-toolbar" style={{
             display: "flex",
             alignItems: "center",
-            gap: 2,
+            gap: "var(--space-1)",
             marginTop: "var(--composer-toolbar-separation)",
             paddingTop: "var(--composer-toolbar-separation)",
             borderTop: "1px solid color-mix(in srgb, var(--border) 62%, transparent)",
@@ -2599,23 +2596,21 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               </div>
             )}
 
-            {/* Reasoning level selector — stays visible while the agent
-                runs (disabled) so the level never looks like it reset. */}
+            {/* Reasoning level selector — usable mid-run; the daemon applies
+                the new level to the next prompt (or steer/follow-up), not to
+                tokens already streaming. */}
             {onThinkingLevelChange && (
               <div ref={thinkingDropdownRef} className="composer-thinking-control" style={{ position: "relative" }}>
                 <button
                   className="composer-thinking-button ui-focus-ring"
                   onClick={() => setThinkingDropdownOpen((v) => !v)}
-                  disabled={!runtimeReady || isStreaming}
+                  disabled={!runtimeReady}
                   title={t("chatInput.changeReasoningTitle", { level: thinkingDisplayLabel })}
                   aria-label={`${t("chatInput.changeReasoning")}: ${thinkingDisplayLabel}`}
                   style={{
                     background: thinkingDropdownOpen ? "var(--bg-hover)" : "none",
-                    cursor: isStreaming ? "not-allowed" : "pointer",
-                    opacity: isStreaming ? 0.5 : 1,
                   }}
                   onMouseEnter={(e) => {
-                    if (isStreaming) return;
                     e.currentTarget.style.background = "var(--bg-hover)";
                     e.currentTarget.style.color = "var(--text)";
                   }}
@@ -2650,7 +2645,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                         <button
                           className="dropdown-item"
                           key={lvl}
-                          onClick={() => { setThinkingDropdownOpen(false); if (runtimeReady && !isActive && !isStreaming) onThinkingLevelChange(lvl); }}
+                          onClick={() => { setThinkingDropdownOpen(false); if (runtimeReady && !isActive) onThinkingLevelChange(lvl); }}
                           disabled={!runtimeReady}
                           style={{
                             display: "flex", alignItems: "center", gap: 8,
@@ -2700,7 +2695,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                             type="button"
                             onClick={() => {
                               setThinkingDropdownOpen(false);
-                              if (runtimeReady && !isActive && !isStreaming) onThinkingLevelChange(lvl);
+                              if (runtimeReady && !isActive) onThinkingLevelChange(lvl);
                             }}
                             disabled={!runtimeReady}
                             style={{

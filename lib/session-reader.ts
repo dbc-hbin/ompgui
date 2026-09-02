@@ -504,7 +504,9 @@ export function buildSessionContext(
   let compaction: CompactionEntry | null = null;
   for (const entry of path) {
     if (entry.type === "thinking_level_change") {
-      thinkingLevel = entry.thinkingLevel ?? "off";
+      // Prefer the *configured* selector ("auto" or a concrete level); the
+      // sibling thinkingLevel field is only the classifier's effective effort.
+      thinkingLevel = entry.configured ?? entry.thinkingLevel ?? "off";
     } else if (entry.type === "model_change") {
       if (entry.model) {
         const role = entry.role ?? "default";

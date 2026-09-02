@@ -4,7 +4,7 @@ import test from "node:test";
 
 const root = new URL("../", import.meta.url);
 
-test("globals.css defines --app-viewport-height, touch-action, and >=44px mobile hit targets", async () => {
+test("globals.css defines --app-viewport-height, touch-action, and compact token-based composer controls", async () => {
   const css = await readFile(new URL("app/globals.css", root), "utf8");
   assert.match(css, /--app-viewport-height:\s*100dvh;/);
   assert.match(css, /height:\s*var\(--app-viewport-height,\s*100dvh\);/);
@@ -13,9 +13,11 @@ test("globals.css defines --app-viewport-height, touch-action, and >=44px mobile
   assert.match(css, /@keyframes ui-sheet-slide-up/);
   assert.match(css, /@keyframes ui-sheet-backdrop-in/);
   assert.match(css, /--shell-topbar-height:\s*calc\(44px \+ env\(safe-area-inset-top,\s*0px\)\);/);
-  assert.match(css, /--composer-control-h:\s*44px;/);
-  assert.match(css, /--composer-send-size:\s*44px;/);
-  assert.match(css, /--composer-attachment-w:\s*44px;/);
+  // Composer attach/send are deliberately compact on both breakpoints:
+  // 28px ghost attach, 32px circular primary send (Paseo-style hierarchy).
+  assert.match(css, /--composer-attachment-w:\s*var\(--control-height-sm\);/);
+  assert.match(css, /--composer-send-size:\s*var\(--control-height\);/);
+  assert.match(css, /\.composer-primary-action\s*\{[^}]*border-radius:\s*50%;/s);
   assert.match(css, /--control-touch:\s*44px;/);
 });
 

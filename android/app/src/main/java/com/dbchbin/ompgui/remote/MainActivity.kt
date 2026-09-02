@@ -1,13 +1,16 @@
 package com.dbchbin.ompgui.remote
 
 import android.app.AlertDialog
+import android.content.ClipDescription
 import android.net.Uri
 import android.os.Bundle
+import android.view.DragEvent
 import android.view.View
 import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
 import androidx.core.graphics.Insets
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -19,8 +22,10 @@ class MainActivity : BridgeActivity() {
     private var exitConfirmDialog: AlertDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         WindowCompat.setDecorFitsSystemWindows(window, false)
         super.onCreate(savedInstanceState)
+        window.setBackgroundDrawableResource(R.color.shell_background)
         val activeBridge = bridge ?: return
         val webView = activeBridge.webView ?: return
 
@@ -53,6 +58,8 @@ class MainActivity : BridgeActivity() {
     }
 
     private fun configureWebView(webView: WebView) {
+        webView.setBackgroundColor(SHELL_BACKGROUND_COLOR)
+        webView.setOnDragListener { _, event -> consumeTextDrag(event) }
         webView.settings.apply {
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             allowFileAccess = false
@@ -62,6 +69,26 @@ class MainActivity : BridgeActivity() {
             javaScriptCanOpenWindowsAutomatically = false
             setSupportMultipleWindows(false)
             safeBrowsingEnabled = true
+        }
+    }
+
+    private fun consumeTextDrag(event: DragEvent): Boolean {
+        val description = event.clipDescription
+        val textDrag = description != null && (
+            description.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) ||
+                description.hasMimeType(ClipDescription.MIMETYPE_TEXT_URILIST) ||
+                description.hasMimeType("text/html")
+            )
+        if (!textDrag) return false
+        return when (event.action) {
+            DragEvent.ACTION_DRAG_STARTED,
+            DragEvent.ACTION_DRAG_ENTERED,
+            DragEvent.ACTION_DRAG_LOCATION,
+            DragEvent.ACTION_DRAG_EXITED,
+            DragEvent.ACTION_DROP,
+            DragEvent.ACTION_DRAG_ENDED,
+            -> true
+            else -> false
         }
     }
 
@@ -136,13 +163,14 @@ class MainActivity : BridgeActivity() {
         webView.loadUrl(builder.build().toString())
     }
 
-    internal fun isLocalUrl(target: Uri): Boolean {
-        val localOrigin = bridge?.localUrl ?: return false
-        return OriginValidator.isAllowedNavigation(localOrigin, target)
-    }
+    internal fun isPermittedDocument(targetUrl: String?): Boolean =
+        RemoteNavigationPolicy.isPermittedDocument(
+            localOrigin = bridge?.localUrl,
+            configuredOrigin = replicaBridge?.configuredOrigin,
+            targetUrl = targetUrl,
+        )
 
-    internal fun isConfiguredUrl(target: Uri): Boolean =
-        OriginValidator.isAllowedNavigation(replicaBridge?.configuredOrigin, target)
+    internal fun configuredOriginForNavigation(): String? = replicaBridge?.configuredOrigin
 
     internal fun onTopLevelUrlChanged(url: String?) {
         replicaBridge?.onTopLevelUrlChanged(url)
@@ -151,5 +179,6 @@ class MainActivity : BridgeActivity() {
     companion object {
         private const val CONSUME_BACK_JS =
             "(function(){try{return !!(window.ompguiConsumeBack&&window.ompguiConsumeBack());}catch(e){return false;}})()"
+        private const val SHELL_BACKGROUND_COLOR = 0xFF101317.toInt()
     }
 }

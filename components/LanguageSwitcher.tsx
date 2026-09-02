@@ -109,29 +109,31 @@ export function LanguageSwitcher() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? listboxId : undefined}
-        className="shell-toolbar-btn ui-focus-ring"
+        className="shell-toolbar-btn ui-focus-ring shell-language-switcher"
         style={{
-          width: "auto",
-          minWidth: isMobile ? "var(--control-touch)" : "var(--control-height-lg)",
-          padding: "0 var(--space-4)",
-          gap: "var(--space-2)",
+          width: isMobile ? 44 : "auto",
+          minWidth: isMobile ? 44 : "var(--control-height-lg)",
+          padding: isMobile ? 0 : "0 var(--space-4)",
+          gap: isMobile ? 0 : "var(--space-2)",
           background: open ? "var(--bg-selected)" : undefined,
           color: open ? "var(--text)" : undefined,
           fontSize: "var(--text-sm)",
           whiteSpace: "nowrap",
         }}
       >
-        {current.label}
-        <ChevronDown
-          size={10}
-          strokeWidth={2}
-          aria-hidden="true"
-          style={{
-            flexShrink: 0,
-            transform: open ? "rotate(180deg)" : "none",
-            transition: "transform var(--dur-fast) var(--ease-out-warm)",
-          }}
-        />
+        {isMobile ? current.short : current.label}
+        {!isMobile && (
+          <ChevronDown
+            size={10}
+            strokeWidth={2}
+            aria-hidden="true"
+            style={{
+              flexShrink: 0,
+              transform: open ? "rotate(180deg)" : "none",
+              transition: "transform var(--dur-fast) var(--ease-out-warm)",
+            }}
+          />
+        )}
       </button>
 
       {open && (

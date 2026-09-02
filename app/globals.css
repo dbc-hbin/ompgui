@@ -228,7 +228,7 @@ html[data-palette="omp"].dark {
   --composer-control-h: var(--control-height-sm);
   --composer-attachment-w: var(--control-height-sm);
   --composer-thinking-max-w: 66px;
-  --composer-send-size: 34px;
+  --composer-send-size: var(--control-height);
   --composer-shell-padding: var(--space-5) var(--space-5) var(--space-4) calc(var(--space-5) + var(--space-1));
   --composer-toolbar-separation: var(--space-2);
   --sidebar-mobile-width: 280px;
@@ -1855,7 +1855,9 @@ html.dark .dropdown-surface :is(select, option) {
   cursor: default;
   opacity: 0.5;
 }
-.shell-toolbar-btn[aria-pressed="true"] {
+/* Panel-open chrome only. The theme toggle uses aria-pressed for the
+   dark/light state and must not render as a stuck selected control. */
+.shell-toolbar-btn[aria-pressed="true"]:not([data-theme-toggle]) {
   background: var(--bg-selected);
   color: var(--text);
 }
@@ -1972,10 +1974,8 @@ html.dark .dropdown-surface :is(select, option) {
     --shell-topbar-height: calc(44px + env(safe-area-inset-top, 0px));
     --shell-file-toggle-size: 38px;
     --composer-ring-size: 28px;
-    --composer-control-h: 44px;
-    --composer-attachment-w: 44px;
-    --composer-thinking-max-w: 72px;
-    --composer-send-size: 44px;
+    --composer-control-h: var(--control-height-lg);
+    --composer-thinking-max-w: 66px;
     --control-touch: 44px;
     --control-touch-icon: 44px;
     --composer-shell-padding: var(--space-5) max(var(--space-5), env(safe-area-inset-right, 0px)) var(--space-2) max(calc(var(--space-5) + var(--space-1)), env(safe-area-inset-left, 0px));
@@ -2234,8 +2234,8 @@ html.dark .dropdown-surface :is(select, option) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: var(--composer-attachment-w, var(--control-height-sm));
-  height: var(--composer-control-h, var(--control-height-sm));
+  width: var(--composer-attachment-w);
+  height: var(--composer-attachment-w);
   padding: 0;
   border: none;
   border-radius: var(--radius-control);
@@ -2297,13 +2297,19 @@ html.dark .dropdown-surface :is(select, option) {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-3, 6px);
-  height: var(--composer-control-h, var(--control-height-sm));
-  padding: 0 calc(var(--space-5) + var(--space-1));
+  gap: var(--space-3);
+  width: var(--composer-send-size);
+  min-width: var(--composer-send-size);
+  height: var(--composer-send-size);
+  padding: 0;
   border: none;
-  border-radius: var(--radius-control);
+  /* Circular primary action: the composer's visual focal point. */
+  border-radius: 50%;
   font-size: var(--text-md);
   font-weight: 600;
+}
+.composer-primary-label {
+  display: none;
 }
 .composer-primary-action[data-state="stop"] {
   background: var(--accent-strong);
@@ -2410,6 +2416,8 @@ html.dark .dropdown-surface :is(select, option) {
   direction: rtl;
   text-align: left;
   unicode-bidi: plaintext;
+  font-size: var(--text-base);
+  line-height: 1.2;
 }
 .model-option-name {
   overflow: hidden;
@@ -2448,6 +2456,9 @@ html.dark .dropdown-surface :is(select, option) {
 
 /* Mobile sidebar: slide in/out as overlay */
 @media (max-width: 640px) {
+  .composer-model-name {
+    font-size: var(--text-lg);
+  }
   .chat-stats-center {
     display: none !important;
   }
@@ -2458,18 +2469,18 @@ html.dark .dropdown-surface :is(select, option) {
   }
   .composer-toolbar {
     display: grid !important;
-    grid-template-columns: var(--composer-attachment-w, 44px) minmax(0, 1fr) minmax(0, var(--composer-thinking-max-w, 72px)) var(--composer-ring-size, 28px) var(--composer-send-size, 44px);
+    grid-template-columns: var(--composer-attachment-w) minmax(0, 1fr) minmax(0, var(--composer-thinking-max-w)) var(--composer-ring-size) var(--composer-send-size);
     align-items: center;
-    gap: var(--space-3, 6px) !important;
+    gap: var(--space-3) !important;
   }
   .composer-attachment {
     order: 1;
     grid-column: 1;
     grid-row: 1;
-    width: var(--composer-attachment-w, 44px) !important;
-    height: var(--composer-control-h, 44px) !important;
-    min-width: 44px !important;
-    min-height: 44px !important;
+    width: var(--composer-attachment-w) !important;
+    height: var(--composer-send-size) !important;
+    min-width: var(--composer-attachment-w) !important;
+    min-height: var(--composer-send-size) !important;
     border-radius: var(--radius-control) !important;
     touch-action: manipulation;
   }
@@ -2482,11 +2493,11 @@ html.dark .dropdown-surface :is(select, option) {
   .composer-model-button {
     width: 100%;
     max-width: none !important;
-    height: var(--composer-control-h, 44px) !important;
-    min-height: 44px !important;
-    padding-inline: var(--space-4, 8px) !important;
+    height: var(--composer-control-h) !important;
+    min-height: var(--composer-control-h) !important;
+    padding-inline: var(--space-4) !important;
     border-radius: var(--radius-control) !important;
-    font-size: var(--text-base, 14px) !important;
+    font-size: var(--text-base) !important;
     touch-action: manipulation;
   }
   .composer-thinking-control {
@@ -2494,20 +2505,20 @@ html.dark .dropdown-surface :is(select, option) {
     grid-column: 3;
     grid-row: 1;
     min-width: 0;
-    max-width: var(--composer-thinking-max-w, 72px);
+    max-width: var(--composer-thinking-max-w);
   }
   /* Keep the effort picker compact: icon + label only, no minimum width —
      every pixel here is taken from the model chip next to it. */
   .composer-thinking-button {
     width: 100%;
-    height: var(--composer-control-h, 44px) !important;
-    min-height: 44px !important;
-    min-width: 44px !important;
+    height: var(--composer-control-h) !important;
+    min-height: var(--composer-control-h) !important;
+    min-width: 0;
     justify-content: center;
-    gap: var(--space-1, 2px) !important;
-    padding-inline: var(--space-2, 4px) !important;
+    gap: var(--space-1) !important;
+    padding-inline: var(--space-2) !important;
     border-radius: var(--radius-control) !important;
-    font-size: var(--text-md, 13px) !important;
+    font-size: var(--text-md) !important;
     overflow: hidden;
     touch-action: manipulation;
   }
@@ -2515,14 +2526,15 @@ html.dark .dropdown-surface :is(select, option) {
     order: 5;
     grid-column: 5;
     grid-row: 1;
-    width: var(--composer-send-size, 44px) !important;
-    min-width: var(--composer-send-size, 44px) !important;
-    height: var(--composer-control-h, 44px) !important;
-    min-height: 44px !important;
+    width: var(--composer-send-size) !important;
+    min-width: var(--composer-send-size) !important;
+    height: var(--composer-send-size) !important;
+    min-height: var(--composer-send-size) !important;
     justify-content: center;
     padding-inline: 0 !important;
-    border-radius: var(--radius-control) !important;
-    font-size: var(--text-base, 14px) !important;
+    /* Keep the primary action circular in the mobile grid. */
+    border-radius: 50% !important;
+    font-size: var(--text-base) !important;
     touch-action: manipulation;
   }
   .composer-primary-label {
@@ -2607,7 +2619,7 @@ html.dark .dropdown-surface :is(select, option) {
 
 @media (max-width: 420px) {
   .composer-toolbar {
-    grid-template-columns: var(--composer-attachment-w, 36px) minmax(0, 1fr) minmax(0, var(--composer-thinking-max-w, 66px)) var(--composer-ring-size, 28px) var(--composer-send-size, 34px);
+    grid-template-columns: var(--composer-attachment-w) minmax(0, 1fr) minmax(0, var(--composer-thinking-max-w)) var(--composer-ring-size) var(--composer-send-size);
     gap: var(--space-1, 2px) !important;
   }
 }

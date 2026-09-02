@@ -9,11 +9,11 @@ import { migrateStorageValue } from "@/lib/storage-migration";
 
 export type Locale = "en" | "zh-CN" | "ja" | "ko";
 
-export const LOCALES: Array<{ value: Locale; label: string }> = [
-  { value: "en", label: "EN" },
-  { value: "zh-CN", label: "中文" },
-  { value: "ja", label: "日本語" },
-  { value: "ko", label: "한국어" },
+export const LOCALES: Array<{ value: Locale; label: string; short: string }> = [
+  { value: "en", label: "EN", short: "EN" },
+  { value: "zh-CN", label: "中文", short: "ZH" },
+  { value: "ja", label: "日本語", short: "JA" },
+  { value: "ko", label: "한국어", short: "KO" },
 ];
 
 const STORAGE_KEY = "ompgui-lang";

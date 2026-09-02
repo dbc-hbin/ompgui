@@ -1,7 +1,5 @@
 package com.dbchbin.ompgui.remote
 
-import android.net.Uri
-
 /**
  * Ordered Android back handling: web UI overlays, then in-surface WebView
  * history, then confirm/exit only at the shell boundary.
@@ -24,6 +22,9 @@ object ShellBackPolicy {
         if (previousUrl != null && staysOnSameSurface(currentUrl, previousUrl, configuredOrigin, localOrigin)) {
             return Action.WebHistoryBack
         }
+        if (previousUrl != null && isLocalFallbackOverRemote(currentUrl, previousUrl, configuredOrigin, localOrigin)) {
+            return Action.WebHistoryBack
+        }
         return Action.ConfirmExit
     }
 
@@ -36,13 +37,22 @@ object ShellBackPolicy {
         configuredOrigin: String?,
         localOrigin: String,
     ): Boolean {
-        val current = currentUrl?.let(Uri::parse) ?: return false
-        val previous = Uri.parse(previousUrl)
-        val currentLocal = OriginValidator.isAllowedNavigation(localOrigin, current)
-        val previousLocal = OriginValidator.isAllowedNavigation(localOrigin, previous)
+        if (currentUrl == null || previousUrl == null) return false
+        val currentLocal = OriginValidator.isAllowedNavigation(localOrigin, currentUrl)
+        val previousLocal = OriginValidator.isAllowedNavigation(localOrigin, previousUrl)
         if (currentLocal && previousLocal) return true
-        val currentRemote = OriginValidator.isAllowedNavigation(configuredOrigin, current)
-        val previousRemote = OriginValidator.isAllowedNavigation(configuredOrigin, previous)
+        val currentRemote = OriginValidator.isAllowedNavigation(configuredOrigin, currentUrl)
+        val previousRemote = OriginValidator.isAllowedNavigation(configuredOrigin, previousUrl)
         return currentRemote && previousRemote
+    }
+
+    internal fun isLocalFallbackOverRemote(
+        currentUrl: String?,
+        previousUrl: String?,
+        configuredOrigin: String?,
+        localOrigin: String,
+    ): Boolean {
+        return OriginValidator.isAllowedNavigation(localOrigin, currentUrl) &&
+            OriginValidator.isAllowedNavigation(configuredOrigin, previousUrl)
     }
 }

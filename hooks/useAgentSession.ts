@@ -656,6 +656,25 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [newSessionDefaultModel, setNewSessionDefaultModel] = useState<SelectedModel | null>(null);
   const [toolPreset, setToolPreset] = useState<ToolPreset>(() => getPreferredToolPreset());
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevelOption>("auto");
+  // Mirror of the *configured* thinking level. omp's get_state and several
+  // events report only the *effective* effort (a concrete level resolved by
+  // the auto classifier), so snapshot sync paths must not overwrite a
+  // configured "auto" with the effective value.
+  const thinkingLevelRef = useRef<ThinkingLevelOption>("auto");
+  const thinkingLevelExplicitRef = useRef(false);
+  const setThinkingLevelTracked = useCallback((level: ThinkingLevelOption, explicit = true) => {
+    thinkingLevelRef.current = level;
+    if (explicit) thinkingLevelExplicitRef.current = true;
+    setThinkingLevel(level);
+  }, []);
+  // Snapshot paths (get_state / config_update / model_changed) only report
+  // omp's *effective* effort. They must not clobber an explicitly configured
+  // "auto" with the classifier-resolved level; anything else still syncs.
+  const applySnapshotThinkingLevel = useCallback((reported: string | undefined) => {
+    if (reported === undefined) return;
+    if (thinkingLevelExplicitRef.current && thinkingLevelRef.current === "auto") return;
+    setThinkingLevelTracked(normalizeThinkingLevel(reported), false);
+  }, [setThinkingLevelTracked]);
   const [fastModeEnabled, setFastModeEnabled] = useState(false);
   const [fastModeActive, setFastModeActive] = useState<boolean | undefined>(undefined);
   // Runtime session modes returned by get_state and changed via RPC
@@ -1204,7 +1223,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const applied = applyAuthoritativeModel(toThinkingModelMeta(agentState.state?.model), token);
       if (!applied) return; // stale snapshot — drop its thinking level too
       if (agentState.state?.thinkingLevel !== undefined) {
-        setThinkingLevel(normalizeThinkingLevel(agentState.state.thinkingLevel));
+        applySnapshotThinkingLevel(agentState.state.thinkingLevel);
       }
       // Fast mode is family-scoped in omp: switching to a fast-supported
       // model flips the child's state without any event, so the composer
@@ -1221,7 +1240,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch {
       // Best effort; the next loadSession/reconcile re-syncs.
     }
-  }, [applyAuthoritativeModel, beginAuthoritativeModelSync, canMutateSession]);
+  }, [applyAuthoritativeModel, beginAuthoritativeModelSync, canMutateSession, applySnapshotThinkingLevel]);
 
   const applyLoadedAgentState = useCallback((
     sid: string,
@@ -1250,7 +1269,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (liveState) {
       if (liveState.contextUsage !== undefined) setContextUsage(liveState.contextUsage ?? null);
       if (liveState.systemPrompt !== undefined) setSystemPrompt(liveState.systemPrompt || null);
-      if (modelApplied && liveState.thinkingLevel !== undefined) setThinkingLevel(normalizeThinkingLevel(liveState.thinkingLevel));
+      if (modelApplied && liveState.thinkingLevel !== undefined) applySnapshotThinkingLevel(liveState.thinkingLevel);
       if (liveState.fastModeEnabled !== undefined) setFastModeEnabled(liveState.fastModeEnabled);
       setFastModeActive(liveState.fastModeActive);
       if (liveState.autoRetryEnabled !== undefined) setAutoRetryEnabled(liveState.autoRetryEnabled);
@@ -1277,7 +1296,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     updateRuntimeReadiness(sid, runtimeLoadGeneration, { runtime: "ready" });
     setRuntimeError(null);
     return true;
-  }, [applyAuthoritativeModel, setContextUsage, updateRuntimeReadiness]);
+  }, [applyAuthoritativeModel, setContextUsage, updateRuntimeReadiness, applySnapshotThinkingLevel]);
 
   const loadRuntimeStateForGeneration = useCallback(async (
     sid: string,
@@ -1370,7 +1389,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setCurrentModelOverride(null);
         setError(null);
         if (d.context.thinkingLevel && d.context.thinkingLevel !== "off") {
-          setThinkingLevel(d.context.thinkingLevel as ThinkingLevelOption);
+          // File-format value = the *configured* selector (session-reader now
+          // prefers the entry's `configured` field), so it is authoritative.
+          setThinkingLevelTracked(d.context.thinkingLevel as ThinkingLevelOption);
         }
         updateSessionReadiness(sid, loadGeneration, { history: "ready" });
         setLoading(false);
@@ -2367,7 +2388,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         break;
       }
       case "thinking_level_changed":
-        setThinkingLevel(normalizeThinkingLevel(event.thinkingLevel as string | undefined));
+        // omp emits both the *effective* level and the *configured* selector;
+        // the composer shows the configured one (e.g. auto vs its resolved
+        // per-turn effort).
+        setThinkingLevelTracked(normalizeThinkingLevel(
+          (event.configured as string | undefined) ?? (event.thinkingLevel as string | undefined),
+        ));
         break;
       case "model_changed": {
         // Bare event: omp switched the resolved model (explicit /model,
@@ -2383,7 +2409,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             if (sessionIdRef.current !== sid || runtimeLoadGenerationRef.current !== loadGeneration) return;
             const applied = applyAuthoritativeModel(toThinkingModelMeta(d.state.model), token);
             if (!applied) return; // stale snapshot — drop its thinking level too
-            if (d.state.thinkingLevel !== undefined) setThinkingLevel(normalizeThinkingLevel(d.state.thinkingLevel));
+            if (d.state.thinkingLevel !== undefined) applySnapshotThinkingLevel(d.state.thinkingLevel);
             if (d.state.fastModeEnabled !== undefined) setFastModeEnabled(d.state.fastModeEnabled);
             setFastModeActive(d.state.fastModeActive);
             if (d.state.autoRetryEnabled !== undefined) setAutoRetryEnabled(d.state.autoRetryEnabled);
@@ -2400,7 +2426,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         // config-affecting slash command (e.g. /model).
         const model = event.model as { provider?: string; id?: string; name?: string; reasoning?: boolean; thinking?: { efforts?: string[] } } | undefined;
         if (model) applyAuthoritativeModel(toThinkingModelMeta(model));
-        if (event.thinkingLevel !== undefined) setThinkingLevel(normalizeThinkingLevel(event.thinkingLevel as string | undefined));
+        if (event.thinkingLevel !== undefined) applySnapshotThinkingLevel(event.thinkingLevel as string | undefined);
         break;
       }
       case "available_commands_update": {
@@ -2743,7 +2769,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         handleExtensionUiRequest(event as unknown as IncomingExtensionUiRequest);
         break;
     }
-  }, [addNotice, consumeQueuedMessage, finishPromptWithoutStream, handleExtensionUiRequest, handleHostToolCall, handleHostUriRequest, loadSession, mergeSubagents, onAgentEnd, reconcileAgentState, applyAuthoritativeModel, beginAuthoritativeModelSync, refreshSubagentHistory, setContextUsage]);
+  }, [addNotice, consumeQueuedMessage, finishPromptWithoutStream, handleExtensionUiRequest, handleHostToolCall, handleHostUriRequest, loadSession, mergeSubagents, onAgentEnd, reconcileAgentState, applyAuthoritativeModel, beginAuthoritativeModelSync, refreshSubagentHistory, setContextUsage, applySnapshotThinkingLevel, setThinkingLevelTracked]);
   handleAgentEventRef.current = handleAgentEvent;
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]): Promise<boolean> => {
@@ -3429,17 +3455,24 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const handleThinkingLevelChange = useCallback(async (level: ThinkingLevelOption) => {
     if (!canMutateSession()) return;
-    setThinkingLevel(level);
-    if (level === "auto") return; // "auto" leaves pi's current setting untouched
+    const previous = thinkingLevelRef.current;
+    setThinkingLevelTracked(level);
+    // "auto" is a real omp selector (per-turn classifier) — it must reach the
+    // daemon like any concrete level. The old pi-era early return silently
+    // left the daemon's previous mode in place.
     const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
     if (!sid) return;
     try {
       await sendAgentCommand(sid, { type: "set_thinking_level", level });
       void refreshLiveModelState(sid);
     } catch (e) {
+      // Revert the optimistic selector so the composer matches the daemon.
+      if (thinkingLevelRef.current === level) {
+        setThinkingLevelTracked(previous);
+      }
       console.error("Failed to set thinking level:", e);
     }
-  }, [canMutateSession, refreshLiveModelState]);
+  }, [canMutateSession, refreshLiveModelState, setThinkingLevelTracked]);
 
   const handleToolPresetChange = useCallback(async (preset: ToolPreset) => {
     if (!canMutateSession()) return;

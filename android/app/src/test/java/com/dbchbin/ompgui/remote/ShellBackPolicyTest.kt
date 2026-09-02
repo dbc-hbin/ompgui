@@ -74,6 +74,20 @@ class ShellBackPolicyTest {
     }
 
     @Test
+    fun localFallbackCanReturnToRemote() {
+        assertEquals(
+            ShellBackPolicy.Action.WebHistoryBack,
+            ShellBackPolicy.decide(
+                webUiConsumed = false,
+                currentUrl = "$local/?offline=1",
+                previousUrl = "$remote/?ompguiRemote=1",
+                configuredOrigin = remote,
+                localOrigin = local,
+            ),
+        )
+    }
+
+    @Test
     fun localBootstrapHistoryStaysOnSurface() {
         assertTrue(
             ShellBackPolicy.staysOnSameSurface(
