@@ -1500,7 +1500,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           type: "ensure_session",
           toolNames,
           ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
-          ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
+          ...(thinkingLevelRef.current !== "auto" ? { thinkingLevel: thinkingLevelRef.current } : {}),
           ...(advisorEnabled ? { advisor: true } : {}),
         }),
       });
@@ -1517,7 +1517,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       ensuringNewSessionRef.current = null;
     }
-  }, [advisorEnabled, isNew, newSessionCwd, newSessionModel, newSessionDefaultModel, toolPreset, thinkingLevel]);
+  }, [advisorEnabled, isNew, newSessionCwd, newSessionModel, newSessionDefaultModel, toolPreset]);
 
   // The system panel may initialize a dormant session, but must not create a
   // prompt or model run just to inspect the resolved system prompt.

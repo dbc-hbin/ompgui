@@ -38,6 +38,7 @@ import { FolderIcon, getFileIcon } from "./FileIcons";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/lib/i18n";
 import { selectableThinkingLevels } from "@/lib/thinking-levels";
+import { shouldDismissComposerMenu } from "@/lib/composer-menus";
 import {
   clampContextPercent,
   formatContextWindow,
@@ -452,6 +453,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
+  const [thinkingDropdownRect, setThinkingDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [contextDropdownOpen, setContextDropdownOpen] = useState(false);
   const [modelSearchQuery, setModelSearchQuery] = useState("");
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>(() => (
@@ -480,6 +482,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const modelDropdownPanelRef = useRef<HTMLDivElement>(null);
   const modelSearchInputRef = useRef<HTMLInputElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
+  const thinkingDropdownPanelRef = useRef<HTMLDivElement>(null);
   const contextDropdownRef = useRef<HTMLDivElement>(null);
   const historyMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1515,19 +1518,22 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     requestAnimationFrame(() => modelSearchInputRef.current?.focus());
   }, [modelDropdownOpen]);
 
-  // Close dropdowns on outside click
+  // Close dropdowns on outside click. Portaled MobileSheets are not inside the
+  // trigger refs — treating those mousedowns as "outside" unmounts the option
+  // before click, so the selection never lands (0.6.0 thinking-sheet regression).
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (
-        dropdownRef.current && !dropdownRef.current.contains(e.target as Node) &&
-        modelDropdownPanelRef.current && !modelDropdownPanelRef.current.contains(e.target as Node)
-      ) {
+      const target = e.target;
+      if (shouldDismissComposerMenu(target, dropdownRef.current, modelDropdownPanelRef.current)) {
         setModelDropdownOpen(false);
       }
-      if (thinkingDropdownRef.current && !thinkingDropdownRef.current.contains(e.target as Node)) {
+      if (shouldDismissComposerMenu(target, thinkingDropdownRef.current, thinkingDropdownPanelRef.current)) {
         setThinkingDropdownOpen(false);
       }
-      if (historyMenuRef.current && !historyMenuRef.current.contains(e.target as Node) && !textareaRef.current?.contains(e.target as Node)) {
+      if (
+        shouldDismissComposerMenu(target, historyMenuRef.current, historyMenuRef.current)
+        && !textareaRef.current?.contains(target as Node)
+      ) {
         setHistoryMenuOpen(false);
       }
     };
@@ -2603,7 +2609,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               <div ref={thinkingDropdownRef} className="composer-thinking-control" style={{ position: "relative" }}>
                 <button
                   className="composer-thinking-button ui-focus-ring"
-                  onClick={() => setThinkingDropdownOpen((v) => !v)}
+                  onClick={(e) => {
+                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                    setThinkingDropdownRect({ top: rect.top, left: rect.left, width: rect.width });
+                    setThinkingDropdownOpen((v) => !v);
+                  }}
                   disabled={!runtimeReady}
                   title={t("chatInput.changeReasoningTitle", { level: thinkingDisplayLabel })}
                   aria-label={`${t("chatInput.changeReasoning")}: ${thinkingDisplayLabel}`}
@@ -2627,13 +2637,25 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   <span style={{ whiteSpace: "nowrap" }}>{thinkingTriggerLabel}</span>
                   <ChevronDown size={12} strokeWidth={1.8} style={{ flexShrink: 0, opacity: 0.7 }} aria-hidden="true" />
                 </button>
-                {thinkingDropdownOpen && !isMobile && (
-                  <div className="dropdown-surface" style={{
-                    position: "absolute",
-                    bottom: "calc(100% + 6px)",
-                    left: 0,
-                    zIndex: 100, minWidth: 250, maxWidth: "calc(100vw - 32px)",
-                  }}>
+                {thinkingDropdownOpen && !isMobile && thinkingDropdownRect && (() => {
+                  const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+                  const bottom = viewportHeight - thinkingDropdownRect.top + 6;
+                  const maxH = Math.max(120, Math.min(thinkingDropdownRect.top - 8, viewportHeight * 0.6));
+                  return (
+                    <div
+                      ref={thinkingDropdownPanelRef}
+                      className="dropdown-surface"
+                      style={{
+                        position: "fixed",
+                        bottom,
+                        left: thinkingDropdownRect.left,
+                        zIndex: 500,
+                        minWidth: Math.max(250, thinkingDropdownRect.width),
+                        maxWidth: "calc(100vw - 32px)",
+                        maxHeight: maxH,
+                        overflowY: "auto",
+                      }}
+                    >
                     {thinkingLevelOptions.map((lvl) => {
                       const isActive = (thinkingLevel ?? "auto") === lvl;
                       const descKey = THINKING_LEVEL_DESC_KEYS[lvl];
@@ -2672,8 +2694,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                         </button>
                       );
                     })}
-                  </div>
-                )}
+                    </div>
+                  );
+                })()}
                 {thinkingDropdownOpen && isMobile && (
                   <MobileSheet
                     open={thinkingDropdownOpen}
