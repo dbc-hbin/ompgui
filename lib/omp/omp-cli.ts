@@ -1,5 +1,5 @@
 import { execFile } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, lstatSync, statSync } from "fs";
 import { homedir } from "os";
 import { delimiter, join } from "path";
 
@@ -12,7 +12,9 @@ import { delimiter, join } from "path";
 let cachedBin: string | null = null;
 let binMissAt = 0;
 let cachedVersion: string | null = null;
+let cachedVersionFingerprint: string | null = null;
 let versionMissAt = 0;
+let inFlightVersionProbe: Promise<string | null> | null = null;
 
 const BIN_NAME = process.platform === "win32" ? "omp.exe" : "omp";
 const ANSI_RE = /\x1B\[[0-9;]*m/g;
@@ -20,6 +22,20 @@ const ANSI_RE = /\x1B\[[0-9;]*m/g;
 // PATH repaired) while the server runs; a permanently cached "not found" would
 // keep the UI reporting a missing binary until restart.
 const MISS_TTL_MS = 30_000;
+
+function getExecutableFingerprint(path: string): string | null {
+  try {
+    const stat = statSync(path);
+    let fp = `${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+    const lstat = lstatSync(path);
+    if (lstat.isSymbolicLink()) {
+      fp += `:${lstat.ino}:${lstat.mtimeMs}:${lstat.ctimeMs}`;
+    }
+    return fp;
+  } catch {
+    return null;
+  }
+}
 
 function probeOmpBin(): string | null {
   const override = process.env.OMPGUI_OMP_BIN ?? process.env.OMP_WEB_OMP_BIN;
@@ -48,7 +64,12 @@ function probeOmpBin(): string | null {
  * null when omp is not installed. A hit is cached until explicitly
  * invalidated; a miss is re-probed after MISS_TTL_MS. */
 export function resolveOmpBin(): string | null {
-  if (cachedBin) return cachedBin;
+  if (cachedBin && existsSync(cachedBin)) return cachedBin;
+  if (cachedBin && !existsSync(cachedBin)) {
+    cachedBin = null;
+    cachedVersion = null;
+    cachedVersionFingerprint = null;
+  }
   if (Date.now() - binMissAt < MISS_TTL_MS) return null;
   const found = probeOmpBin();
   if (found) {
@@ -66,38 +87,56 @@ export function invalidateOmpCliCache(): void {
   cachedBin = null;
   binMissAt = 0;
   cachedVersion = null;
+  cachedVersionFingerprint = null;
   versionMissAt = 0;
+  inFlightVersionProbe = null;
 }
 
 /** `omp --version` output (e.g. "omp/17.1.3"), or null when unavailable.
- * Successes are reused until OMP sessions are explicitly restarted; failures
- * are retried after MISS_TTL_MS. */
+ * Successes are cached until the binary changes on disk (metadata/fingerprint)
+ * or OMP sessions are explicitly restarted; failures are retried after MISS_TTL_MS. */
 export async function getOmpVersion(): Promise<string | null> {
-  if (cachedVersion) return cachedVersion;
-  if (Date.now() - versionMissAt < MISS_TTL_MS) return null;
   const bin = resolveOmpBin();
   if (!bin) {
+    if (Date.now() - versionMissAt < MISS_TTL_MS) return null;
     versionMissAt = Date.now();
     return null;
   }
-  try {
-    const output = await new Promise<string>((resolve, reject) => {
-      execFile(bin, ["--version"], { timeout: 10_000, windowsHide: true }, (error, stdout) => {
-        if (error) reject(error);
-        else resolve(stdout);
-      });
-    });
-    const version = output.trim();
-    if (version) {
-      cachedVersion = version;
-      versionMissAt = 0;
-      return version;
-    }
-  } catch {
-    // Fall through to the miss path: retry after the TTL.
+
+  const fingerprint = getExecutableFingerprint(bin);
+  if (cachedVersion && fingerprint && cachedVersionFingerprint === fingerprint) {
+    return cachedVersion;
   }
-  versionMissAt = Date.now();
-  return null;
+  if (!cachedVersion && Date.now() - versionMissAt < MISS_TTL_MS) return null;
+
+  if (inFlightVersionProbe) return inFlightVersionProbe;
+
+  inFlightVersionProbe = (async () => {
+    try {
+      const output = await new Promise<string>((resolve, reject) => {
+        execFile(bin, ["--version"], { timeout: 10_000, windowsHide: true }, (error, stdout) => {
+          if (error) reject(error);
+          else resolve(stdout);
+        });
+      });
+      const version = output.trim();
+      if (version) {
+        const currentFingerprint = getExecutableFingerprint(bin);
+        cachedVersion = version;
+        cachedVersionFingerprint = currentFingerprint ?? fingerprint;
+        versionMissAt = 0;
+        return version;
+      }
+    } catch {
+      // Fall through to the miss path: retry after the TTL.
+    } finally {
+      inFlightVersionProbe = null;
+    }
+    versionMissAt = Date.now();
+    return null;
+  })();
+
+  return inFlightVersionProbe;
 }
 
 /** Run `omp <args>` and return stdout+stderr with colors disabled. Shared by

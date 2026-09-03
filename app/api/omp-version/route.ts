@@ -7,5 +7,12 @@ export const dynamic = "force-dynamic";
  * build-time ompgui version — the two can legitimately drift. */
 export async function GET() {
   const version = await getOmpVersion();
-  return NextResponse.json({ version });
+  return NextResponse.json(
+    { version },
+    {
+      headers: {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+      },
+    },
+  );
 }

@@ -551,7 +551,11 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
     setRestarting(true);
     setMessage(null);
     try {
-      const response = await fetch("/api/omp/sessions/restart", { method: "POST" });
+      const response = await fetch("/api/omp-update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "restart" }),
+      });
       if (!response.ok) {
         throw new Error("Failed to restart sessions");
       }
