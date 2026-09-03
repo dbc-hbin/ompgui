@@ -72,6 +72,16 @@ test("ChatInput and CommandPalette render bottom sheets for mobile pickers", asy
   assert.match(mobileSheet, /safe-area-inset-bottom/);
 });
 
+test("UsageConfig pins the mobile dialog inside system safe-area insets", async () => {
+  const usage = await readFile(new URL("components/UsageConfig.tsx", root), "utf8");
+  const primitives = await readFile(new URL("components/ui/primitives.tsx", root), "utf8");
+  assert.match(usage, /MOBILE_SAFE_AREA_DIALOG_STYLE/);
+  assert.doesNotMatch(usage, /isMobile \? "calc\(100dvh - 16px\)"/);
+  assert.match(primitives, /safe-area-inset-top/);
+  assert.match(primitives, /safe-area-inset-bottom/);
+  assert.match(primitives, /animation:\s*"none"/);
+});
+
 test("shared Dialog registers overlay-back and mobile surfaces consume side safe-area", async () => {
   const primitives = await readFile(new URL("components/ui/primitives.tsx", root), "utf8");
   const css = await readFile(new URL("app/globals.css", root), "utf8");

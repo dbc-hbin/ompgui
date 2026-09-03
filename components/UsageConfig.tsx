@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/lib/i18n";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/primitives";
+import { Dialog, DialogContent, DialogTitle, MOBILE_SAFE_AREA_DIALOG_STYLE } from "@/components/ui/primitives";
 import { AlertCircle, Gauge, RefreshCw, X } from "lucide-react";
 import type {
   UsageLimit,
@@ -150,10 +150,14 @@ export function UsageConfig({ onClose }: { onClose: () => void }) {
       <DialogContent
         ariaLabel={t("usageConfig.title")}
         style={{
-          width: isMobile ? "calc(100vw - 16px)" : 720,
-          maxWidth: "calc(100vw - 16px)",
-          height: isMobile ? "calc(100dvh - 16px)" : "80vh",
-          maxHeight: "calc(100dvh - 16px)",
+          ...(isMobile
+            ? MOBILE_SAFE_AREA_DIALOG_STYLE
+            : {
+                width: 720,
+                maxWidth: "calc(100vw - 16px)",
+                height: "80vh",
+                maxHeight: "calc(100dvh - 16px)",
+              }),
           padding: 0,
           display: "flex",
           flexDirection: "column",

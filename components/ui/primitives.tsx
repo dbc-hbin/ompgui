@@ -14,6 +14,29 @@ import { useOverlayBack } from "@/hooks/overlay-stack";
 
 /* ---------------------------------- Dialog --------------------------------- */
 
+/**
+ * Pin a near-fullscreen dialog inside the padded safe rect.
+ *
+ * Pre-0.6.0 Android padded the WebView for system bars, so a centered
+ * `100dvh - 16px` panel sat below the status bar. 0.6.0 left system bars to
+ * `env(safe-area-inset-*)`; centering that same box now draws under the
+ * status bar (insets are not symmetric). `dialog-pop-in` locks
+ * `translate(-50%, -50%)` for its fill lifetime, so animation is disabled.
+ */
+export const MOBILE_SAFE_AREA_DIALOG_STYLE: React.CSSProperties = {
+  top: "max(8px, env(safe-area-inset-top, 0px))",
+  left: "max(8px, env(safe-area-inset-left, 0px))",
+  right: "max(8px, env(safe-area-inset-right, 0px))",
+  bottom: "max(8px, env(safe-area-inset-bottom, 0px))",
+  width: "auto",
+  height: "auto",
+  maxWidth: "none",
+  maxHeight: "none",
+  transform: "none",
+  animation: "none",
+};
+
+
 function OverlayBackBridge({ open, onOpenChange }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
