@@ -106,3 +106,45 @@ test("TabBar exposes 44px hit targets and touch manipulation on mobile", async (
   assert.match(tabbar, /touchAction:\s*"manipulation"/);
   assert.match(css, /\.tabbar-close\s*\{\s*width:\s*44px\s*!important;\s*height:\s*44px\s*!important;/);
 });
+
+test("SessionItem keeps RunningSessionIndicator visible on selected or hover", async () => {
+  // selected/hover must not hide a running session's indicator
+  const sidebar = await readFile(new URL("components/SessionSidebar.tsx", root), "utf8");
+  const sessionItemStart = sidebar.indexOf("const SessionItem = memo(function SessionItem");
+  assert.ok(sessionItemStart >= 0, "SessionItem must exist");
+  const sessionItem = sidebar.slice(sessionItemStart);
+  const indicatorCall = "{isRunning && <RunningSessionIndicator size={12} />}";
+  const idx = sessionItem.indexOf(indicatorCall);
+  assert.ok(idx >= 0, "RunningSessionIndicator must render for isRunning");
+  assert.equal(
+    [...sessionItem.matchAll(/<RunningSessionIndicator\b/g)].length,
+    1,
+    "running rows must not double-render the spinner",
+  );
+  assert.match(sessionItem, /\{!isRunning && isUnread && <UnreadSessionIndicator/);
+
+  const before = sessionItem.slice(0, idx);
+  const openTags = [];
+  const tagRe = /<\/?div\b([^>]*)>/g;
+  for (const match of before.matchAll(tagRe)) {
+    if (match[0].startsWith("</")) {
+      openTags.pop();
+      continue;
+    }
+    if (!match[0].endsWith("/>")) openTags.push(match[1] ?? "");
+  }
+  for (const attrs of openTags) {
+    const hoverGate = /hovered|focusWithin|actionMenuOpen|showActions/.test(attrs);
+    const hides =
+      /opacity:\s*[^;"']*(0\b|hidden)/.test(attrs)
+      || /visibility:\s*[^;"']*hidden/.test(attrs)
+      || /opacity:\s*(showActions|hovered|focusWithin|actionMenuOpen)[^;]*\?\s*0/.test(attrs);
+    if (hoverGate && hides) {
+      assert.match(
+        attrs,
+        /isRunning/,
+        "hover/selected hide must except isRunning so the spinner stays visible",
+      );
+    }
+  }
+});

@@ -47,6 +47,13 @@ test("clamped description renders collapsed to 2 lines with an expand affordance
   assert.match(html, /Click to expand/);
 });
 
+test("add forwards timeout from timeout or duration options", async () => {
+  const code = await readFile(new URL("components/ui/toast.tsx", root), "utf8");
+  assert.match(code, /interface ToastOptions \{[\s\S]*timeout\?: number;[\s\S]*duration\?: number;/);
+  assert.match(code, /const timeout = options\?\.timeout \?\? options\?\.duration;/);
+  assert.match(code, /\.\.\.\(timeout !== undefined \? \{ timeout \} : \{\}\)/);
+});
+
 test("clamp style helper drops the clamp when expanded", () => {
   const collapsed = clampDescriptionStyle(false);
   const expanded = clampDescriptionStyle(true);

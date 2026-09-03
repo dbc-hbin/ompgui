@@ -2606,6 +2606,7 @@ const SessionItem = memo(function SessionItem({
             </span>
           </button>
           {session.worktreeBranch && <span title={t("sessionSidebar.worktreeTitle", { path: session.cwd })} className="sidebar-session-worktree"><GitBranch size={10} strokeWidth={2.4} aria-hidden="true" /><span className="sidebar-session-worktree-label">{session.worktreeBranch}</span></span>}
+          {/* Keep visible on hover/selected (f8ac24e). */}
           {isRunning && <RunningSessionIndicator size={12} />}
           {!isRunning && isUnread && <UnreadSessionIndicator size={11} />}
           {relativeTime && <span title={new Date(session.modified).toLocaleString(locale)} className="sidebar-session-time" data-selected={isSelected ? "true" : "false"}>{relativeTime}</span>}

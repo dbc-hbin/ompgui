@@ -135,3 +135,29 @@ test("follow token includes widget line contents rather than only line counts", 
     /widgetSignature: extensionWidgets\.map\(\(widget\) => `\$\{widget\.key\}:\$\{widget\.lines\.length\}`\)/,
   );
 });
+
+test("quota-like errors are tracked and re-surfaced without content", () => {
+  assert.match(hookSource, /function isQuotaLikeError\(text: string\): boolean \{/);
+  assert.match(hookSource, /\/429\|quota\|RESOURCE_EXHAUSTED\|Cloud Code Assist\/i/);
+  assert.match(hookSource, /const lastQuotaErrorRef = useRef<string \| null>\(null\);/);
+  assert.match(hookSource, /const runHadContentRef = useRef\(false\);/);
+  assert.match(hookSource, /const NOTICE_ERROR_VISIBLE_MS = 30000;/);
+  assert.match(hookSource, /const dismissNotice = useCallback\(\(id: string\) => \{/);
+  assert.match(hookSource, /notices: noticeState\.visible, dismissNotice,/);
+  assert.match(
+    hookSource,
+    /toast\.error\(translate\("agentSession\.quotaReached"\), quotaMessage, \{ timeout: 12000 \}\)/,
+  );
+  assert.match(
+    hookSource,
+    /const hadContent = runHadContentRef\.current;\s+const quotaMessage = lastQuotaErrorRef\.current;/,
+  );
+  assert.match(
+    hookSource,
+    /if \(!hadContent && quotaMessage && isQuotaLikeError\(quotaMessage\)\) \{\s+addNotice\(\{ type: "error", message: quotaMessage \}\);\s+toast\.error\(translate\("agentSession\.quotaReached"\), quotaMessage, \{ timeout: 12000 \}\);/,
+  );
+  assert.match(
+    hookSource,
+    /const timeout = oldest\.type === "error" \? NOTICE_ERROR_VISIBLE_MS : NOTICE_VISIBLE_MS;/,
+  );
+});

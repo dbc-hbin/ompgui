@@ -533,7 +533,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
     retryInfo, contextUsage, forkingEntryId,
     isCompacting, compactResult, displayModel: displayModelValue, sessionStats,
     slashCommands, slashCommandsLoading, queuedMessages,
-    notices, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
+    notices, dismissNotice, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
     isAutoModelSelection,
     agentPhase, activeGoal, activePlan,
     subagents, subagentEvents, subagentTranscriptVersions, activeSubagentCount, currentTodoPhase, todoPhases,
@@ -907,7 +907,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
                       <OmpRuntimeVersion refreshKey={ompVersionRefreshKey} />
                     </div>
                   </div>
-                  <NoticeShelf notices={notices} align="right" />
+                  <NoticeShelf notices={notices} onDismiss={dismissNotice} align="right" />
                 </div>
               </div>
               {chatInputElement}
@@ -930,7 +930,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
           }}
         >
           <div style={{ maxWidth: CHAT_COLUMN_MAX_WIDTH, margin: "0 auto" }}>
-            <NoticeShelf notices={notices} floating align="right" />
+            <NoticeShelf notices={notices} onDismiss={dismissNotice} floating align="right" />
           </div>
         </div>
         {/* Hide the Firefox scrollbar on desktop only: ChatMinimap provides the
@@ -1131,7 +1131,7 @@ function ExtensionWidgets({ widgets }: { widgets: Array<{ key: string; lines: st
   );
 }
 
-function NoticeShelf({ notices, floating = false, align = "left" }: { notices: NoticeItem[]; floating?: boolean; align?: "left" | "right" }) {
+function NoticeShelf({ notices, onDismiss, floating = false, align = "left" }: { notices: NoticeItem[]; onDismiss?: (id: string) => void; floating?: boolean; align?: "left" | "right" }) {
   if (notices.length === 0) return null;
   return (
     <div
@@ -1142,6 +1142,7 @@ function NoticeShelf({ notices, floating = false, align = "left" }: { notices: N
         flexDirection: "column",
         alignItems: align === "right" ? "flex-end" : "stretch",
         marginBottom: floating ? 0 : 10,
+        pointerEvents: floating ? "auto" : undefined,
       }}
     >
       {notices.map((notice, index) => {
@@ -1152,33 +1153,34 @@ function NoticeShelf({ notices, floating = false, align = "left" }: { notices: N
             : notice.type === "success"
               ? "var(--status-success)"
               : "var(--accent)";
+        const isError = notice.type === "error";
         return (
           <div
             key={notice.id}
             className="notice-shelf-item"
             style={{
               display: "flex",
-              alignItems: "center",
+              alignItems: isError ? "flex-start" : "center",
               gap: "var(--space-4)",
               minHeight: "var(--control-height-lg)",
-              height: "var(--control-height-lg)",
-              maxHeight: 48,
+              height: isError ? "auto" : "var(--control-height-lg)",
+              maxHeight: isError ? 96 : 48,
               marginBottom: index === notices.length - 1 ? 0 : "var(--space-2)",
               overflow: "hidden",
               borderRadius: "var(--radius-control)",
-              border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
-              background: "var(--bg)",
-              color: "var(--text-muted)",
+              border: `1px solid ${isError ? "color-mix(in srgb, var(--status-error) 35%, var(--border))" : "color-mix(in srgb, var(--border) 70%, transparent)"}`,
+              background: isError ? "color-mix(in srgb, var(--status-error) 7%, var(--bg))" : "var(--bg)",
+              color: isError ? "var(--text)" : "var(--text-muted)",
               width: "fit-content",
-              maxWidth: "min(100%, 620px)",
+              maxWidth: isError ? "min(100%, 640px)" : "min(100%, 620px)",
               boxShadow: floating ? "var(--shadow-pop)" : "var(--shadow-card)",
               fontSize: "var(--text-md)",
-              lineHeight: 1.35,
+              lineHeight: isError ? 1.4 : 1.35,
               transformOrigin: "top center",
               animation: notice.exiting
                 ? "notice-shelf-out var(--dur-med) ease-in forwards"
                 : "notice-shelf-in var(--dur-med) var(--ease-out-warm) both",
-              padding: "0 10px",
+              padding: isError ? "8px 8px 8px 10px" : "0 10px",
             }}
           >
             <span
@@ -1188,11 +1190,51 @@ function NoticeShelf({ notices, floating = false, align = "left" }: { notices: N
                 borderRadius: "50%",
                 background: color,
                 flexShrink: 0,
+                marginTop: isError ? 6 : 0,
               }}
             />
-            <span style={{ padding: "8px 0", minWidth: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <span
+              style={{
+                padding: isError ? "0" : "8px 0",
+                minWidth: 0,
+                maxWidth: "100%",
+                overflow: "hidden",
+                display: isError ? "-webkit-box" : "block",
+                WebkitLineClamp: isError ? 3 : undefined,
+                WebkitBoxOrient: isError ? "vertical" as const : undefined,
+                overflowWrap: "anywhere",
+                whiteSpace: isError ? "normal" : "nowrap",
+                textOverflow: isError ? "clip" : "ellipsis",
+                flex: 1,
+              }}
+              title={notice.message}
+            >
               {notice.message}
             </span>
+            {onDismiss && (
+              <button
+                type="button"
+                onClick={() => onDismiss(notice.id)}
+                aria-label={translate("ui.dismiss")}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 18,
+                  height: 18,
+                  padding: 0,
+                  border: 0,
+                  borderRadius: "var(--radius-control)",
+                  background: "transparent",
+                  color: "var(--text-dim)",
+                  cursor: "pointer",
+                  flexShrink: 0,
+                  marginTop: isError ? 1 : 0,
+                }}
+              >
+                <span aria-hidden style={{ fontSize: 12, lineHeight: 1 }}>×</span>
+              </button>
+            )}
           </div>
         );
       })}

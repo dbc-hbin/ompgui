@@ -27,16 +27,20 @@ interface ToastData {
 interface ToastOptions {
   /** Clamp the description to 2 lines; click the description to expand it. */
   clamp?: boolean;
+  timeout?: number;
+  duration?: number;
 }
 
 const manager = Toast.createToastManager<ToastData>();
 
 function add(kind: ToastKind, title: React.ReactNode, description?: React.ReactNode, options?: ToastOptions) {
+  const timeout = options?.timeout ?? options?.duration;
   return manager.add({
     title,
     description,
     type: kind,
     data: { kind, clamp: options?.clamp },
+    ...(timeout !== undefined ? { timeout } : {}),
   });
 }
 
