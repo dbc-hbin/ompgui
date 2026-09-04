@@ -46,6 +46,8 @@
   "settingsConfig.checkingUpdates": "更新を確認中…",
   "settingsConfig.upToDate": "v{version} は最新です",
   "settingsConfig.versionUnavailable": "バージョンを取得できません",
+  "settingsConfig.updateCheckFailed": "OMP の更新を確認できませんでした。",
+  "settingsConfig.appUpdateCheckFailed": "ompgui の更新を確認できませんでした。",
   "settingsConfig.checkAppUpdates": "ompgui の更新を確認",
   "settingsConfig.checkOmpUpdates": "OMP の更新を確認",
   "settingsConfig.refresh": "更新",

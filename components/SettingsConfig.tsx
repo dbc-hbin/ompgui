@@ -28,6 +28,7 @@ type UpdateState = {
   availableVersion: string | null;
   updateAvailable: boolean;
   updateCommand?: string;
+  lookupFailed?: boolean;
 };
 
 type NativeApplication = {
@@ -259,7 +260,7 @@ function NativeSetting({ label, description, scope, compact = false, hideDescrip
   );
 }
 
-export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, toolCallsDefaultCollapsed, onToolCallsDefaultCollapsedChange, cwd, sessionId, systemPrompt, systemPromptLoading, onLoadSystemPrompt, onModelsSaved, onPluginsReloaded, onOmpSessionsRestarted, onOmpUpdateAvailabilityChange, onSelectTab, onClose, runtimeReady }: {
+export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, toolCallsDefaultCollapsed, onToolCallsDefaultCollapsedChange, cwd, sessionId, systemPrompt, systemPromptLoading, onLoadSystemPrompt, onModelsSaved, onPluginsReloaded, onOmpSessionsRestarted, onOmpUpdateAvailabilityChange, onAppUpdateAvailabilityChange, onSelectTab, onClose, runtimeReady }: {
   activeTab: SettingsTab;
   advisorEnabled: boolean;
   onAdvisorChange: (enabled: boolean) => void;
@@ -274,6 +275,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
   onPluginsReloaded: () => void;
   onOmpSessionsRestarted: () => void;
   onOmpUpdateAvailabilityChange?: (available: boolean) => void;
+  onAppUpdateAvailabilityChange?: (available: boolean) => void;
   onSelectTab: (tab: SettingsTab) => void;
   onClose: () => void;
   runtimeReady?: boolean;
@@ -297,6 +299,11 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
   const [checkingAppUpdate, setCheckingAppUpdate] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [appUpdateError, setAppUpdateError] = useState(false);
+  const ompCheckRef = useRef(0);
+  const appCheckRef = useRef(0);
+  const ompCheckInFlightRef = useRef(false);
+  const appCheckInFlightRef = useRef(false);
   const [nativeSettings, setNativeSettings] = useState<NativeSettings | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [submitBehavior, setSubmitBehavior] = useState<SubmitDuringRunBehavior>("steer");
@@ -502,43 +509,95 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
     setVisitedTabs((prev) => new Set([...prev, normalized]));
   }, [activeTab]);
 
-  const checkForUpdate = useCallback(async () => {
+  const checkForUpdate = useCallback(async (manual = false) => {
+    if (!manual && ompCheckInFlightRef.current) return;
+    const requestId = ++ompCheckRef.current;
+    ompCheckInFlightRef.current = true;
     setChecking(true);
-    setMessage(null);
+    if (manual) {
+      setMessage(null);
+    }
     try {
-      const response = await fetch("/api/omp/updates", { method: "POST" });
+      const response = await fetch("/api/omp-update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "check" }),
+      });
+      if (!response.ok) {
+        throw new Error("Failed to check OMP updates");
+      }
       const data = await response.json() as UpdateState;
+      if (requestId !== ompCheckRef.current || !mountedRef.current) return;
       setUpdate(data);
       if (onOmpUpdateAvailabilityChange && typeof data.updateAvailable === "boolean") {
         onOmpUpdateAvailabilityChange(data.updateAvailable);
       }
       if (!data.updateAvailable) {
-        setMessage(t("settingsConfig.latestVersion", { version: data.currentVersion ?? "current" }));
+        setMessage(t("settingsConfig.upToDate", { version: data.currentVersion ?? "current" }));
       }
     } catch {
+      if (requestId !== ompCheckRef.current || !mountedRef.current) return;
       setMessage(t("settingsConfig.updateCheckFailed"));
     } finally {
-      setChecking(false);
+      if (requestId === ompCheckRef.current) {
+        ompCheckInFlightRef.current = false;
+        if (mountedRef.current) {
+          setChecking(false);
+        }
+      }
     }
   }, [onOmpUpdateAvailabilityChange, t]);
 
   const checkForAppUpdate = useCallback(async (manual = false) => {
+    if (!manual && appCheckInFlightRef.current) return;
+    const requestId = ++appCheckRef.current;
+    appCheckInFlightRef.current = true;
     setCheckingAppUpdate(true);
+    if (manual) {
+      setMessage(null);
+      setAppUpdateError(false);
+    }
     try {
-      const response = await fetch("/api/ompgui/updates", { method: "POST" });
+      const response = await fetch(manual ? "/api/app-update?force=1" : "/api/app-update");
+      if (!response.ok) {
+        throw new Error("Failed to check ompgui updates");
+      }
       const data = await response.json() as UpdateState;
+      if (requestId !== appCheckRef.current || !mountedRef.current) return;
       setAppUpdate(data);
-      if (manual && !data.updateAvailable) {
-        setMessage(t("settingsConfig.latestVersion", { version: data.currentVersion ?? "current" }));
+      if (data.lookupFailed) {
+        if (manual) {
+          setAppUpdateError(true);
+          setMessage(t("settingsConfig.appUpdateCheckFailed"));
+        }
+        return;
+      }
+      if (onAppUpdateAvailabilityChange && typeof data.updateAvailable === "boolean") {
+        onAppUpdateAvailabilityChange(data.updateAvailable);
+      }
+      setAppUpdateError(false);
+      if (manual) {
+        if (data.updateAvailable) {
+          setMessage(null);
+        } else {
+          setMessage(t("settingsConfig.upToDate", { version: data.currentVersion ?? "current" }));
+        }
       }
     } catch {
+      if (requestId !== appCheckRef.current || !mountedRef.current) return;
       if (manual) {
+        setAppUpdateError(true);
         setMessage(t("settingsConfig.appUpdateCheckFailed"));
       }
     } finally {
-      setCheckingAppUpdate(false);
+      if (requestId === appCheckRef.current) {
+        appCheckInFlightRef.current = false;
+        if (mountedRef.current) {
+          setCheckingAppUpdate(false);
+        }
+      }
     }
-  }, [t]);
+  }, [onAppUpdateAvailabilityChange, t]);
 
   useEffect(() => {
     if (currentTab === "system") {
@@ -1360,7 +1419,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                     <div>
                       <div style={{ fontSize: "var(--text-md)", fontWeight: 600 }}>{t("settingsConfig.appLabel")}</div>
                       <div style={{ marginTop: 4, color: appUpdate?.updateAvailable ? "var(--accent)" : "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)" }}>
-                        {checkingAppUpdate ? t("settingsConfig.checkingUpdates") : appUpdate?.updateAvailable ? t("appShell.updateVersion", { current: appUpdate.currentVersion ?? "?", available: appUpdate.availableVersion ?? "?" }) : appUpdate?.currentVersion ? t("settingsConfig.upToDate", { version: appUpdate.currentVersion }) : t("settingsConfig.versionUnavailable")}
+                        {checkingAppUpdate ? t("settingsConfig.checkingUpdates") : appUpdate?.updateAvailable ? t("appShell.updateVersion", { current: appUpdate.currentVersion ?? "?", available: appUpdate.availableVersion ?? "?" }) : appUpdateError || appUpdate?.lookupFailed ? t("settingsConfig.appUpdateCheckFailed") : appUpdate?.currentVersion && appUpdate?.availableVersion ? t("settingsConfig.upToDate", { version: appUpdate.currentVersion }) : t("settingsConfig.versionUnavailable")}
                       </div>
                     </div>
                     <button type="button" onClick={() => void checkForAppUpdate(true)} disabled={checkingAppUpdate} aria-label={t("settingsConfig.checkAppUpdates")} style={{ padding: "6px 10px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "transparent", color: "var(--text)", cursor: checkingAppUpdate ? "wait" : "pointer", fontSize: "var(--text-sm)", display: "inline-flex", alignItems: "center", gap: 5 }}>
@@ -1397,7 +1456,7 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                         {checking ? t("settingsConfig.checkingUpdates") : update?.updateAvailable ? t("appShell.updateVersion", { current: update.currentVersion ?? "?", available: update.availableVersion ?? "?" }) : update?.currentVersion ? t("settingsConfig.upToDate", { version: update.currentVersion }) : t("settingsConfig.versionUnavailable")}
                       </div>
                     </div>
-                    <button type="button" onClick={() => void checkForUpdate()} disabled={checking} aria-label={t("settingsConfig.checkOmpUpdates")} style={{ padding: "6px 10px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "transparent", color: "var(--text)", cursor: checking ? "wait" : "pointer", fontSize: "var(--text-sm)", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    <button type="button" onClick={() => void checkForUpdate(true)} disabled={checking} aria-label={t("settingsConfig.checkOmpUpdates")} style={{ padding: "6px 10px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "transparent", color: "var(--text)", cursor: checking ? "wait" : "pointer", fontSize: "var(--text-sm)", display: "inline-flex", alignItems: "center", gap: 5 }}>
                       <RefreshCw size={13} aria-hidden="true" /> {t("settingsConfig.refresh")}
                     </button>
                   </div>

@@ -568,7 +568,11 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
 
   // Cycle model / thinking level via ⌘/Ctrl+Alt+M and ⌘/Ctrl+Alt+T (RPC
   // cycle_model / cycle_thinking_level). Meta/Alt combos avoid clashing with
-  // ordinary typing in the composer.
+  // ordinary typing in the composer. Model cycling is blocked while busy
+  // (same contract as the composer model picker); thinking-level cycling
+  // stays usable mid-run (same contract as the reasoning picker). The hook
+  // handlers re-check live run refs, so this early return only avoids firing
+  // a doomed RPC from a stale render.
   useEffect(() => {
     if (!session) return;
     const handler = (e: KeyboardEvent) => {
@@ -576,6 +580,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
       const key = e.key.toLowerCase();
       if (key === "m") {
         e.preventDefault();
+        if (sessionBusy) return;
         void handleCycleModel();
       } else if (key === "t") {
         e.preventDefault();
@@ -584,7 +589,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [session, handleCycleModel, handleCycleThinkingLevel]);
+  }, [session, sessionBusy, handleCycleModel, handleCycleThinkingLevel]);
 
   const sessionKeyForPaging = session?.id ?? (newSessionCwd ? `new:${newSessionCwd}` : "empty");
   const [minimapLayoutKey, setMinimapLayoutKey] = useState(() => minimapMeasureKey(0, 0, 0));

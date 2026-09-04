@@ -200,23 +200,110 @@ test("SubagentStatusIcon renders distinct status icons and distinguishes lost fr
 });
 
 test("hierarchy builder stacks active agents first and newest agents first", () => {
+  const now = 100_000;
   const roster = [
-    { id: "root", agent: "scout", status: "started", index: 0, task: "Inspect" },
+    { id: "root", agent: "scout", status: "started", index: 0, task: "Inspect", lastUpdate: now },
     { id: "unknown-child", agent: "worker", status: "completed", index: 1, parentToolCallId: "parent-call", task: "Write" },
-    { id: "nested", agent: "helper", status: "started", index: 2, parentToolCallId: "root", task: "Check" },
+    { id: "nested", agent: "helper", status: "started", index: 2, parentToolCallId: "root", task: "Check", lastUpdate: now },
     { id: "root-2", agent: "reviewer", status: "failed", index: 3, task: "Review" },
     { id: "unknown-child-2", agent: "helper", status: "aborted", index: 4, parentToolCallId: "parent-call", task: "Report" },
-    { id: "root-3", agent: "writer", status: "started", index: 5, task: "Implement" },
+    { id: "root-3", agent: "writer", status: "started", index: 5, task: "Implement", lastUpdate: now },
   ];
 
-  const first = buildSubagentHubTree(roster);
-  const second = buildSubagentHubTree(roster);
+  const first = buildSubagentHubTree(roster, now);
+  const second = buildSubagentHubTree(roster, now);
   assert.deepEqual(second, first);
   assert.deepEqual(
     first.filter((item) => item.kind === "row").map((item) => item.subagent.id),
-    ["root-3", "root", "nested", "root-2", "unknown-child-2", "unknown-child"],
+    ["root-3", "root", "nested", "unknown-child-2", "unknown-child", "root-2"],
   );
   assert.equal(first.filter((item) => item.kind === "row").length, roster.length);
+});
+
+test("hierarchy builder lifts active orphan groups above completed history roots", () => {
+  const now = 100_000;
+  const roster = [
+    { id: "history-root", agent: "archived", status: "completed", source: "history", index: 0, task: "Old work" },
+    { id: "history-root-2", agent: "archived-2", status: "failed", source: "history", index: 1, task: "Older failure" },
+    { id: "live-orphan", agent: "scout", status: "started", index: 2, parentToolCallId: "tool-call-1", task: "Live nested task", lastUpdate: now },
+    { id: "live-orphan-2", agent: "worker", status: "started", index: 3, parentToolCallId: "tool-call-1", task: "Sibling live task", lastUpdate: now },
+    { id: "done-orphan", agent: "helper", status: "completed", index: 4, parentToolCallId: "tool-call-2", task: "Finished nested" },
+  ];
+
+  const tree = buildSubagentHubTree(roster, now);
+  assert.deepEqual(
+    tree.filter((item) => item.kind === "row").map((item) => item.subagent.id),
+    ["live-orphan-2", "live-orphan", "done-orphan", "history-root-2", "history-root"],
+  );
+});
+
+test("hierarchy builder floats completed roots that still have live nested children", () => {
+  const now = 100_000;
+  const roster = [
+    { id: "old-root", agent: "archived", status: "completed", source: "history", index: 0, task: "History root" },
+    { id: "parent", agent: "coordinator", status: "completed", index: 1, task: "Parent settled" },
+    { id: "child", agent: "worker", status: "started", index: 2, parentToolCallId: "parent", task: "Detached child still running", lastUpdate: now },
+  ];
+
+  const tree = buildSubagentHubTree(roster, now);
+  assert.deepEqual(
+    tree.filter((item) => item.kind === "row").map((item) => item.subagent.id),
+    ["parent", "child", "old-root"],
+  );
+});
+
+test("hierarchy builder propagates active state through orphan descendants", () => {
+  const now = 100_000;
+  const roster = [
+    { id: "history-root", agent: "archived", status: "completed", source: "history", index: 8, task: "Recent history" },
+    { id: "orphan-parent", agent: "coordinator", status: "completed", index: 1, parentToolCallId: "missing-call", task: "Parent settled" },
+    { id: "live-child", agent: "worker", status: "started", index: 9, parentToolCallId: "orphan-parent", task: "Still running", lastUpdate: now },
+  ];
+
+  const tree = buildSubagentHubTree(roster, now);
+  assert.deepEqual(
+    tree.filter((item) => item.kind === "row").map((item) => item.subagent.id),
+    ["orphan-parent", "live-child", "history-root"],
+  );
+});
+
+test("hierarchy builder does not prioritize stale started orphan groups", () => {
+  const now = 100_000;
+  const roster = [
+    { id: "completed-root", agent: "reviewer", status: "completed", index: 3, task: "Recent result" },
+    {
+      id: "stale-orphan",
+      agent: "worker",
+      status: "started",
+      index: 2,
+      parentToolCallId: "missing-call",
+      task: "No longer updating",
+      lastUpdate: now - SUBAGENT_STALE_AFTER_MS - 1,
+    },
+  ];
+
+  const tree = buildSubagentHubTree(roster, now);
+  assert.deepEqual(
+    tree.filter((item) => item.kind === "row").map((item) => item.subagent.id),
+    ["completed-root", "stale-orphan"],
+  );
+  const firstGroup = tree.find((item) => item.kind === "group");
+  assert.equal(firstGroup?.group, "roots");
+});
+
+test("hierarchy builder sorts active root blocks by their newest active descendant", () => {
+  const now = 100_000;
+  const roster = [
+    { id: "older-parent", agent: "coordinator", status: "completed", index: 1, task: "Parent settled" },
+    { id: "newer-root", agent: "reviewer", status: "started", index: 5, task: "Review", lastUpdate: now },
+    { id: "newest-child", agent: "worker", status: "started", index: 10, parentToolCallId: "older-parent", task: "Implement", lastUpdate: now },
+  ];
+
+  const tree = buildSubagentHubTree(roster, now);
+  assert.deepEqual(
+    tree.filter((item) => item.kind === "row").map((item) => item.subagent.id),
+    ["older-parent", "newest-child", "newer-root"],
+  );
 });
 
 test("row selection callback fires with the clicked subagent", () => {
@@ -601,7 +688,7 @@ test("mobile contract: globals.css defines media queries hiding omitted elements
 test("mobile minimal row contract: every subagent row maintains status icon, agent name, single-line task, and selection handler", () => {
   const selected = [];
   const testSubagents = [
-    { id: "s1", agent: "scout", status: "started", index: 0, task: "Investigate mobile layout" },
+    { id: "s1", agent: "scout", status: "started", index: 0, task: "Investigate mobile layout", lastUpdate: 0 },
     { id: "w1", agent: "worker", status: "completed", index: 1, task: "Apply compact styling" },
     { id: "r1", agent: "reviewer", status: "failed", index: 2, task: "Verify no regressions" },
   ];

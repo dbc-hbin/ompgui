@@ -371,11 +371,20 @@ export type SubagentHubTreeItem =
   | { kind: "group"; key: string; group: "roots" | "nested" | "orphans"; parentLabel?: string; depth: number }
   | { kind: "row"; key: string; subagent: SubagentInfo; depth: number };
 
+function isLiveStartedSubagent(subagent: SubagentInfo, now: number): boolean {
+  return subagent.source !== "history"
+    && subagent.status === "started"
+    && getSubagentFreshness(subagent, now) === "live";
+}
+
 /** Build the display order without mutating the input roster or render state. */
-export function buildSubagentHubTree(subagents: SubagentInfo[]): SubagentHubTreeItem[] {
+export function buildSubagentHubTree(
+  subagents: SubagentInfo[],
+  now = Date.now(),
+): SubagentHubTreeItem[] {
   const sorted = [...subagents].sort((left, right) => {
-    const leftActive = left.source !== "history" && left.status === "started";
-    const rightActive = right.source !== "history" && right.status === "started";
+    const leftActive = isLiveStartedSubagent(left, now);
+    const rightActive = isLiveStartedSubagent(right, now);
     if (leftActive !== rightActive) return leftActive ? -1 : 1;
     return right.index - left.index || right.id.localeCompare(left.id);
   });
@@ -420,22 +429,82 @@ export function buildSubagentHubTree(subagents: SubagentInfo[]): SubagentHubTree
     }
   };
 
-  if (roots.length > 0) {
-    tree.push({ kind: "group", key: "group-roots", group: "roots", depth: 0 });
-    appendSubtree(roots, 0);
-  }
-  if (unknownParentGroups.size > 0) {
-    tree.push({ kind: "group", key: "group-orphans", group: "orphans", depth: 0 });
-    for (const [parentId, items] of unknownParentGroups) {
-      tree.push({
-        kind: "group",
-        key: `group-parent-${parentId}`,
-        group: "nested",
-        parentLabel: parentId,
-        depth: 0,
-      });
-      appendSubtree(items, 0);
+  // Live task children often carry a tool-call parent id that is not itself a
+  // roster row, so they land in the orphan bucket. Emitting every root before
+  // every orphan buried active live agents under completed history roots.
+  // Interleave top-level blocks with the same active-then-newest rule.
+  type TopLevelBlock =
+    | { kind: "root"; key: string; items: SubagentInfo[]; active: boolean; sortIndex: number }
+    | { kind: "orphan"; key: string; parentId: string; items: SubagentInfo[]; active: boolean; sortIndex: number };
+
+  const getSubtreeSortMeta = (items: SubagentInfo[]): { active: boolean; sortIndex: number } => {
+    let newestIndex = Number.NEGATIVE_INFINITY;
+    let newestActiveIndex = Number.NEGATIVE_INFINITY;
+    const pending = [...items];
+    const seen = new Set<string>();
+    while (pending.length > 0) {
+      const subagent = pending.pop()!;
+      if (seen.has(subagent.id)) continue;
+      seen.add(subagent.id);
+      newestIndex = Math.max(newestIndex, subagent.index);
+      if (isLiveStartedSubagent(subagent, now)) {
+        newestActiveIndex = Math.max(newestActiveIndex, subagent.index);
+      }
+      pending.push(...(childrenByParent.get(subagent.id) ?? []));
     }
+    const active = newestActiveIndex !== Number.NEGATIVE_INFINITY;
+    return { active, sortIndex: active ? newestActiveIndex : newestIndex };
+  };
+
+  const topLevels: TopLevelBlock[] = [
+    ...roots.map((subagent) => {
+      const meta = getSubtreeSortMeta([subagent]);
+      return {
+        kind: "root" as const,
+        key: subagent.id,
+        items: [subagent],
+        ...meta,
+      };
+    }),
+    ...[...unknownParentGroups.entries()].map(([parentId, items]) => {
+      const meta = getSubtreeSortMeta(items);
+      return {
+        kind: "orphan" as const,
+        key: parentId,
+        parentId,
+        items,
+        ...meta,
+      };
+    }),
+  ];
+
+  topLevels.sort((left, right) => {
+    if (left.active !== right.active) return left.active ? -1 : 1;
+    return right.sortIndex - left.sortIndex || left.key.localeCompare(right.key);
+  });
+
+  let lastTopKind: "root" | "orphan" | null = null;
+  for (const block of topLevels) {
+    if (block.kind === "root") {
+      if (lastTopKind !== "root") {
+        tree.push({ kind: "group", key: `group-roots-${block.key}`, group: "roots", depth: 0 });
+      }
+      appendSubtree(block.items, 0);
+      lastTopKind = "root";
+      continue;
+    }
+    if (lastTopKind !== "orphan") {
+      tree.push({ kind: "group", key: `group-orphans-${block.key}`, group: "orphans", depth: 0 });
+    }
+    tree.push({
+      kind: "group",
+      key: `group-parent-${block.parentId}`,
+      group: "nested",
+      parentLabel: block.parentId,
+      depth: 0,
+    });
+    appendSubtree(block.items, 0);
+    lastTopKind = "orphan";
   }
 
   const remaining = sorted.filter((subagent) => !visited.has(subagent.id));
@@ -477,7 +546,10 @@ export function SubagentHub({
     () => filterSubagentHubRows(subagents, filter, freshnessNow),
     [subagents, filter, freshnessNow],
   );
-  const treeItems = useMemo(() => buildSubagentHubTree(visibleSubagents), [visibleSubagents]);
+  const treeItems = useMemo(
+    () => buildSubagentHubTree(visibleSubagents, freshnessNow),
+    [visibleSubagents, freshnessNow],
+  );
 
   return (
     <section

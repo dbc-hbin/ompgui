@@ -46,6 +46,8 @@
   "settingsConfig.checkingUpdates": "Checking for updates...",
   "settingsConfig.upToDate": "v{version} is up to date",
   "settingsConfig.versionUnavailable": "Version unavailable",
+  "settingsConfig.updateCheckFailed": "Could not check OMP updates.",
+  "settingsConfig.appUpdateCheckFailed": "Could not check ompgui updates.",
   "settingsConfig.checkAppUpdates": "Check ompgui updates",
   "settingsConfig.checkOmpUpdates": "Check OMP updates",
   "settingsConfig.refresh": "Refresh",

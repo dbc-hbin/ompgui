@@ -161,3 +161,20 @@ test("quota-like errors are tracked and re-surfaced without content", () => {
     /const timeout = oldest\.type === "error" \? NOTICE_ERROR_VISIBLE_MS : NOTICE_VISIBLE_MS;/,
   );
 });
+
+test("cycle_model is blocked during agent/bash runs at the live-ref boundary", () => {
+  assert.match(
+    hookSource,
+    /const handleCycleModel = useCallback\(async \(\) => \{\s+const sid = sessionIdRef\.current;\s+if \(!sid \|\| !canMutateSession\(sid\)\) return;\s+if \(agentRunningRef\.current \|\| bashRunningRef\.current\) return;\s+try \{\s+await sendAgentCommand\(sid, \{ type: "cycle_model" \}\);/,
+  );
+});
+
+test("cycle_thinking_level stays usable mid-run like the reasoning picker", () => {
+  // The reasoning picker is explicitly usable mid-run (the daemon applies the
+  // level to the next prompt, not to streaming tokens), so the cycle shortcut
+  // must not gain a run guard either: assert the exact unguarded shape.
+  assert.match(
+    hookSource,
+    /const handleCycleThinkingLevel = useCallback\(async \(\) => \{\s+const sid = sessionIdRef\.current;\s+if \(!sid \|\| !canMutateSession\(sid\)\) return;\s+try \{\s+await sendAgentCommand\(sid, \{ type: "cycle_thinking_level" \}\);/,
+  );
+});

@@ -6,6 +6,7 @@ import { MarkdownBody } from "./MarkdownBody";
 import { ClickableImage } from "./ImageLightbox";
 import { translate, useI18n, type Locale } from "@/lib/i18n";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
+import { collectToolResultImages } from "@/lib/image-attachments";
 import { isEmptyThinkingBlock } from "@/lib/message-display";
 import { parseUnifiedPatch, type SplitDiffCell } from "@/lib/patch";
 import { isRecord } from "@/lib/type-guards";
@@ -603,11 +604,14 @@ function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCal
   if (block.type === "thinking") {
     return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} />;
   }
+  if (block.type === "image") {
+    return <AssistantImageBlock block={block as ImageContent} />;
+  }
   if (block.type === "toolCall") {
     const tc = block as ToolCallContent;
     const result = toolResults?.get(tc.toolCallId);
     const duration = toolCallDurations?.get(tc.toolCallId);
-    return <ToolCallBlock block={tc} result={result} duration={duration} isStreaming={isStreaming} defaultCollapsed={toolCallsDefaultCollapsed} />;
+    return <ToolCallBlock block={tc} result={result} duration={duration} isStreaming={isStreaming} defaultCollapsed={toolCallsDefaultCollapsed} sessionId={sessionId} />;
   }
   return null;
 }
@@ -625,6 +629,20 @@ const TextBlock = memo(function TextBlock({ block, isStreaming, cwd, onOpenFile 
   && prev.cwd === next.cwd
   && prev.onOpenFile === next.onOpenFile
 ));
+
+const AssistantImageBlock = memo(function AssistantImageBlock({ block }: { block: ImageContent }) {
+  const src = imageSource(block);
+  if (!src) return null;
+  return (
+    <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap" }}>
+      <ClickableImage
+        src={src}
+        alt=""
+        style={{ maxWidth: 240, maxHeight: 240, borderRadius: 6, objectFit: "contain", display: "block", border: "1px solid var(--border)" }}
+      />
+    </div>
+  );
+}, (prev, next) => prev.block === next.block || imageSource(prev.block) === imageSource(next.block));
 
 const ThinkingBlock = memo(function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
   block: ThinkingContent;
@@ -726,23 +744,125 @@ const ThinkingBlock = memo(function ThinkingBlock({ block, duration, sessionId, 
 ));
 
 
-const ToolCallBlock = memo(function ToolCallBlock({ block, result, duration, isStreaming, defaultCollapsed = true }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number; isStreaming?: boolean; defaultCollapsed?: boolean }) {
+export interface ToolResultImageLoad {
+  images: ImageContent[];
+  missingCount: number;
+}
+
+export function loadToolResultImages(sessionId: string, entryId: string, signal?: AbortSignal): Promise<ToolResultImageLoad> {
+  return fetch(
+    `/api/sessions/${encodeURIComponent(sessionId)}/entries/${encodeURIComponent(entryId)}/media`,
+    signal ? { signal } : undefined,
+  ).then(async (response) => {
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json() as { images?: unknown; missingCount?: unknown };
+    if (
+      !Array.isArray(data.images)
+      || typeof data.missingCount !== "number"
+      || !Number.isInteger(data.missingCount)
+      || data.missingCount < 0
+    ) {
+      throw new Error("Invalid media response");
+    }
+    return { images: data.images as ImageContent[], missingCount: data.missingCount };
+  });
+}
+
+// Placeholder line the history projection appends when base64 images are
+// stripped from the initial payload ("[N tool result image(s) omitted from
+// initial history payload...]"). Once deferred metadata exists the images load
+// on expansion, so the stale claim must not render alongside them.
+const DEFERRED_IMAGE_PLACEHOLDER_RE = /^\[\d+ tool result images? omitted from initial history payload[^\]]*\]$/;
+
+const ToolCallBlock = memo(function ToolCallBlock({ block, result, duration, isStreaming, defaultCollapsed = true, sessionId }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number; isStreaming?: boolean; defaultCollapsed?: boolean; sessionId?: string }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(Boolean(isStreaming) && !defaultCollapsed);
   const isEditTool = isEditToolName(block.toolName);
   const resultDiff = expanded && result && !result.isError ? getResultDiff(result) : null;
+  const deferred = result?.deferredImages;
 
   // Result display
   const resultText = result
     ? (typeof result.content === "string"
         ? result.content
         : (Array.isArray(result.content) ? result.content : [])
-            .filter((b): b is { type: "text"; text: string } => b.type === "text" && typeof b.text === "string")
+            .filter((b): b is { type: "text"; text: string } => {
+              if (b.type !== "text" || typeof b.text !== "string") return false;
+              // The omission placeholder is stale once deferred metadata can
+              // load the real images — never show it next to them.
+              if (deferred && DEFERRED_IMAGE_PLACEHOLDER_RE.test(b.text.trim())) return false;
+              return true;
+            })
             .map((b) => b.text)
             .join("\n"))
     : null;
   const resultIsEmpty = resultText === null ? false : (resultText.trim() === "(no output)" || resultText.trim() === "");
   const isError = result?.isError ?? false;
+
+  // Inline images: content screenshots plus live generate_image details
+  // images, deduplicated through the shared helper.
+  const inlineImages = useMemo(
+    () => (result ? collectToolResultImages({ content: result.content, details: result.details }) : []),
+    [result],
+  );
+
+  // Deferred history images: fetched once per deferred entry, only while
+  // expanded. Stale in-flight requests are ignored on prop/unmount changes.
+  const deferredKey = deferred && sessionId ? `${sessionId}:${deferred.entryId}` : null;
+  const [deferredImages, setDeferredImages] = useState<ImageContent[] | null>(null);
+  const [deferredLoadedKey, setDeferredLoadedKey] = useState<string | null>(null);
+  const [deferredMissingCount, setDeferredMissingCount] = useState(0);
+  const [deferredLoading, setDeferredLoading] = useState(false);
+  const [deferredFailed, setDeferredFailed] = useState(false);
+
+  useEffect(() => {
+    if (!expanded) {
+      setDeferredImages(null);
+      setDeferredLoadedKey(null);
+      setDeferredMissingCount(0);
+      setDeferredLoading(false);
+      setDeferredFailed(false);
+      return;
+    }
+    if (!deferredKey || !deferred || !sessionId) return;
+    if (deferredLoadedKey === deferredKey) return;
+    const controller = new AbortController();
+    let cancelled = false;
+    setDeferredLoading(true);
+    setDeferredFailed(false);
+    setDeferredMissingCount(0);
+    void loadToolResultImages(sessionId, deferred.entryId, controller.signal)
+      .then(({ images, missingCount }) => {
+        if (cancelled) return;
+        setDeferredImages(images);
+        setDeferredMissingCount(missingCount);
+        setDeferredLoadedKey(deferredKey);
+      })
+      .catch((err) => {
+        if (cancelled || (err instanceof DOMException && err.name === "AbortError")) return;
+        setDeferredFailed(true);
+      })
+      .finally(() => {
+        if (!cancelled) setDeferredLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [expanded, deferredKey, deferred, sessionId, deferredLoadedKey]);
+
+  const deferredLoaded = deferredKey !== null && deferredLoadedKey === deferredKey;
+  const toolImages = deferred ? (deferredLoaded ? (deferredImages ?? []) : []) : inlineImages;
+  // "(no output)" is empty, not real text: route it through the localized
+  // empty-state path, and suppress it entirely for images-only results.
+  const hasResultText = resultText !== null && !resultIsEmpty;
+  // The fetch effect runs after mount/expansion, so the first expanded frame
+  // (including SSR) must already show the loading line; a deferred result
+  // without session context can never load and reads as a failure.
+  const deferredPending = Boolean(deferred) && (deferredLoading || (expanded && deferredKey !== null && !deferredLoaded && !deferredFailed));
+  const deferredUnreachable = Boolean(deferred) && expanded && deferredKey === null;
+  const toolLoading = deferredPending && toolImages.length === 0;
+  const toolFailed = deferredFailed || deferredUnreachable || (deferredLoaded && deferredMissingCount > 0);
 
   return (
     <div
@@ -819,17 +939,30 @@ const ToolCallBlock = memo(function ToolCallBlock({ block, result, duration, isS
         {/* ── Paired result — only shown when expanded ── */}
         {expanded && result && (
           resultDiff ? (
-            <PairedDiffResult
-              diff={resultDiff}
-            />
+            <>
+              <PairedDiffResult
+                diff={resultDiff}
+              />
+              <ToolResultImages images={toolImages} loading={toolLoading} failed={toolFailed} />
+            </>
           ) : (
             <>
               <TaskResultPanel details={result.details} />
-              <PairedResult
-                text={resultText ?? ""}
-                isEmpty={resultIsEmpty}
-                isError={isError}
-              />
+              {hasResultText && (
+                <PairedResult
+                  text={resultText ?? ""}
+                  isEmpty={false}
+                  isError={isError}
+                />
+              )}
+              <ToolResultImages images={toolImages} loading={toolLoading} failed={toolFailed} />
+              {!hasResultText && toolImages.length === 0 && !toolLoading && !toolFailed && (
+                <PairedResult
+                  text={resultText ?? ""}
+                  isEmpty={resultIsEmpty}
+                  isError={isError}
+                />
+              )}
             </>
           )
         )}
@@ -846,7 +979,44 @@ const ToolCallBlock = memo(function ToolCallBlock({ block, result, duration, isS
   && prev.result === next.result
   && prev.duration === next.duration
   && prev.defaultCollapsed === next.defaultCollapsed
+  && prev.sessionId === next.sessionId
 ));
+
+function ToolResultImages({ images, loading, failed }: { images: ImageContent[]; loading: boolean; failed: boolean }) {
+  const { t } = useI18n();
+  if (images.length === 0 && !loading && !failed) return null;
+  return (
+    <div
+      style={{
+        borderTop: "1px solid var(--border)",
+        background: "var(--bg-subtle)",
+        padding: "var(--space-4) var(--control-padding-inline)",
+        display: "flex",
+        gap: "var(--space-3)",
+        flexWrap: "wrap",
+      }}
+    >
+      {images.map((img, i) => {
+        const src = imageSource(img);
+        if (!src) return null;
+        return (
+          <ClickableImage
+            key={i}
+            src={src}
+            alt=""
+            style={{ maxWidth: 240, maxHeight: 240, borderRadius: 6, objectFit: "contain", display: "block", border: "1px solid var(--border)" }}
+          />
+        );
+      })}
+      {loading && images.length === 0 && (
+        <span style={{ color: "var(--text-dim)", fontSize: "var(--text-md)", lineHeight: 1.5 }}>{t("appShell.loading")}</span>
+      )}
+      {failed && (
+        <span style={{ color: "var(--status-error)", fontSize: "var(--text-md)", lineHeight: 1.5 }}>{t("fileViewer.imageLoadFailed")}</span>
+      )}
+    </div>
+  );
+}
 
 interface ResultDiff {
   text: string;

@@ -1,10 +1,16 @@
+import { createHash } from "crypto";
 import { existsSync, realpathSync, statSync } from "fs";
 import { normalize as normalizePath } from "path";
 import { getAgentDir } from "./omp/paths";
 import {
   invalidateSessionFileListCache,
+  isBlobRef,
+  getBlobByteLength,
   listAllSessionInfos,
   loadSessionFile,
+  materializeSessionEntries,
+  parseBlobRef,
+  readSessionEntryByIdSync,
   readSessionHeaderSync,
   type LoadedSession,
   type OmpSessionInfo,
@@ -13,11 +19,19 @@ import type {
   AgentMessage,
   CompactionEntry,
   CustomMessage,
+  ImageContent,
   SessionContext,
   SessionEntry,
   SessionHeader,
   SessionInfo,
+  ToolResultMessage,
 } from "./types";
+import {
+  assertToolResultImageSizesWithinLimits,
+  collectToolResultImages,
+  getBase64DecodedByteLength,
+  getInlineToolResultImageBytes,
+} from "./image-attachments";
 import { normalizeToolCalls } from "./normalize";
 import { isRecord } from "./type-guards";
 import { taskResultRetryFailure, taskResultStructuredOutput, taskResultUsageCost } from "./task-result-details";
@@ -379,6 +393,152 @@ export function getSessionEntries(filePath: string): readonly SessionEntry[] {
 }
 
 /**
+ * Load one raw session entry and return its normalized tool-result images.
+ * Enforces the shared deferred-media limits (max 10 images, max 10 MiB per
+ * image, max 25 MiB aggregate) before any blob payload is read: inline sizes
+ * come from the base64 length and blob sizes from stat, so an oversized entry
+ * throws ToolResultImagesTooLargeError without materializing image bytes.
+ * Missing/non-message/non-toolResult entries and entries with no presentable
+ * images return null; missing blobs degrade to a placeholder like the history
+ * projection and non-image entries stay 404. Never exposes paths, full
+ * details, or blob refs.
+ */
+export function getToolResultImagesForEntry(
+  filePath: string,
+  entryId: string,
+): { images: ImageContent[]; missingCount: number } | null {
+  const raw = readSessionEntryByIdSync(filePath, entryId);
+  if (!raw || raw.type !== "message" || !isRecord(raw.message)) return null;
+  const message = raw.message;
+  if (message.role !== "toolResult") return null;
+  const content = "content" in message ? message.content : undefined;
+  const details = "details" in message ? message.details : undefined;
+  const sizes = collectToolResultImageSizes(content, details);
+  // No presentable images (missing entry payload, non-image blocks, URL-source
+  // images) stays a 404 at the route.
+  if (!sizes) return null;
+  assertToolResultImageSizesWithinLimits(sizes);
+  // Selectively resolve only the preflighted image blocks: a minimal
+  // synthetic entry carrying just canonical content images and
+  // details.images. Unrelated fields (image_generation_call.result,
+  // image_url, other details keys, message/top-level extras) are never
+  // constructed, so their refs are neither read nor rejected.
+  const filteredContent = Array.isArray(content)
+    ? content.filter(
+        (block) => isRecord(block) && block.type === "image",
+      )
+    : [];
+  const synthetic = {
+    type: "message",
+    id: raw.id,
+    parentId: raw.parentId,
+    timestamp: raw.timestamp,
+    message: {
+      role: "toolResult",
+      toolCallId: "media",
+      content: filteredContent,
+      details:
+        isRecord(details) && Array.isArray((details as Record<string, unknown>).images)
+          ? { images: (details as Record<string, unknown>).images }
+          : undefined,
+    },
+  } as SessionEntry;
+  const materialized = materializeSessionEntries([synthetic])[0];
+  const resolved = materialized?.type === "message" && isRecord(materialized.message)
+    ? materialized.message
+    : null;
+  if (!resolved || resolved.role !== "toolResult") return null;
+  const images = collectToolResultImages({
+    content: "content" in resolved ? resolved.content : undefined,
+    details: "details" in resolved ? resolved.details : undefined,
+  });
+  const missingCount = Math.max(0, sizes.length - images.length);
+  return images.length > 0 || missingCount > 0 ? { images, missingCount } : null;
+}
+
+/**
+ * Decoded byte sizes for one toolResult's presentable images (canonical
+ * content blocks plus generated details.images), deduplicated exactly like
+ * collectToolResultImages. Inline payloads use the base64 length; blob refs
+ * use the blob file size without reading contents. Returns null when the entry
+ * carries no countable image payload (so the caller keeps 404 behavior);
+ * missing blobs count as zero bytes here and are reported separately after
+ * materialization.
+ */
+function collectToolResultImageSizes(content: unknown, details: unknown): number[] | null {
+  const seen = new Set<string>();
+  const sizes: number[] = [];
+  let countable = false;
+  const pushInline = (data: string, mimeType: string) => {
+    countable = true;
+    const validBytes = getBase64DecodedByteLength(data);
+    const hash = validBytes === null
+      ? null
+      : createHash("sha256").update(data, "base64").digest("hex");
+    const key = hash === null
+      ? `inline:${mimeType}\0${data}`
+      : `image:${mimeType}\0${hash}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    sizes.push(validBytes ?? getInlineToolResultImageBytes(data));
+  };
+  const pushBlob = (hash: string, mimeType: string) => {
+    countable = true;
+    const key = `image:${mimeType}\0${hash}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    sizes.push(getBlobByteLength(hash) ?? 0);
+  };
+  const scanBlock = (value: unknown, canonicalOnly: boolean) => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return;
+    const record = value as Record<string, unknown>;
+    if (canonicalOnly && record.type !== "image") return;
+    const source = record.source;
+    if (
+      typeof source === "object" && source !== null && !Array.isArray(source) &&
+      (source as Record<string, unknown>).type === "base64" &&
+      typeof (source as Record<string, unknown>).data === "string"
+    ) {
+      const nested = source as Record<string, unknown>;
+      const mediaType = typeof nested.media_type === "string" ? nested.media_type : "";
+      if (!mediaType.toLowerCase().startsWith("image/")) return;
+      const data = nested.data as string;
+      if (typeof data !== "string") return;
+      if (isBlobRef(data)) {
+        const hash = parseBlobRef(data);
+        if (hash) pushBlob(hash, mediaType);
+        return;
+      }
+      pushInline(data, mediaType);
+      return;
+    }
+    if (typeof record.data === "string" && typeof record.mimeType === "string") {
+      if (!record.mimeType.toLowerCase().startsWith("image/")) return;
+      if (isBlobRef(record.data)) {
+        const hash = parseBlobRef(record.data);
+        if (hash) pushBlob(hash, record.mimeType);
+        return;
+      }
+      pushInline(record.data, record.mimeType);
+    }
+  };
+  try {
+    if (Array.isArray(content)) {
+      for (const block of content) scanBlock(block, true);
+    }
+    if (typeof details === "object" && details !== null && !Array.isArray(details)) {
+      const nested = (details as Record<string, unknown>).images;
+      if (Array.isArray(nested)) {
+        for (const rawImage of nested) scanBlock(rawImage, false);
+      }
+    }
+  } catch {
+    // Defensive: one malformed block must never break the media route.
+  }
+  return countable ? sizes : null;
+}
+
+/**
  * Session files are JSONL and may contain shape-valid records with a missing
  * or malformed `message` payload (for example while another process is
  * writing a line). Keep all readers on the same defensive boundary before
@@ -702,10 +862,13 @@ function keepTaskToolResultDetails(details: Record<string, unknown>): Record<str
   return Object.keys(kept).length > 0 ? kept : null;
 }
 
-function stripToolResultDetails(message: AgentMessage): AgentMessage {
+function stripToolResultDetails(message: AgentMessage, keepImages = false): AgentMessage {
   if (message.role !== "toolResult" || message.details === undefined) return message;
   const { details, ...rest } = message;
   if (isRecord(details)) {
+    // Generated images (generate_image) ride `details.images` to the full
+    // projection; fold them into content before the details are stripped.
+    const detailImages = keepImages ? collectToolResultImages({ content: [], details }) : [];
     const kept: Record<string, unknown> = {};
     if (typeof details.patch === "string") kept.patch = details.patch;
     if (typeof details.diff === "string") kept.diff = details.diff;
@@ -713,9 +876,40 @@ function stripToolResultDetails(message: AgentMessage): AgentMessage {
       const taskDetails = keepTaskToolResultDetails(details);
       if (taskDetails) Object.assign(kept, taskDetails);
     }
-    if (Object.keys(kept).length > 0) return { ...rest, details: kept };
+    let merged: ToolResultMessage = message;
+    if (detailImages.length > 0 && Array.isArray(message.content)) {
+      merged = mergeDetailImagesIntoContent(message, detailImages);
+    }
+    if (Object.keys(kept).length > 0) return { ...merged, details: kept };
+    const { details: _dropped, ...stripped } = merged;
+    void _dropped;
+    return stripped;
   }
   return rest;
+}
+
+function mergeDetailImagesIntoContent(
+  message: ToolResultMessage,
+  detailImages: ImageContent[],
+): ToolResultMessage {
+  if (!Array.isArray(message.content)) return message;
+  const seen = new Set<string>();
+  for (const block of message.content) {
+    if (!isRecord(block) || block.type !== "image") continue;
+    const normalized = collectToolResultImages({ content: [block], details: {} })[0];
+    if (normalized && typeof normalized.data === "string" && typeof normalized.mimeType === "string") {
+      seen.add(`${normalized.mimeType}\0${normalized.data}`);
+    }
+  }
+  const additions = detailImages.filter((image) => {
+    if (typeof image.data !== "string" || typeof image.mimeType !== "string") return false;
+    const key = `${image.mimeType}\0${image.data}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (additions.length === 0) return message;
+  return { ...message, content: [...message.content, ...additions] };
 }
 
 function omitToolResultBase64Images(message: AgentMessage): AgentMessage {
@@ -810,9 +1004,44 @@ export function entryToUiMessage(
           timestamp: raw.timestamp,
         };
       }
-      const normalized = options.deferToolResultImages
-        ? omitToolResultBase64Images(normalizeToolCalls(raw))
-        : normalizeToolCalls(raw);
+      if (raw.role === "toolResult") {
+        const deferMedia = options.deferToolResultImages === true;
+        const normalized = normalizeToolCalls(raw);
+        if (normalized.role !== "toolResult") return normalized;
+        const detailsRecord = isRecord(normalized.details) ? normalized.details : undefined;
+        // Count presentable images (content + generated details.images)
+        // BEFORE details stripping so the deferred marker is accurate even
+        // though deferred materialization skips blob resolution.
+        const imageCount = collectToolResultImages({ content: normalized.content, details: detailsRecord }).length;
+        if (deferMedia) {
+          const omitted = omitToolResultBase64Images(normalized);
+          // Deferred mode also strips generated details.images (they are
+          // base64 too) and attaches the lazy-load marker.
+          const stripped = stripToolResultDetails(omitted);
+          const message = imageCount > 0 && stripped.role === "toolResult"
+            ? { ...stripped, deferredImages: { entryId: entry.id, count: imageCount } }
+            : stripped;
+          // Tool results carry no thinking blocks; no deferThinking pass needed.
+          return message;
+        }
+        // Full projection: merge generated details.images into content so
+        // history can render them, then strip internal details as before.
+        const message = stripToolResultDetails(normalized, true);
+        if (!options.deferThinking || message.role !== "assistant") return message;
+        // Guard like the loader does for bad lines: normalizeToolCalls passes
+        // non-array content through unchanged, so a string-content assistant
+        // entry must not 500 the whole context route.
+        if (!Array.isArray(message.content)) return message;
+        return {
+          ...message,
+          content: message.content.map((block) => (
+            block.type === "thinking" && typeof block.thinking === "string" && block.thinking.trim() !== ""
+              ? { ...block, thinking: "", deferred: true }
+              : block
+          )),
+        };
+      }
+      const normalized = normalizeToolCalls(raw);
       const message = stripToolResultDetails(normalized);
       if (!options.deferThinking || message.role !== "assistant") return message;
       // Guard like the loader does for bad lines: normalizeToolCalls passes

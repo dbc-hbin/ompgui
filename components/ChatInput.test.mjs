@@ -302,6 +302,77 @@ test("keeps an existing session composer read-only until runtime state is ready"
   assert.match(html, /<button[^>]*class="[^"]*composer-primary-action[^"]*"[^>]*disabled/);
 });
 
+test("disables the model selector while the agent is streaming", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(ChatInput, {
+      onSend: noop,
+      onAbort: noop,
+      onModelChange: noop,
+      runtimeReady: true,
+      isStreaming: true,
+      model: { provider: "test", modelId: "model" },
+      modelList: [{ provider: "test", modelId: "model", id: "model", name: "Test model" }],
+    }),
+  );
+
+  const modelButton = html.match(/<button[^>]*class="[^"]*composer-model-button[^"]*"[^>]*>/);
+  assert.ok(modelButton, "expected a model selector button");
+  assert.match(modelButton[0], /\sdisabled(?:[=/\s>]|$)/);
+});
+
+test("blocks model selection from a stale open menu once a run starts", () => {
+  const priorWindow = globalThis.window;
+  globalThis.window = { visualViewport: { height: 800 }, innerHeight: 800 };
+  try {
+    withInteractiveHooks((rerender) => {
+      const calls = [];
+      const baseProps = {
+        onSend: noop,
+        onAbort: noop,
+        onModelChange: (provider, modelId) => { calls.push([provider, modelId]); },
+        runtimeReady: true,
+        isStreaming: false,
+        model: { provider: "test", modelId: "model" },
+        modelList: [
+          { provider: "test", modelId: "model", id: "model", name: "Test model" },
+          { provider: "test", modelId: "other", id: "other", name: "Other model" },
+        ],
+      };
+      const openEvent = () => ({ currentTarget: { getBoundingClientRect: () => ({ top: 600, left: 8, width: 160 }) } });
+      const findModelButton = (tree) => findHostElements(
+        tree,
+        (type, buttonProps) => type === "button" && String(buttonProps.className ?? "").includes("composer-model-button"),
+      )[0];
+      const findModelOptions = (tree) => findHostElements(
+        tree,
+        (type, buttonProps) => type === "button" && buttonProps.className === "dropdown-item",
+      );
+
+      // Idle: the menu opens and selection dispatches as before.
+      let tree = rerender(baseProps);
+      findModelButton(tree).props.onClick(openEvent());
+      tree = rerender(baseProps);
+      assert.equal(findModelOptions(tree).length, 2);
+      findModelOptions(tree).find((option) => textContent(option).includes("Other model")).props.onClick();
+      assert.deepEqual(calls, [["test", "other"]]);
+
+      // A run starts with the menu open (stale): options lock and clicks are dropped.
+      tree = rerender(baseProps);
+      findModelButton(tree).props.onClick(openEvent());
+      tree = rerender({ ...baseProps, isStreaming: true });
+      assert.equal(findModelButton(tree).props.disabled, true);
+      const staleOptions = findModelOptions(tree);
+      assert.equal(staleOptions.length, 2);
+      for (const option of staleOptions) assert.equal(option.props.disabled, true);
+      staleOptions.find((option) => textContent(option).includes("Other model")).props.onClick();
+      assert.deepEqual(calls, [["test", "other"]]);
+    });
+  } finally {
+    if (priorWindow === undefined) delete globalThis.window;
+    else globalThis.window = priorWindow;
+  }
+});
+
 test("renders active stop button when agent is streaming", () => {
   const html = renderToStaticMarkup(
     React.createElement(ChatInput, {

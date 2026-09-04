@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -8,9 +9,11 @@ const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   tsconfigPaths: true,
 });
-const { MessageView, SafeMarkdownBody, TaskResultPanel } = await jiti.import("./MessageView.tsx");
+const { MessageView, SafeMarkdownBody, TaskResultPanel, loadToolResultImages } = await jiti.import("./MessageView.tsx");
 const { CodeBlock } = await jiti.import("./MermaidBlock.tsx");
 const { CHAT_COLUMN_MAX_WIDTH } = await jiti.import("../lib/chat-layout.ts");
+const { collectToolResultImages } = await jiti.import("../lib/image-attachments.ts");
+const messageViewSource = await readFile(new URL("./MessageView.tsx", import.meta.url), "utf8");
 
 test("large message content avoids the markdown pipeline until requested", () => {
   const largeMessage = "x".repeat(100_001);
@@ -228,5 +231,238 @@ test("thinking block renders with normalized Lucide icons and neutral border", (
   assert.match(html, /width="14" height="14"[^>]*stroke-width="1.75"/);
   // Chevron: chip 12/2
   assert.match(html, /width="12" height="12"[^>]*stroke-width="2"/);
+});
+
+const TEST_IMAGE_DATA = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+function expandedToolCallHtml({ result, toolName = "read", sessionId } = {}) {
+  return renderToStaticMarkup(React.createElement(MessageView, {
+    // Streaming + expanded preference starts the tool call expanded, since
+    // collapsed tool calls unmount their paired result.
+    isStreaming: true,
+    toolCallsDefaultCollapsed: false,
+    sessionId,
+    message: {
+      role: "assistant",
+      content: [{ type: "toolCall", toolCallId: "call-1", toolName, input: { path: "foo.ts" } }],
+    },
+    toolResults: new Map([["call-1", result]]),
+  }));
+}
+
+test("assistant image blocks render inline through the clickable thumbnail", () => {
+  const html = renderToStaticMarkup(React.createElement(MessageView, {
+    message: {
+      role: "assistant",
+      content: [
+        { type: "text", text: "Here is the screenshot:" },
+        { type: "image", data: TEST_IMAGE_DATA, mimeType: "image/png" },
+      ],
+    },
+  }));
+
+  assert.match(html, /Here is the screenshot/);
+  assert.match(html, new RegExp(`data:image/png;base64,${TEST_IMAGE_DATA}`));
+  assert.match(html, /class="image-clickable"/);
+});
+
+test("assistant image blocks support the nested source shape", () => {
+  const html = renderToStaticMarkup(React.createElement(MessageView, {
+    message: {
+      role: "assistant",
+      content: [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: TEST_IMAGE_DATA } },
+      ],
+    },
+  }));
+
+  assert.match(html, new RegExp(`data:image/jpeg;base64,${TEST_IMAGE_DATA}`));
+});
+
+test("tool content images render inside the expanded paired tool call", () => {
+  const html = expandedToolCallHtml({
+    result: {
+      role: "toolResult",
+      toolCallId: "call-1",
+      toolName: "read",
+      content: [
+        { type: "text", text: "Screenshot captured" },
+        { type: "image", data: TEST_IMAGE_DATA, mimeType: "image/png" },
+      ],
+    },
+  });
+
+  assert.match(html, /Screenshot captured/);
+  assert.match(html, new RegExp(`data:image/png;base64,${TEST_IMAGE_DATA}`));
+  assert.match(html, /class="image-clickable"/);
+});
+
+test("tool results with images only skip the no-output placeholder", () => {
+  const html = expandedToolCallHtml({
+    result: {
+      role: "toolResult",
+      toolCallId: "call-1",
+      toolName: "read",
+      content: [{ type: "image", data: TEST_IMAGE_DATA, mimeType: "image/png" }],
+    },
+  });
+
+  assert.match(html, new RegExp(`data:image/png;base64,${TEST_IMAGE_DATA}`));
+  assert.doesNotMatch(html, /\(no output\)/);
+});
+
+test("non-image no-output results keep the localized empty-state styling", () => {
+  const html = expandedToolCallHtml({
+    result: {
+      role: "toolResult",
+      toolCallId: "call-1",
+      toolName: "read",
+      content: "(no output)",
+    },
+  });
+
+  assert.match(html, /\(no output\)/);
+  assert.match(html, /font-style:italic/);
+  assert.match(html, /opacity:0\.6/);
+});
+
+test("tool details.images render alongside text through the shared helper", () => {
+  const image = { type: "image", data: TEST_IMAGE_DATA, mimeType: "image/png" };
+  const result = {
+    role: "toolResult",
+    toolCallId: "call-1",
+    toolName: "generate_image",
+    content: [{ type: "text", text: "Generated" }],
+    details: { images: [{ data: TEST_IMAGE_DATA, mimeType: "image/png" }] },
+  };
+  // Exact deduplication through the shared helper: the same payload in
+  // content and details.images collapses to one image.
+  assert.deepEqual(
+    collectToolResultImages({ content: [...result.content, image], details: result.details }),
+    [image],
+  );
+  const html = expandedToolCallHtml({ result, toolName: "generate_image" });
+  assert.match(html, /Generated/);
+  assert.match(html, new RegExp(`data:image/png;base64,${TEST_IMAGE_DATA}`));
+});
+
+test("shared helper deduplicates exact copies and tolerates malformed input", () => {
+  const flat = { type: "image", data: TEST_IMAGE_DATA, mimeType: "image/png" };
+  const nested = { type: "image", source: { type: "base64", media_type: "image/png", data: TEST_IMAGE_DATA } };
+  assert.deepEqual(
+    collectToolResultImages({ content: [flat, nested], details: { images: [{ data: TEST_IMAGE_DATA, mimeType: "image/png" }] } }),
+    [{ type: "image", data: TEST_IMAGE_DATA, mimeType: "image/png" }],
+  );
+  assert.deepEqual(collectToolResultImages({ content: "oops", details: null }), []);
+  assert.deepEqual(collectToolResultImages({}), []);
+});
+
+test("collapsed deferred results render no image and fetch no media", () => {
+  const fetches = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    fetches.push([url, init]);
+    throw new Error("must not fetch while collapsed");
+  };
+  try {
+    const html = renderToStaticMarkup(React.createElement(MessageView, {
+      sessionId: "session-1",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", toolCallId: "call-1", toolName: "read", input: { path: "foo.ts" } }],
+      },
+      toolResults: new Map([["call-1", {
+        role: "toolResult",
+        toolCallId: "call-1",
+        toolName: "read",
+        content: [{ type: "text", text: "[2 tool result images omitted from initial history payload: image/png, ~10 bytes]" }],
+        deferredImages: { entryId: "entry-9", count: 2 },
+      }]]),
+    }));
+    assert.equal(fetches.length, 0);
+    // Collapsed tool calls unmount their paired result entirely.
+    assert.doesNotMatch(html, /omitted from initial history payload/);
+    assert.doesNotMatch(html, /<img/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("expanded deferred results hide the omission line and show the loading state", () => {
+  const html = expandedToolCallHtml({
+    sessionId: "session-1",
+    result: {
+      role: "toolResult",
+      toolCallId: "call-1",
+      toolName: "read",
+      content: [{ type: "text", text: "[2 tool result images omitted from initial history payload: image/png, ~10 bytes]" }],
+      deferredImages: { entryId: "entry-9", count: 2 },
+    },
+  });
+
+  // Effects never run under server rendering, so the first expanded frame is
+  // the loading state — never the stale omission claim or a no-output line.
+  assert.doesNotMatch(html, /omitted from initial history payload/);
+  assert.doesNotMatch(html, /\(no output\)/);
+  assert.match(html, /Loading…/);
+  assert.doesNotMatch(html, /<img/);
+});
+
+test("loadToolResultImages fetches the per-entry media route", async () => {
+  const seen = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    seen.push([url, init]);
+    return {
+      ok: true,
+      json: async () => ({
+        images: [{ type: "image", data: TEST_IMAGE_DATA, mimeType: "image/png" }],
+        missingCount: 1,
+      }),
+    };
+  };
+  try {
+    const result = await loadToolResultImages("session 1", "entry/9");
+    assert.deepEqual(result, {
+      images: [{ type: "image", data: TEST_IMAGE_DATA, mimeType: "image/png" }],
+      missingCount: 1,
+    });
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0][0], "/api/sessions/session%201/entries/entry%2F9/media");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  globalThis.fetch = async () => ({ ok: false, status: 404, json: async () => ({}) });
+  try {
+    await assert.rejects(() => loadToolResultImages("session-1", "missing"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ images: [] }) });
+  try {
+    await assert.rejects(
+      () => loadToolResultImages("session-1", "invalid"),
+      /Invalid media response/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("deferred image state is released on collapse and partial loads stay visibly failed", () => {
+  assert.match(
+    messageViewSource,
+    /if \(!expanded\) \{\s*setDeferredImages\(null\);\s*setDeferredLoadedKey\(null\);\s*setDeferredMissingCount\(0\)/,
+  );
+  assert.match(
+    messageViewSource,
+    /deferredLoaded && deferredMissingCount > 0/,
+  );
+  assert.doesNotMatch(
+    messageViewSource,
+    /\{failed && images\.length === 0 && \(/,
+  );
 });
 

@@ -1436,7 +1436,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     // the state response to resolve and restore a running runtime first.
     await historyPromise;
     return agentState;
-  }, [beginSessionLoad, loadRuntimeStateForGeneration, refreshSubagentHistory, updateSessionReadiness]);
+  }, [beginSessionLoad, loadRuntimeStateForGeneration, refreshSubagentHistory, setThinkingLevelTracked, updateSessionReadiness]);
 
   // External omp/TUI writes arrive through the sidebar's session-change bus.
   // Reload only when this selected session has no managed per-session stream;
@@ -3212,10 +3212,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [addNotice, canMutateSession, isNew]);
 
-  /** Cycle to the next available model (⌘/Ctrl+Alt+M). */
+  /** Cycle to the next available model (⌘/Ctrl+Alt+M). Blocked mid-run like
+   * the composer model picker: a mid-turn switch would mutate the current
+   * turn. Uses live refs (not state) so a run that started after the last
+   * render still blocks the RPC. */
   const handleCycleModel = useCallback(async () => {
     const sid = sessionIdRef.current;
     if (!sid || !canMutateSession(sid)) return;
+    if (agentRunningRef.current || bashRunningRef.current) return;
     try {
       await sendAgentCommand(sid, { type: "cycle_model" });
       void refreshLiveModelState(sid);

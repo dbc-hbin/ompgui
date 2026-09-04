@@ -8,6 +8,8 @@ export interface NpmUpdateStatus {
   availableVersion: string | null;
   updateAvailable: boolean;
   updateCommand: string;
+  /** True when the npm lookup did not produce a conclusive result. */
+  lookupFailed: boolean;
 }
 
 let cached: { checkedAt: number; status: NpmUpdateStatus } | null = null;
@@ -44,16 +46,20 @@ export async function checkNpmUpdate(force = false): Promise<NpmUpdateStatus> {
     });
     const data = response.ok ? await response.json() as { version?: unknown } : null;
     const availableVersion = typeof data?.version === "string" ? data.version : null;
+    const lookupFailed = !response.ok || availableVersion === null;
     const status: NpmUpdateStatus = {
       currentVersion,
       availableVersion,
       updateAvailable: Boolean(availableVersion && isNewerVersion(availableVersion, currentVersion)),
       updateCommand,
+      lookupFailed,
     };
-    cached = { checkedAt: Date.now(), status };
+    if (!lookupFailed) {
+      cached = { checkedAt: Date.now(), status };
+    }
     return status;
   } catch {
-    return { currentVersion, availableVersion: null, updateAvailable: false, updateCommand };
+    return { currentVersion, availableVersion: null, updateAvailable: false, updateCommand, lookupFailed: true };
   }
 }
 

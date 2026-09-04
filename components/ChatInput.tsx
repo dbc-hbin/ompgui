@@ -2478,8 +2478,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                                 <button
                                   className="dropdown-item"
                                   key={`${opt.provider}:${opt.modelId}`}
-                                  onClick={() => { setModelDropdownOpen(false); if (runtimeReady && (!isActive || isAutoModelSelection)) onModelChange(opt.provider, opt.modelId); }}
-                                  disabled={!runtimeReady}
+                                  onClick={() => { setModelDropdownOpen(false); if (!isStreaming && runtimeReady && (!isActive || isAutoModelSelection)) onModelChange(opt.provider, opt.modelId); }}
+                                  disabled={!runtimeReady || isStreaming}
                                   style={{
                                     display: "flex", alignItems: "center", gap: 8,
                                     width: "100%", padding: "7px 12px",
@@ -2566,9 +2566,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                                   type="button"
                                   onClick={() => {
                                     setModelDropdownOpen(false);
-                                    if (runtimeReady && (!isActive || isAutoModelSelection)) onModelChange(opt.provider, opt.modelId);
+                                    if (!isStreaming && runtimeReady && (!isActive || isAutoModelSelection)) onModelChange(opt.provider, opt.modelId);
                                   }}
-                                  disabled={!runtimeReady}
+                                  disabled={!runtimeReady || isStreaming}
                                   style={{
                                     display: "flex",
                                     alignItems: "center",

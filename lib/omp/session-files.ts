@@ -249,20 +249,29 @@ function migrateToCurrentVersion(header: SessionHeader, entries: MutableEntry[])
 const BLOB_PREFIX = "blob:sha256:";
 const BLOB_HASH_RE = /^[a-f0-9]{64}$/;
 
-function isBlobRef(data: string): boolean {
+export function isBlobRef(data: string): boolean {
   return data.startsWith(BLOB_PREFIX);
 }
 
 /** Extract the hash from a blob ref; the hash check confines reads to the blob dir. */
-function parseBlobRef(data: string): string | null {
+export function parseBlobRef(data: string): string | null {
   if (!data.startsWith(BLOB_PREFIX)) return null;
   const hash = data.slice(BLOB_PREFIX.length);
   return BLOB_HASH_RE.test(hash) ? hash : null;
 }
 
-function readBlobSync(hash: string): Buffer | null {
+export function readBlobSync(hash: string): Buffer | null {
   try {
     return readFileSync(path.join(getBlobsDir(), hash));
+  } catch {
+    return null;
+  }
+}
+
+/** Decoded byte length of a blob payload without reading its contents. Null when the blob is missing. */
+export function getBlobByteLength(hash: string): number | null {
+  try {
+    return statSync(path.join(getBlobsDir(), hash)).size;
   } catch {
     return null;
   }
@@ -426,7 +435,7 @@ export const MAX_SESSION_LOAD_BYTES = 1024 * 1024 * 1024;
  * past Node's ~512 MiB string cap still open. Lines exclude the newline; the
  * decoder carries multi-byte characters across chunk boundaries.
  */
-function forEachFileLineSync(filePath: string, onLine: (line: string) => void): void {
+function forEachFileLineSync(filePath: string, onLine: (line: string) => boolean | void): void {
   const fd = openSync(filePath, "r");
   try {
     const buffer = Buffer.allocUnsafe(SESSION_READ_CHUNK_BYTES);
@@ -455,7 +464,7 @@ function forEachFileLineSync(filePath: string, onLine: (line: string) => void): 
       let start = 0;
       let newlineIndex = joined.indexOf("\n", start);
       while (newlineIndex !== -1) {
-        onLine(joined.slice(start, newlineIndex));
+        if (onLine(joined.slice(start, newlineIndex)) === false) return;
         start = newlineIndex + 1;
         newlineIndex = joined.indexOf("\n", start);
       }
@@ -467,6 +476,63 @@ function forEachFileLineSync(filePath: string, onLine: (line: string) => void): 
   } finally {
     closeSync(fd);
   }
+}
+
+/**
+ * Read one v3 entry without retaining the rest of the session document.
+ * Malformed lines are skipped like loadSessionFile; title slots and the
+ * required session header are still validated before an entry is returned.
+ * Legacy files fall back to the full loader because their entry ids are
+ * synthesized by migration rather than persisted on disk.
+ */
+export function readSessionEntryByIdSync(filePath: string, entryId: string): SessionEntry | null {
+  let firstPhysicalLine = true;
+  let sawHeader = false;
+  let legacy = false;
+  let invalid = false;
+  let found: SessionEntry | null = null;
+
+  try {
+    forEachFileLineSync(filePath, (rawLine) => {
+      if (firstPhysicalLine) {
+        firstPhysicalLine = false;
+        if (parseTitleSlotLine(rawLine)) return;
+      }
+
+      const line = rawLine.trim();
+      if (!line) return;
+
+      let record: Record<string, unknown>;
+      try {
+        record = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        return;
+      }
+
+      if (!sawHeader) {
+        if (record.type !== "session" || typeof record.id !== "string") {
+          invalid = true;
+          return false;
+        }
+        sawHeader = true;
+        legacy = typeof record.version !== "number" || record.version < CURRENT_SESSION_VERSION;
+        return legacy ? false : undefined;
+      }
+
+      if (record.type !== "session" && record.id === entryId) {
+        found = record as unknown as SessionEntry;
+        return false;
+      }
+    });
+  } catch {
+    return null;
+  }
+
+  if (invalid || !sawHeader) return null;
+  if (legacy) {
+    return loadSessionFile(filePath).entries.find((entry) => entry.id === entryId) ?? null;
+  }
+  return found;
 }
 
 /**

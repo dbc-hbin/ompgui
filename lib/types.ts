@@ -104,6 +104,9 @@ export interface ToolResultMessage {
   isError?: boolean;
   details?: unknown;
   timestamp?: number;
+  /** Lazy-image marker: inline base64 images were stripped from the initial
+   * history payload and can be fetched per entry from the media route. */
+  deferredImages?: { entryId: string; count: number };
 }
 
 export interface CustomMessage {

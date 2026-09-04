@@ -46,6 +46,8 @@
   "settingsConfig.checkingUpdates": "正在检查更新…",
   "settingsConfig.upToDate": "v{version} 已是最新版本",
   "settingsConfig.versionUnavailable": "版本不可用",
+  "settingsConfig.updateCheckFailed": "无法检查 OMP 更新。",
+  "settingsConfig.appUpdateCheckFailed": "无法检查 ompgui 更新。",
   "settingsConfig.checkAppUpdates": "检查 ompgui 更新",
   "settingsConfig.checkOmpUpdates": "检查 OMP 更新",
   "settingsConfig.refresh": "刷新",

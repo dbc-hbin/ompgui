@@ -1,3 +1,5 @@
+import type { ImageContent } from "./types";
+
 export const MAX_ATTACHED_IMAGE_BYTES = 10 * 1024 * 1024;
 export const MAX_ATTACHED_IMAGES = 10;
 
@@ -53,4 +55,110 @@ export function validateAgentImages(value: unknown): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Normalize one unknown value to a canonical flat base64 image block.
+ * Accepts the flat omp shape `{data, mimeType}` (with or without `type`) and
+ * the legacy nested Anthropic-style `source: {type: "base64", data,
+ * media_type}` shape. URL-source images and malformed values return null.
+ */
+function normalizeImageBlock(value: unknown): ImageContent | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const source = record.source;
+  // Nested legacy shape carries the payload under `source`.
+  if (typeof source === "object" && source !== null && !Array.isArray(source)) {
+    const nested = source as Record<string, unknown>;
+    if (nested.type === "base64" && typeof nested.data === "string") {
+      const mediaType = typeof nested.media_type === "string" ? nested.media_type : "";
+      if (!mediaType.toLowerCase().startsWith("image/")) return null;
+      return { type: "image", data: nested.data, mimeType: mediaType };
+    }
+  }
+  // Flat shape: `type` is optional here so bare generate_image
+  // `details.images` payloads (which omit it) still normalize.
+  if (typeof record.data === "string" && typeof record.mimeType === "string") {
+    if (!record.mimeType.toLowerCase().startsWith("image/")) return null;
+    return { type: "image", data: record.data, mimeType: record.mimeType };
+  }
+  return null;
+}
+
+export const MAX_TOOL_RESULT_IMAGES = MAX_ATTACHED_IMAGES;
+export const MAX_TOOL_RESULT_IMAGE_BYTES = MAX_ATTACHED_IMAGE_BYTES;
+export const MAX_TOOL_RESULT_IMAGES_TOTAL_BYTES = 25 * 1024 * 1024;
+export const TOOL_RESULT_IMAGES_TOO_LARGE_CODE = "tool_result_images_too_large";
+
+export type ToolResultImagesLimitReason = "count" | "per_image" | "total";
+
+export class ToolResultImagesTooLargeError extends Error {
+  readonly code = TOOL_RESULT_IMAGES_TOO_LARGE_CODE;
+  readonly reason: ToolResultImagesLimitReason;
+  constructor(reason: ToolResultImagesLimitReason) {
+    super(
+      reason === "count"
+        ? `Tool result images exceed the limit of ${MAX_TOOL_RESULT_IMAGES} images`
+        : reason === "per_image"
+          ? `Tool result image exceeds the per-image limit of ${MAX_TOOL_RESULT_IMAGE_BYTES / (1024 * 1024)}MB`
+          : `Tool result images exceed the total limit of ${MAX_TOOL_RESULT_IMAGES_TOTAL_BYTES / (1024 * 1024)}MB`,
+    );
+    this.name = "ToolResultImagesTooLargeError";
+    this.reason = reason;
+  }
+}
+
+/** Decoded byte length for an inline base64 payload, with a length-based fallback for malformed data. */
+export function getInlineToolResultImageBytes(data: string): number {
+  return getBase64DecodedByteLength(data) ?? Math.floor(data.length * 3 / 4);
+}
+
+/** Enforce count, per-image, and aggregate limits on decoded image byte sizes. */
+export function assertToolResultImageSizesWithinLimits(sizes: number[]): void {
+  if (sizes.length > MAX_TOOL_RESULT_IMAGES) throw new ToolResultImagesTooLargeError("count");
+  for (const size of sizes) {
+    if (size > MAX_TOOL_RESULT_IMAGE_BYTES) throw new ToolResultImagesTooLargeError("per_image");
+  }
+  let total = 0;
+  for (const size of sizes) total += size;
+  if (total > MAX_TOOL_RESULT_IMAGES_TOTAL_BYTES) throw new ToolResultImagesTooLargeError("total");
+}
+
+/**
+ * Collect the presentable images for a toolResult from both the canonical
+ * content image blocks and OMP `details.images` (generate_image). Returns
+ * deduplicated normalized flat `ImageContent[]` (canonical content images keep
+ * their normalized form; URL-source blocks are skipped since they carry no
+ * base64 payload). Tolerates malformed input by returning [].
+ */
+export function collectToolResultImages(input: { content?: unknown; details?: unknown }): ImageContent[] {
+  const seen = new Set<string>();
+  const images: ImageContent[] = [];
+  const push = (image: ImageContent | null) => {
+    if (!image || typeof image.data !== "string" || typeof image.mimeType !== "string") return;
+    const key = `${image.mimeType}\0${image.data}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    images.push(image);
+  };
+  try {
+    if (input && typeof input === "object" && Array.isArray(input.content)) {
+      for (const block of input.content) {
+        if (typeof block !== "object" || block === null || Array.isArray(block)) continue;
+        // Canonical content image blocks carry `type: "image"`.
+        if ((block as Record<string, unknown>).type !== "image") continue;
+        push(normalizeImageBlock(block));
+      }
+    }
+    const details = input && typeof input === "object" ? input.details : undefined;
+    if (typeof details === "object" && details !== null && !Array.isArray(details)) {
+      const nested = (details as Record<string, unknown>).images;
+      if (Array.isArray(nested)) {
+        for (const raw of nested) push(normalizeImageBlock(raw));
+      }
+    }
+  } catch {
+    // Defensive: one malformed block must never break history projection.
+  }
+  return images;
 }
