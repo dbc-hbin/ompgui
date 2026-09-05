@@ -13,6 +13,7 @@ import com.dbchbin.ompgui.remote.relay.AttachedImage
 import com.dbchbin.ompgui.remote.relay.ClientFrame
 import com.dbchbin.ompgui.remote.relay.DisplayMessage
 import com.dbchbin.ompgui.remote.relay.EventProjector
+import com.dbchbin.ompgui.remote.relay.PairingPolicy
 import com.dbchbin.ompgui.remote.relay.RelayModelOption
 import com.dbchbin.ompgui.remote.relay.RelayProtocol
 import com.dbchbin.ompgui.remote.relay.ServerFrame
@@ -62,6 +63,10 @@ class RelayClient private constructor(
     private var pendingSessionId: String? = null
     private var pairingOfferUrl: String? = null
     private var pairingServerId: String? = null
+    /** True while a pairing-secret hello is in flight (not a token reconnect). */
+    private var pairingAttempt = false
+    /** In-flight settings.update count; remote snapshots must not clobber newer local patches. */
+    private var pendingSettings = 0
     /** req -> cmd type for in-flight prompt/abort/get_state/set_model commands. */
     private val pendingCmds = mutableMapOf<Int, String>()
 
@@ -116,6 +121,7 @@ class RelayClient private constructor(
 
     fun consumePairingUri(raw: String?, autoConnect: Boolean = false) {
         if (raw.isNullOrBlank()) return
+        if (PairingPolicy.shouldIgnoreStalePairing(_ui.value.paired)) return
         _ui.update { it.copy(pairingUri = raw, screen = RemoteScreen.Pairing) }
         if (autoConnect && parsePairingUri(raw) != null) {
             pair()
@@ -136,6 +142,7 @@ class RelayClient private constructor(
         }
         pairingOfferUrl = offer.url
         pairingServerId = offer.serverId
+        pairingAttempt = true
         val password = _ui.value.password.takeIf { it.isNotEmpty() }
         _ui.update { it.copy(error = null) }
         connection.connectPairing(offer.url, offer.secret, deviceLabel, password)
@@ -236,6 +243,7 @@ class RelayClient private constructor(
     }
 
     fun updateSettings(patch: JSONObject) {
+        pendingSettings++
         connection.send(ClientFrame.SettingsUpdate(patch))
     }
 
@@ -256,6 +264,7 @@ class RelayClient private constructor(
         val current = settingsData.value?.let { JSONObject(it.toString()) } ?: JSONObject()
         deepMerge(current, patch)
         settingsData.value = current
+        pendingSettings++
         connection.send(ClientFrame.SettingsUpdate(patch))
     }
 
@@ -289,6 +298,8 @@ class RelayClient private constructor(
         pendingSessionId = null
         pairingOfferUrl = null
         pairingServerId = null
+        pairingAttempt = false
+        pendingSettings = 0
         pendingCmds.clear()
         if (opened != null) RelayNotifications.cancelAgentDone(app, opened)
         if (pending != null && pending != opened) RelayNotifications.cancelAgentDone(app, pending)
@@ -306,6 +317,7 @@ class RelayClient private constructor(
     private fun handleFrame(frame: ServerFrame) {
         when (frame) {
             is ServerFrame.HelloOk -> {
+                pairingAttempt = false
                 val url = pairingOfferUrl ?: store.load()?.relayUrl
                 val serverId = pairingServerId ?: store.load()?.serverId
                 val token = frame.token ?: store.load()?.token
@@ -338,8 +350,12 @@ class RelayClient private constructor(
                 connection.send(ClientFrame.SettingsGet)
             }
             is ServerFrame.HelloErr -> {
-                when (frame.code) {
-                    "unauthorized", "pairing_expired" -> {
+                val attempt = pairingAttempt
+                pairingAttempt = false
+                val saved = store.load()
+                val hasSavedDevice = saved != null
+                when {
+                    PairingPolicy.shouldClearCredentials(frame.code, hasSavedDevice, attempt) -> {
                         store.clear()
                         RelayForegroundService.stop(app)
                         _ui.update {
@@ -350,18 +366,26 @@ class RelayClient private constructor(
                             )
                         }
                     }
-                    "password_required" -> {
+                    PairingPolicy.shouldReconnectWithSavedDevice(frame.code, hasSavedDevice, attempt) -> {
+                        val device = saved!!
+                        _ui.update {
+                            it.copy(
+                                screen = if (it.screen is RemoteScreen.Chat) it.screen else RemoteScreen.Sessions,
+                                paired = true,
+                                error = frame.message,
+                            )
+                        }
+                        connection.connectToken(device.relayUrl, device.deviceId, device.token, deviceLabel)
+                    }
+                    frame.code == "password_required" -> {
                         RelayForegroundService.stop(app)
-                        val hasDevice = store.load() != null
-                        if (!hasDevice && pairingOfferUrl != null) {
-                            // First-pair attempt with nothing previously saved:
-                            // ensure no partial state lingers.
+                        if (!hasSavedDevice && pairingOfferUrl != null) {
                             store.clear()
                         }
                         _ui.update {
                             it.copy(
                                 screen = RemoteScreen.Pairing,
-                                paired = hasDevice,
+                                paired = hasSavedDevice,
                                 error = frame.message,
                             )
                         }
@@ -390,12 +414,17 @@ class RelayClient private constructor(
                     pendingCmds[req] = "get_state"
                     connection.send(ClientFrame.Cmd(req = req, type = "get_state"))
                 }
+                val promptInFlight = pendingCmds.containsValue("prompt")
                 _ui.update {
                     it.copy(
                         chatTitle = frame.title?.takeIf { title -> title.isNotBlank() }
                             ?: it.chatTitle,
-                        messages = frame.messages,
-                        running = frame.agent.running,
+                        messages = EventProjector.mergeSnapshotMessages(
+                            current = it.messages,
+                            snapshot = frame.messages,
+                            promptInFlight = promptInFlight,
+                        ),
+                        running = if (promptInFlight) true else frame.agent.running,
                         currentModel = snapshotModel ?: it.currentModel,
                     )
                 }
@@ -450,11 +479,16 @@ class RelayClient private constructor(
                 usageData.value = frame.data
             }
             is ServerFrame.Settings -> {
-                settingsData.value = frame.settings
+                if (pendingSettings == 0) settingsData.value = frame.settings
             }
             is ServerFrame.SettingsUpdated -> {
-                if (frame.success && frame.settings != null) {
+                pendingSettings = (pendingSettings - 1).coerceAtLeast(0)
+                if (frame.success && frame.settings != null && pendingSettings == 0) {
                     settingsData.value = frame.settings
+                } else if (!frame.success) {
+                    connection.send(ClientFrame.SettingsGet)
+                    val message = frame.error?.takeIf { it.isNotBlank() } ?: "Settings update failed"
+                    _ui.update { it.copy(error = message) }
                 }
             }
         }

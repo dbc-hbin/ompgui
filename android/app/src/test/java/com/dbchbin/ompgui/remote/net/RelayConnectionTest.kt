@@ -79,6 +79,32 @@ class RelayConnectionTest {
         assertEquals("hello", JSONObject(fake.sent[0]).getString("op"))
         assertEquals("d_abcdefghijklmnopqr", JSONObject(fake.sent[0]).getString("deviceId"))
     }
+
+    @Test
+    fun deviceLimitHelloErrDoesNotScheduleReconnect() {
+        val fake = FakeTransport()
+        val scheduled = mutableListOf<Runnable>()
+        val conn = RelayConnection(
+            transportFactory = { listener ->
+                fake.listener = listener
+                fake
+            },
+            schedule = { _, runnable -> scheduled.add(runnable) },
+        )
+        conn.connectToken(
+            url = "wss://mac.example.ts.net/relay",
+            deviceId = "d_abcdefghijklmnopqr",
+            token = "b".repeat(43),
+            label = "Pixel",
+        )
+        fake.listener?.onOpen()
+        fake.listener?.onText(
+            """{"op":"hello_err","code":"device_limit","message":"Too many paired devices"}""",
+        )
+        fake.listener?.onClosed()
+        assertEquals(0, scheduled.size)
+        assertEquals(ConnectionState.Failed, conn.state)
+    }
 }
 
 private class FakeTransport : RelayTransport {

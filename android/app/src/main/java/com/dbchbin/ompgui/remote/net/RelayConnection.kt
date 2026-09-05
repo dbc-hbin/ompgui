@@ -1,6 +1,7 @@
 package com.dbchbin.ompgui.remote.net
 
 import com.dbchbin.ompgui.remote.relay.ClientFrame
+import com.dbchbin.ompgui.remote.relay.PairingPolicy
 import com.dbchbin.ompgui.remote.relay.ServerFrame
 import com.dbchbin.ompgui.remote.relay.encode
 import com.dbchbin.ompgui.remote.relay.parseServerFrame
@@ -265,7 +266,7 @@ class RelayConnection(
     }
 
     private fun shouldStopReconnect(code: String): Boolean =
-        code == "unauthorized" || code == "pairing_expired" || code == "password_required"
+        PairingPolicy.shouldStopReconnect(code)
 
     private fun emitState(next: ConnectionState) {
         state = next

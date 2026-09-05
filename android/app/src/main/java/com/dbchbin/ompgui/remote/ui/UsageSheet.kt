@@ -157,6 +157,14 @@ private fun parseUsageReports(root: JSONObject?): List<UsageReportView>? {
     return out
 }
 
+internal fun primaryUsageFraction(root: JSONObject?): Double? {
+    val reports = parseUsageReports(root) ?: return null
+    return reports
+        .flatMap { it.limits }
+        .maxByOrNull { it.usedFraction }
+        ?.usedFraction
+}
+
 private fun resolveLimitFraction(limit: JSONObject): Double? {
     val amount = limit.optJSONObject("amount") ?: return null
     if (!amount.isNull("usedFraction")) {

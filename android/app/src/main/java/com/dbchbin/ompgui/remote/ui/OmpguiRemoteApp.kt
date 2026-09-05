@@ -2,6 +2,7 @@ package com.dbchbin.ompgui.remote.ui
 
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +49,12 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
                     onUpdateSetting = { key, value -> viewModel.updateSetting(key, value) },
                 )
                 is RemoteScreen.Chat -> {
+                    val thinkingLevel = settings?.optString("defaultThinkingLevel")
+                        ?.takeIf { it.isNotBlank() } ?: "auto"
+                    val usageFraction = primaryUsageFraction(usageData)
+                    LaunchedEffect(screen.sessionId) {
+                        viewModel.fetchUsage()
+                    }
                     ChatScreen(
                         title = state.chatTitle.ifBlank { screen.sessionId },
                         messages = state.messages,
@@ -74,6 +81,11 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
                             viewModel.fetchSettings()
                             chatSettingsOpen = true
                         },
+                        thinkingLevel = thinkingLevel,
+                        onThinkingLevelChange = { level ->
+                            viewModel.updateSetting("defaultThinkingLevel", level)
+                        },
+                        usageFraction = usageFraction,
                     )
                     if (chatSettingsOpen) {
                         SettingsSheet(

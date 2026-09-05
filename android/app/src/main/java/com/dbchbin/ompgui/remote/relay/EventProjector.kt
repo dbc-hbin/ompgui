@@ -52,6 +52,22 @@ object EventProjector {
         }
     }
 
+    /**
+     * Keep an optimistic user bubble if a snapshot arrives while a prompt is
+     * still in flight and the snapshot does not yet include that message.
+     */
+    fun mergeSnapshotMessages(
+        current: List<DisplayMessage>,
+        snapshot: List<DisplayMessage>,
+        promptInFlight: Boolean,
+    ): List<DisplayMessage> {
+        if (!promptInFlight || current.isEmpty()) return snapshot
+        val last = current.last()
+        if (last.role != "user") return snapshot
+        val alreadyPresent = snapshot.any { it.role == "user" && it.text == last.text }
+        return if (alreadyPresent) snapshot else snapshot + last
+    }
+
     private fun extractText(message: JSONObject): String {
         if (message.has("text") && !message.isNull("text")) {
             return message.optString("text")

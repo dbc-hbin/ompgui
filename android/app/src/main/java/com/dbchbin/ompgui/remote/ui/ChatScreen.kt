@@ -44,12 +44,8 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
@@ -65,6 +61,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -90,6 +87,9 @@ import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** A file or photo attached to the composer, staged before send. */
 data class AttachmentItem(
@@ -105,6 +105,7 @@ data class AttachmentItem(
 private const val MAX_ATTACHMENTS = 10
 private const val MAX_IMAGE_BYTES = 4 * 1024 * 1024
 private const val MAX_TEXT_BYTES = 128 * 1024
+private val THINKING_LEVELS = listOf("auto", "minimal", "low", "medium", "high", "xhigh", "max")
 
 private fun guessMimeType(name: String): String {
     return when (name.substringAfterLast('.', "").lowercase(Locale.US)) {
@@ -171,9 +172,13 @@ private fun compressImageForRelay(resolver: android.content.ContentResolver, uri
         }
         val opts = BitmapFactory.Options().apply { inSampleSize = sample }
         val bitmap = resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) } ?: return null
-        val out = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
-        Pair(out.toByteArray(), "image/jpeg")
+        try {
+            val out = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
+            Pair(out.toByteArray(), "image/jpeg")
+        } finally {
+            bitmap.recycle()
+        }
     } catch (_: Exception) {
         null
     }
@@ -301,15 +306,25 @@ fun ChatScreen(
     onSendWithAttachments: ((String, List<AttachedImage>) -> Boolean)? = null,
     onOpenUsage: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
+    thinkingLevel: String = "auto",
+    onThinkingLevelChange: (String) -> Unit = {},
+    usageFraction: Double? = null,
 ) {
     val listState = rememberLazyListState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var attachedFiles by remember { mutableStateOf<List<AttachmentItem>>(emptyList()) }
+    var thinkingPickerOpen by remember { mutableStateOf(false) }
     val pickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetMultipleContents(),
     ) { uris ->
-        val items = uris.mapNotNull { uri -> loadAttachment(context, uri) }
-        attachedFiles = (attachedFiles + items).take(MAX_ATTACHMENTS)
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        scope.launch {
+            val items = withContext(Dispatchers.IO) {
+                uris.mapNotNull { uri -> loadAttachment(context, uri) }
+            }
+            attachedFiles = (attachedFiles + items).take(MAX_ATTACHMENTS)
+        }
     }
     val sendWithComposer: () -> Unit = {
         if (attachedFiles.isEmpty()) {
@@ -396,13 +411,13 @@ fun ChatScreen(
                 .padding(bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            TodoPanel()
-            SubagentPanel()
             ComposerCard(
                 draft = draft,
                 running = running,
                 currentModel = currentModel,
                 attachedFiles = attachedFiles,
+                thinkingLevel = thinkingLevel,
+                usageFraction = usageFraction,
                 onDraftChange = onDraftChange,
                 onSend = sendWithComposer,
                 onAbort = onAbort,
@@ -410,6 +425,7 @@ fun ChatScreen(
                 onPickFiles = { pickerLauncher.launch("*/*") },
                 onRemoveAttachment = { item -> attachedFiles = attachedFiles - item },
                 onOpenUsage = onOpenUsage,
+                onOpenThinkingPicker = { thinkingPickerOpen = true },
             )
         }
     }
@@ -420,6 +436,17 @@ fun ChatScreen(
             running = running,
             onClosePicker = onClosePicker,
             onSelectModel = onSelectModel,
+        )
+    }
+    if (thinkingPickerOpen) {
+        ThinkingPickerSheet(
+            selected = thinkingLevel,
+            running = running,
+            onClose = { thinkingPickerOpen = false },
+            onSelect = {
+                onThinkingLevelChange(it)
+                thinkingPickerOpen = false
+            },
         )
     }
 }
@@ -624,97 +651,6 @@ private fun UserMessage(message: DisplayMessage) {
 }
 
 // ---------------------------------------------------------------------------
-// Pinned panels above the composer.
-// ---------------------------------------------------------------------------
-
-@Composable
-private fun PanelCard(
-    icon: @Composable () -> Unit,
-    title: String,
-    status: String,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-    body: @Composable () -> Unit,
-) {
-    val shape = RoundedCornerShape(8.dp)
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(OmpColors.BgPanel)
-            .border(1.dp, OmpColors.Border, shape)
-            .clickable(onClick = onToggle)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-    ) {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            icon()
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = OmpColors.Text)
-            Spacer(modifier = Modifier.weight(1f))
-            Text(status, fontSize = 12.sp, color = OmpColors.TextMuted)
-            Icon(
-                if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = OmpColors.TextMuted,
-            )
-        }
-        if (expanded) {
-            HorizontalDivider(
-                color = OmpColors.Border,
-                thickness = 1.dp,
-                modifier = Modifier.padding(vertical = 8.dp),
-            )
-            body()
-        }
-    }
-}
-
-@Composable
-private fun TodoPanel() {
-    var expanded by remember { mutableStateOf(false) }
-    PanelCard(
-        icon = {
-            Icon(
-                Icons.Filled.Checklist,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = OmpColors.Accent,
-            )
-        },
-        title = "작업",
-        status = "0/4 완료 >",
-        expanded = expanded,
-        onToggle = { expanded = !expanded },
-        body = {
-            Text("항목이 없습니다", fontSize = 12.sp, color = OmpColors.TextDim)
-        },
-    )
-}
-
-@Composable
-private fun SubagentPanel() {
-    var expanded by remember { mutableStateOf(false) }
-    PanelCard(
-        icon = {
-            Icon(
-                Icons.Filled.Group,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = OmpColors.Accent,
-            )
-        },
-        title = "서브에이전트",
-        status = "0/8 >",
-        expanded = expanded,
-        onToggle = { expanded = !expanded },
-        body = {
-            Text("실행 중인 서브에이전트가 없습니다", fontSize = 12.sp, color = OmpColors.TextDim)
-        },
-    )
-}
-
-// ---------------------------------------------------------------------------
 // Floating composer card.
 // ---------------------------------------------------------------------------
 
@@ -724,6 +660,8 @@ private fun ComposerCard(
     running: Boolean,
     currentModel: ModelRef?,
     attachedFiles: List<AttachmentItem>,
+    thinkingLevel: String,
+    usageFraction: Double?,
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
     onAbort: () -> Unit,
@@ -731,6 +669,7 @@ private fun ComposerCard(
     onPickFiles: () -> Unit,
     onRemoveAttachment: (AttachmentItem) -> Unit,
     onOpenUsage: () -> Unit,
+    onOpenThinkingPicker: () -> Unit,
 ) {
     val shape = RoundedCornerShape(14.dp)
     Column(
@@ -832,10 +771,11 @@ private fun ComposerCard(
                     .clip(RoundedCornerShape(8.dp))
                     .background(OmpColors.BgHover)
                     .border(1.dp, OmpColors.Border, RoundedCornerShape(8.dp))
+                    .clickable(onClick = onOpenThinkingPicker)
                     .padding(horizontal = 10.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("auto ▾", fontSize = 12.sp, color = OmpColors.TextMuted)
+                Text("$thinkingLevel ▾", fontSize = 12.sp, color = OmpColors.TextMuted)
             }
             Spacer(modifier = Modifier.weight(1f))
             Box(
@@ -845,7 +785,7 @@ private fun ComposerCard(
                     .clickable(onClick = onOpenUsage),
                 contentAlignment = Alignment.Center,
             ) {
-                ContextRingContent()
+                ContextRingContent(fraction = usageFraction)
             }
             Spacer(modifier = Modifier.width(8.dp))
             val canSend = (draft.isNotBlank() || attachedFiles.isNotEmpty()) && !running
@@ -954,22 +894,29 @@ private fun AttachmentChip(item: AttachmentItem, onRemove: () -> Unit) {
 }
 
 @Composable
-private fun ContextRingContent() {
+private fun ContextRingContent(fraction: Double?) {
+    val clamped = fraction?.coerceIn(0.0, 1.0)
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             drawCircle(color = OmpColors.Border, style = Stroke(width = 3f))
-            drawArc(
-                color = OmpColors.Accent,
-                startAngle = -90f,
-                sweepAngle = 360f * 0.28f,
-                useCenter = false,
-                style = Stroke(width = 3f),
-            )
+            if (clamped != null) {
+                drawArc(
+                    color = OmpColors.Accent,
+                    startAngle = -90f,
+                    sweepAngle = (360f * clamped).toFloat(),
+                    useCenter = false,
+                    style = Stroke(width = 3f),
+                )
+            }
         }
-        Text("28%", fontSize = 7.sp, color = OmpColors.TextMuted)
+        Text(
+            text = if (clamped == null) "—" else "${(clamped * 100).toInt()}%",
+            fontSize = 7.sp,
+            color = OmpColors.TextMuted,
+        )
     }
 }
 
@@ -1034,6 +981,64 @@ private fun ModelPickerSheet(
                         )
                     }
                     if (selected) {
+                        Icon(
+                            Icons.Filled.Check,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = OmpColors.Accent,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ThinkingPickerSheet(
+    selected: String,
+    running: Boolean,
+    onClose: () -> Unit,
+    onSelect: (String) -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onClose,
+        containerColor = OmpColors.BgPanel,
+        contentColor = OmpColors.Text,
+    ) {
+        Text(
+            "Thinking level",
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            color = OmpColors.Text,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            THINKING_LEVELS.forEach { level ->
+                val isSelected = level == selected
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isSelected) OmpColors.BgHover else OmpColors.BgPanel)
+                        .clickable(enabled = !running) { onSelect(level) }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        level,
+                        fontSize = 14.sp,
+                        color = OmpColors.Text,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (isSelected) {
                         Icon(
                             Icons.Filled.Check,
                             contentDescription = null,

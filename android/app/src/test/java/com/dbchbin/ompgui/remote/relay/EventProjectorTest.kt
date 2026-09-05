@@ -64,4 +64,22 @@ class EventProjectorTest {
             EventProjector.isTerminalStop(true, JSONObject("""{"type":"agent_start"}""")),
         )
     }
+
+    @Test
+    fun mergeSnapshotKeepsOptimisticUserWhilePromptInFlight() {
+        val current = listOf(DisplayMessage(role = "user", text = "hello"))
+        val snapshot = listOf(DisplayMessage(role = "assistant", text = "old"))
+        val merged = EventProjector.mergeSnapshotMessages(current, snapshot, promptInFlight = true)
+        assertEquals(2, merged.size)
+        assertEquals("hello", merged.last().text)
+    }
+
+    @Test
+    fun mergeSnapshotReplacesWhenPromptNotInFlight() {
+        val current = listOf(DisplayMessage(role = "user", text = "hello"))
+        val snapshot = listOf(DisplayMessage(role = "user", text = "from server"))
+        val merged = EventProjector.mergeSnapshotMessages(current, snapshot, promptInFlight = false)
+        assertEquals(1, merged.size)
+        assertEquals("from server", merged[0].text)
+    }
 }
