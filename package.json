@@ -22,6 +22,7 @@
   "files": [
     "bin/ompgui.js",
     "bin/ompgui-update.js",
+    "bin/ompgui-pair.js",
     "bin/omp-web.js",
     "bin/ompgui-options.js",
     "bin/omp-web-options.js",
@@ -43,7 +44,7 @@
     "dev": "next dev -H 127.0.0.1 -p 30178",
     "build": "next build --webpack",
     "start": "next start -H 127.0.0.1 -p 30177",
-    "test": "node --experimental-strip-types --test lib/*.test.mjs lib/omp/*.test.mjs components/*.test.mjs components/ui/*.test.mjs hooks/*.test.mjs bin/*.test.mjs",
+    "test": "node --experimental-strip-types --test lib/*.test.mjs lib/omp/*.test.mjs lib/relay/*.test.mjs components/*.test.mjs components/ui/*.test.mjs hooks/*.test.mjs bin/*.test.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "prepack": "npm run build",
@@ -68,6 +69,7 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "undici": "8.10.0",
+    "uqr": "^0.1.3",
     "yaml": "^2"
   },
   "devDependencies": {

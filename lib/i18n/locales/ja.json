@@ -1140,5 +1140,20 @@
   "usageConfig.title": "使用量",
   "usageConfig.unknownAccount": "不明なアカウント",
   "usageConfig.unknownUsed": "使用状況不明",
-  "usageConfig.used": "使用済み"
+  "usageConfig.used": "使用済み",
+  "relayPair.title": "Phone をペアリング",
+  "relayPair.description": "ompgui Remote アプリ用のワンタイムリンクを作成します。Phone は Tailscale Funnel 経由で接続し、デバイストークンはこの Mac に残ります。",
+  "relayPair.urlLabel": "リレー WebSocket URL",
+  "relayPair.create": "ペアリングリンクを作成",
+  "relayPair.creating": "作成中…",
+  "relayPair.createFailed": "ペアリングリンクを作成できませんでした。Funnel URL を確認してください。",
+  "relayPair.linkLabel": "ペアリングリンク",
+  "relayPair.copy": "リンクをコピー",
+  "relayPair.copied": "コピーしました",
+  "relayPair.expires": "{time} に期限切れ",
+  "relayPair.devicesTitle": "ペアリング済みデバイス",
+  "relayPair.noDevices": "ペアリングされた Phone はまだありません。",
+  "relayPair.revoke": "取り消す",
+  "relayPair.revokeFailed": "デバイスを取り消せませんでした。",
+  "relayPair.qrHint": "ompgui Remote でこの QR をスキャンするか、下のリンクを貼り付けてください。"
 }

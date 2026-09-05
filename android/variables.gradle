@@ -10,4 +10,10 @@ ext {
     androidxWebkitVersion = '1.14.0'
     junitVersion = '4.13.2'
     cordovaAndroidVersion = '14.0.1'
+    composeBomVersion = '2024.12.01'
+    okhttpVersion = '4.12.0'
+    securityCryptoVersion = '1.1.0-alpha06'
+    lifecycleVersion = '2.9.2'
+    coroutinesVersion = '1.10.2'
+    cameraxVersion = '1.4.1'
 }

@@ -1140,5 +1140,20 @@
   "usageConfig.title": "사용량",
   "usageConfig.unknownAccount": "알 수 없는 계정",
   "usageConfig.unknownUsed": "사용량 알 수 없음",
-  "usageConfig.used": "사용됨"
+  "usageConfig.used": "사용됨",
+  "relayPair.title": "폰 페어링",
+  "relayPair.description": "ompgui Remote 앱용 일회용 링크를 만듭니다. 폰은 Tailscale Funnel로 붙고, 기기 토큰은 이 맥에 남습니다.",
+  "relayPair.urlLabel": "릴레이 WebSocket URL",
+  "relayPair.create": "페어링 링크 만들기",
+  "relayPair.creating": "만드는 중…",
+  "relayPair.createFailed": "페어링 링크를 만들지 못했습니다. Funnel URL을 확인하세요.",
+  "relayPair.linkLabel": "페어링 링크",
+  "relayPair.copy": "링크 복사",
+  "relayPair.copied": "복사됨",
+  "relayPair.expires": "{time}에 만료",
+  "relayPair.devicesTitle": "페어링된 기기",
+  "relayPair.noDevices": "아직 페어링된 폰이 없습니다.",
+  "relayPair.revoke": "폐기",
+  "relayPair.revokeFailed": "기기를 폐기하지 못했습니다.",
+  "relayPair.qrHint": "ompgui Remote로 이 QR을 스캔하거나 아래 링크를 붙여넣으세요."
 }

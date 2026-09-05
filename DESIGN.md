@@ -117,6 +117,15 @@ configuration is project-local, validated before writing, and saved atomically.
   symlink escapes.
 - Secrets, raw API keys, and auth database contents never appear in API
   responses, logs, or the browser.
+- `/relay` is a WebSocket for paired phone remotes on the same Next.js port
+  (Tailscale Funnel 443). It is not cookie-authenticated. A Mac-side pairing
+  offer (`/pair` or `ompgui pair`) issues a one-time secret; the phone then
+  holds a device token whose hash is stored in `~/.omp/agent/ompgui-relay.json`.
+  Pairing secrets and tokens are never logged. After hello, phones may send
+  `{ op: "models.list" }` and receive `{ op: "models", models: [{ provider, id, name }] }`
+  without opening a session. v1 commands are `prompt`,
+  `abort`, `get_state`, and `set_model` only. The Android app is a Compose
+  client of this socket, not a Capacitor WebView of the desktop UI.
 
 ## UX contract
 

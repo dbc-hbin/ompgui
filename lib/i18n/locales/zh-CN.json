@@ -1140,5 +1140,20 @@
   "usageConfig.title": "用量",
   "usageConfig.unknownAccount": "未知账户",
   "usageConfig.unknownUsed": "使用情况未知",
-  "usageConfig.used": "已用"
+  "usageConfig.used": "已用",
+  "relayPair.title": "配对手机",
+  "relayPair.description": "为 ompgui Remote 应用创建一次性链接。手机通过 Tailscale Funnel 连接，设备令牌保存在这台 Mac 上。",
+  "relayPair.urlLabel": "中继 WebSocket URL",
+  "relayPair.create": "创建配对链接",
+  "relayPair.creating": "正在创建…",
+  "relayPair.createFailed": "无法创建配对链接。请检查 Funnel URL。",
+  "relayPair.linkLabel": "配对链接",
+  "relayPair.copy": "复制链接",
+  "relayPair.copied": "已复制",
+  "relayPair.expires": "于 {time} 过期",
+  "relayPair.devicesTitle": "已配对设备",
+  "relayPair.noDevices": "尚未配对手机。",
+  "relayPair.revoke": "撤销",
+  "relayPair.revokeFailed": "无法撤销该设备。",
+  "relayPair.qrHint": "用 ompgui Remote 扫描此二维码，或粘贴下方链接。"
 }

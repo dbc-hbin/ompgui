@@ -1140,5 +1140,20 @@
   "usageConfig.title": "Usage",
   "usageConfig.unknownAccount": "Unknown account",
   "usageConfig.unknownUsed": "unknown used",
-  "usageConfig.used": "used"
+  "usageConfig.used": "used",
+  "relayPair.title": "Pair a phone",
+  "relayPair.description": "Create a one-time link for the ompgui Remote app. The phone connects over Tailscale Funnel; this Mac keeps the device token.",
+  "relayPair.urlLabel": "Relay WebSocket URL",
+  "relayPair.create": "Create pairing link",
+  "relayPair.creating": "Creating…",
+  "relayPair.createFailed": "Could not create a pairing link. Check the Funnel URL.",
+  "relayPair.linkLabel": "Pairing link",
+  "relayPair.copy": "Copy link",
+  "relayPair.copied": "Copied",
+  "relayPair.expires": "Expires at {time}",
+  "relayPair.devicesTitle": "Paired devices",
+  "relayPair.noDevices": "No phones are paired yet.",
+  "relayPair.revoke": "Revoke",
+  "relayPair.revokeFailed": "Could not revoke that device.",
+  "relayPair.qrHint": "Scan this QR with ompgui Remote, or paste the link below."
 }

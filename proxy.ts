@@ -22,6 +22,8 @@ export function proxy(request: NextRequest) {
     return hasSession ? NextResponse.redirect(new URL("/", request.url)) : NextResponse.next();
   }
   if (pathname === "/api/web-auth/session") return NextResponse.next();
+  // Device-token auth happens after the WebSocket upgrade, not via cookie.
+  if (pathname === "/relay") return NextResponse.next();
   if (hasSession) return NextResponse.next();
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "Password required", code: "password_required" }, { status: 401 });

@@ -81,9 +81,18 @@ app/api/
   skills/install/route.ts         POST install skills through npx skills add
   skills/search/route.ts          GET/POST skills.sh search
   worktrees/route.ts              GET/POST/DELETE git worktrees
+  relay/pair/route.ts             POST one-time phone pairing offer
+  relay/devices/route.ts          GET paired phone devices
+  relay/devices/[id]/route.ts     DELETE revoke a paired device
+
+app/relay/route.ts                GET 426 (WebSocket upgrade is attached in Node)
+app/pair/page.tsx                 Mac pairing UI for /relay
+
+android/                          Compose phone client for /relay (not Capacitor WebView)
 
 lib/
   omp/                 shared omp foundations (paths, CLI probe, RpcProcess)
+  relay/               phone relay protocol, pairing registry, WebSocket gateway
   agent-client.ts      typed fetch helper for /api/agent commands
   draft-store.ts       local draft persistence helpers
   file-access.ts       allowed file roots for /api/files and worktrees
@@ -292,77 +301,4 @@ handled or safely ignored.
 - Skill toggling edits only the `disable-model-invocation` frontmatter key on the target `SKILL.md`; keep that surgical so user formatting survives.
 - `/api/skills/install` shells through `npx skills add ... --agent universal`, which installs into the ecosystem-standard `.agents/skills` dirs omp reads; project installs run with the selected cwd.
 
-### Update notifications (`/api/omp-update`, `/api/app-update`)
-- Automatic in-app self-updating has been removed in favor of explicit user notifications and manual terminal commands.
-- `GET /api/app-update` queries the npm registry for `ompgui` updates, detects the install manager (`bun` vs `npm` via `detectInstallMethod`), and returns `updateAvailable` plus the exact terminal command (e.g. `npm install -g ompgui` or `bun add -g ompgui`).
-- `POST /api/omp-update` (`action: "check"`) runs `omp update --check` and returns `updateAvailable` plus `updateCommand: "omp update"`.
-- `POST /api/omp-update` (`action: "restart"`) restarts active OMP sessions after a manual CLI update.
-- Notifications in `AppShell` and settings cards in `SettingsConfig` present the update notification alongside copyable terminal update commands.
-
-### Auth and model config
-- Auth flows go through RPC commands (`get_login_providers`, `login`) against the omp child process; credentials live in omp's `agent.db` (SQLite) which ompgui never touches directly.
-- The Models panel reads and writes `models.yml` in the omp agent directory (`~/.omp/agent/models.yml`, `.yaml` fallback).
-- API-key status endpoints must never return the raw key.
-
-### Completion sound
-- `hooks/useAudio.ts` stores the toggle in `localStorage` and reuses one `AudioContext`.
-- Browser autoplay policy means sound must be unlocked from a user gesture; `ChatInput` calls the unlock hook from interactive controls, and `ChatWindow` plays the tone from `onAgentEnd`.
-
-## omp Session File Format (v3)
-
-Location: `~/.omp/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
-
-```jsonl
-{"type":"title","v":1,"title":"...","source":"...","updatedAt":"...","pad":"   ..."}   ← fixed 256-byte slot
-{"type":"session","version":3,"id":"<uuid>","timestamp":"...","cwd":"/path","parentSession":"/abs/path/to/parent.jsonl"}
-{"type":"model_change","id":"<8hex>","parentId":null,"provider":"...","modelId":"...","timestamp":"..."}
-{"type":"message","id":"<8hex>","parentId":"<8hex>","message":{"role":"user","content":"..."}}
-{"type":"message","id":"<8hex>","parentId":"<8hex>","message":{"role":"assistant","content":[...],...}}
-{"type":"message","id":"<8hex>","parentId":"<8hex>","message":{"role":"toolResult","toolCallId":"...","content":[...]}}
-{"type":"compaction","id":"<8hex>","parentId":"<8hex>","summary":"...","firstKeptEntryId":"<8hex>","tokensBefore":N}
-```
-
-- Line 1 is a fixed-width 256-byte padded title slot, rewritable in place.
-  Old pi files may lack it — the `{"type":"session"}` header is then line 1.
-- Entries form a tree via `(id, parentId)`. Additional entry types
-  (`title_change`, `session_init`, `mode_change`, `ttsr_injection`, ...) must
-  be tolerated by readers.
-- Large payloads (images) are externalized to the content-addressed blob store
-  at `~/.omp/agent/blobs` and referenced from entries.
-
-`entryIds[]` in `SessionContext` is a parallel array to `messages[]` — maps each displayed message back to its `.jsonl` entry id, used for fork and navigate_tree calls.
-
----
-
-## Design Tokens & UI Kit (`app/globals.css`, `components/ui/`)
-
-Warm-paper (light) / warm-ember (dark) palettes; every text/background pair is
-WCAG AA-verified (measured ratios noted in `globals.css` comments). Components
-must consume these variables — no hardcoded colors.
-
-```
-color:  --bg --bg-panel --bg-hover --bg-selected --border --bg-subtle
-        --text --text-muted --text-dim
-        --accent --accent-strong --accent-hover   (links / filled buttons / hover)
-        --user-bg --tool-bg
-type:   --font-serif (display headings, class .display-serif)  --font-mono
-shape:  --radius-control (8) --radius-card (12) --radius-modal (16)
-depth:  --shadow-card --shadow-pop --shadow-modal
-motion: --dur-fast (150ms) --dur-med (220ms) --dur-slow (320ms) --ease-out-warm
-```
-
-`components/ui/` holds the shared primitives (built on `@base-ui/react`):
-`primitives.tsx` (Dialog/Tooltip/Collapsible), `field.tsx` (form fields +
-ConfirmDialog), `toast.tsx` (`toast.success/error/info`, mounted in AppShell).
-Icons come from `lucide-react` — do not add new inline SVGs. The command
-palette (`components/CommandPalette.tsx`, ⌘K/Ctrl+K) is built on `cmdk`.
-
-<!-- BEGIN:nextjs-agent-rules -->
-
-# This is NOT the Next.js you know
-
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
-
-This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
-
-<!-- END:nextjs-agent-rules -->
+[Showing lines 1-300 of 376. Use :301 to continue]

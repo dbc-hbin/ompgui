@@ -10,16 +10,28 @@ const pkgDir = path.join(__dirname, "..");
 const options = parseLaunchOptions();
 if (options.help || options.version) process.exit(0);
 if (options.command) {
-  if (options.command !== "update" || options.extraPositionals.length) {
-    console.error(`Unknown ompgui command: ${[options.command, ...options.extraPositionals].join(" ")}`);
-    process.exit(1);
+  if (options.command === "update") {
+    if (options.extraPositionals.length) {
+      console.error(`Unknown ompgui command: ${[options.command, ...options.extraPositionals].join(" ")}`);
+      process.exit(1);
+    }
+    const { updateOmpGui } = require("./ompgui-update");
+    updateOmpGui({ packageDir: pkgDir }).catch((error) => {
+      console.error(`Could not update ompgui: ${error.message}`);
+      process.exitCode = 1;
+    });
+    return;
   }
-  const { updateOmpGui } = require("./ompgui-update");
-  updateOmpGui({ packageDir: pkgDir }).catch((error) => {
-    console.error(`Could not update ompgui: ${error.message}`);
-    process.exitCode = 1;
-  });
-  return;
+  if (options.command === "pair" || options.command === "devices") {
+    const { runRelayCli } = require("./ompgui-pair");
+    runRelayCli(options).catch((error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    });
+    return;
+  }
+  console.error(`Unknown ompgui command: ${[options.command, ...options.extraPositionals].join(" ")}`);
+  process.exit(1);
 }
 const { isPortAvailable } = require("./port-availability");
 const { wireChildProcessLifecycle } = require("./process-lifecycle");
