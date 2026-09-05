@@ -4,7 +4,8 @@ import com.dbchbin.ompgui.remote.relay.ClientFrame
 import com.dbchbin.ompgui.remote.relay.PairingPolicy
 import com.dbchbin.ompgui.remote.relay.ServerFrame
 import com.dbchbin.ompgui.remote.relay.encode
-import com.dbchbin.ompgui.remote.relay.parseServerFrame
+import com.dbchbin.ompgui.remote.relay.RelayFrameAssembler
+import com.dbchbin.ompgui.remote.relay.sendRelayFrames
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -83,7 +84,9 @@ class RelayConnection(
     private val transportFactory: (RelayTransportListener) -> RelayTransport,
     private val mainHandler: (Runnable) -> Unit = { it.run() },
     private val schedule: (delayMs: Long, Runnable) -> Unit = { _, runnable -> runnable.run() },
+    nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
+    private val assembler = RelayFrameAssembler(nowMs)
     enum class Mode { Pairing, Token }
 
     interface Listener {
@@ -110,6 +113,7 @@ class RelayConnection(
         this.listener = listener
     }
 
+    @Synchronized
     fun connectPairing(url: String, secret: String, label: String?, password: String?) {
         closed.set(false)
         mode = Mode.Pairing
@@ -124,6 +128,7 @@ class RelayConnection(
         start(url)
     }
 
+    @Synchronized
     fun connectToken(url: String, deviceId: String, token: String, label: String?) {
         closed.set(false)
         mode = Mode.Token
@@ -142,24 +147,29 @@ class RelayConnection(
         backoffMs = INITIAL_BACKOFF_MS
     }
 
+    @Synchronized
     fun send(frame: ClientFrame): Boolean {
         if (closed.get()) return false
-        val encoded = try {
-            frame.encode()
-        } catch (_: Exception) {
-            return false
-        }
         val connectingHello = frame is ClientFrame.Hello && state == ConnectionState.Connecting
         if (state != ConnectionState.Connected && !connectingHello) return false
-        return transport?.send(encoded) == true
+        val current = transport ?: return false
+        return try {
+            val sent = sendRelayFrames(frame.encode(), current::send)
+            if (!sent) handleDrop("Could not send relay frame")
+            sent
+        } catch (_: Exception) {
+            false
+        }
     }
 
+    @Synchronized
     fun close() {
         if (!closed.compareAndSet(false, true)) {
             transport?.close()
             return
         }
         reconnectGeneration += 1
+        assembler.clear()
         reconnectUrl = null
         reconnectHello = null
         pendingHello = null
@@ -170,26 +180,28 @@ class RelayConnection(
 
     private fun start(url: String) {
         reconnectGeneration += 1
+        assembler.clear()
         transport?.close()
         emitState(ConnectionState.Connecting)
         val generation = reconnectGeneration
         var currentTransport: RelayTransport? = null
+        val active = AtomicBoolean(true)
         val current = transportFactory(object : RelayTransportListener {
             override fun onOpen() = dispatch {
-                if (transport !== currentTransport || reconnectGeneration != generation) return@dispatch
+                if (!active.get() || transport !== currentTransport || reconnectGeneration != generation) return@dispatch
                 handleOpen()
             }
             override fun onText(text: String) = dispatch {
-                if (transport !== currentTransport || reconnectGeneration != generation) return@dispatch
+                if (!active.get() || transport !== currentTransport || reconnectGeneration != generation) return@dispatch
                 handleText(text)
             }
-            override fun onClosed() = dispatch {
-                if (transport !== currentTransport || reconnectGeneration != generation) return@dispatch
-                handleDrop("closed")
-            }
-            override fun onFailure(message: String) = dispatch {
-                if (transport !== currentTransport || reconnectGeneration != generation) return@dispatch
-                handleDrop(message)
+            override fun onClosed() = onFailure("closed")
+            override fun onFailure(message: String) {
+                if (!active.compareAndSet(true, false)) return
+                dispatch {
+                    if (transport !== currentTransport || reconnectGeneration != generation) return@dispatch
+                    handleDrop(message)
+                }
             }
         })
         currentTransport = current
@@ -215,24 +227,29 @@ class RelayConnection(
 
     private fun handleText(text: String) {
         if (closed.get()) return
-        val frame = parseServerFrame(text)
-        if (frame == null) {
-            listener?.onProtocolError("Invalid relay frame")
+        val frame = try {
+            assembler.receive(text) ?: return
+        } catch (error: IllegalArgumentException) {
+            listener?.onProtocolError(error.message ?: "Invalid relay frame")
+            handleDrop("Invalid relay frame")
             return
         }
         when (frame) {
             is ServerFrame.HelloOk -> {
+                pendingHello = null
                 backoffMs = INITIAL_BACKOFF_MS
                 emitState(ConnectionState.Connected)
             }
             is ServerFrame.HelloErr -> {
+                val rejectedGeneration = reconnectGeneration
                 emitState(ConnectionState.Failed)
                 listener?.onFrame(frame)
+                if (reconnectGeneration != rejectedGeneration) return
                 if (shouldStopReconnect(frame.code)) {
                     reconnectUrl = null
                     reconnectHello = null
                 }
-                transport?.close()
+                handleDrop(frame.message)
                 return
             }
             else -> Unit
@@ -243,6 +260,12 @@ class RelayConnection(
     private fun handleDrop(message: String) {
         if (closed.get()) return
         if (state == ConnectionState.Idle) return
+        reconnectGeneration += 1
+        assembler.clear()
+        pendingHello = null
+        val dropped = transport
+        transport = null
+        dropped?.close()
         val canReconnect = mode == Mode.Token && reconnectUrl != null && reconnectHello != null
         if (!canReconnect) {
             if (state != ConnectionState.Failed) {
@@ -274,7 +297,7 @@ class RelayConnection(
     }
 
     private fun dispatch(block: () -> Unit) {
-        mainHandler(Runnable(block))
+        mainHandler(Runnable { synchronized(this) { block() } })
     }
 
     companion object {

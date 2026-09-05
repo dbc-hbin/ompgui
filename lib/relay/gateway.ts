@@ -51,12 +51,13 @@ export function handleRelayUpgrade(req: IncomingMessage, socket: Duplex, head: B
   }
 
   let counted = false;
-  let ping: ReturnType<typeof setInterval> | undefined;
+  let ping: NodeJS.Timeout | undefined;
   let attached: { onText(text: string): void; onClose(): void } | null = null;
   const ws = completeRelayUpgrade(req, socket, head, {
     onText: (text) => attached?.onText(text),
     onClose: () => {
-      if (ping) clearInterval(ping);
+      clearInterval(ping);
+      ping = undefined;
       if (counted) {
         counted = false;
         setConnectionCount(Math.max(0, connectionCount() - 1));

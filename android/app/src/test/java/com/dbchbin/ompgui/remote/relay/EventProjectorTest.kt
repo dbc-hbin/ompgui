@@ -8,6 +8,27 @@ import org.junit.Test
 
 class EventProjectorTest {
     @Test
+    fun finalMessageWithoutStreamingUpdatesStillAppearsAfterUser() {
+        val current = listOf(DisplayMessage(role = "user", text = "question"))
+        val event = JSONObject().put("type", "message_end").put(
+            "message", JSONObject().put("role", "assistant").put("text", "answer"),
+        )
+        val result = EventProjector.applyMessages(current, event)
+        assertEquals(listOf("question", "answer"), result.map { it.text })
+        assertFalse(result.last().streaming)
+    }
+
+    @Test
+    fun streamedLongResponseRemainsAvailableAfterFinalEvent() {
+        val text = "x".repeat(8_000) + " final paragraph"
+        val message = JSONObject().put("role", "assistant").put("text", text)
+        val streaming = EventProjector.applyMessages(emptyList(), JSONObject().put("type", "message_update").put("message", message))
+        val completed = EventProjector.applyMessages(streaming, JSONObject().put("type", "message_end").put("message", message))
+        assertEquals(text, completed.single().text)
+        assertFalse(completed.single().streaming)
+    }
+
+    @Test
     fun replacesStreamingAssistantThenFreezesOnEnd() {
         val start = JSONObject(
             """{"type":"message_update","message":{"role":"assistant","content":[{"type":"text","text":"Hel"}]}}""",

@@ -4,6 +4,8 @@
 
 > **Android APK (Android 12+)** — Use the Kotlin companion app to connect to a remote ompgui server, with a read-only offline snapshot of the latest session. [Download ompgui Remote v0.6.5](https://github.com/dbc-hbin/ompgui/releases/download/v0.6.5/ompgui-remote-v0.6.5.apk) · [Release notes](https://github.com/dbc-hbin/ompgui/releases/tag/v0.6.5)
 
+> On the experimental branch, `android/` contains the native Compose client with session/history controls, streamed file transfers, and supported OMP settings over authenticated `/relay` WebSockets. This does not replace the published v0.6.5 APK or add a hosted/E2E relay. Build from `android/` with `./gradlew :app:assembleDebug`; output: `android/app/build/outputs/apk/debug/app-debug.apk`. Server-disabled update, logout, and stored API-key mutations remain unavailable.
+
 Local web UI for the [oh-my-pi (omp) coding agent](https://github.com/can1357/oh-my-pi). ompgui reads your local omp session files and gives you a browser workspace for session browsing, real-time chat, model configuration, skill management, and project file preview.
 
 ![ompgui — light theme](docs/screenshot-light.png)

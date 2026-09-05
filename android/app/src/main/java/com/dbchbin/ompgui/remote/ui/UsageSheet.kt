@@ -19,6 +19,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,80 +37,54 @@ import org.json.JSONObject
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UsageSheet(
-    usageData: JSONObject?,
-    onRefresh: () -> Unit,
+    requester: com.dbchbin.ompgui.remote.relay.RelayRequester,
     onDismiss: () -> Unit,
+    usageData: JSONObject? = null,
 ) {
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        onRefresh()
+    val scope = rememberCoroutineScope()
+    var data by remember { mutableStateOf(usageData) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val refresh: (Boolean) -> Unit = { force ->
+        scope.launch {
+            busy = true; error = null
+            try { data = requester.request("system", "usage.get", JSONObject().put("refresh", force))
+            } catch (failure: kotlinx.coroutines.CancellationException) { throw failure
+            } catch (failure: Exception) { error = failure.message ?: "Usage request failed"
+            } finally { busy = false }
+        }
     }
-    val korean = remember { Locale.getDefault().language == "ko" }
-    val reports = remember(usageData) { parseUsageReports(usageData) }
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = OmpColors.BgPanel,
-        contentColor = OmpColors.Text,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 32.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = if (korean) "사용량" else "Usage",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = OmpColors.Text,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = onRefresh) {
-                    Text(
-                        text = if (korean) "새로고침" else "Refresh",
-                        fontSize = 13.sp,
-                        color = OmpColors.Accent,
-                    )
-                }
+    androidx.compose.runtime.LaunchedEffect(requester) { refresh(false) }
+    val korean = Locale.getDefault().language == "ko"
+    val reports = remember(data) { parseUsageReports(data) }
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = OmpColors.BgPanel, contentColor = OmpColors.Text) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp).padding(bottom = 24.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (korean) "사용량" else "Usage", fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                TextButton(enabled = !busy, onClick = { refresh(true) }) { Text(if (korean) "새로고침" else "Refresh") }
             }
-            if (reports == null || reports.isEmpty()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 24.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    CircularProgressIndicator(
-                        color = OmpColors.Accent,
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.padding(end = 12.dp),
-                    )
-                    Text(
-                        text = if (korean) {
-                            "사용량 정보를 불러오는 중…"
-                        } else {
-                            "Loading usage…"
-                        },
-                        fontSize = 14.sp,
-                        color = OmpColors.TextMuted,
-                    )
-                }
-                return@Column
+            if (busy) CircularProgressIndicator()
+            error?.let { Text(it, color = OmpColors.StatusError) }
+            if (!busy && data != null && reports.isNullOrEmpty()) Text(data?.optString("emptyReason")?.ifBlank { "No usage limits available" } ?: "No usage limits available")
+            for (report in reports.orEmpty()) {
+                Text(report.provider, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
+                for (limit in report.limits) UsageLimitRow(limit, korean)
             }
-            for (report in reports) {
-                Text(
-                    text = report.provider,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = OmpColors.Text,
-                    modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
-                )
-                for (limit in report.limits) {
-                    UsageLimitRow(limit = limit, korean = korean)
+            data?.let { payload ->
+                Text("Generated: ${payload.opt("generatedAt")} · Cached: ${payload.optBoolean("cached")}", modifier = Modifier.padding(top = 12.dp))
+                // Keep provider-specific amounts, scopes, credentials and capacity visible;
+                // their schema differs by provider and must not be reduced to percentages.
+                for (key in listOf("reports", "accountsWithoutUsage", "disabledCredentials", "capacity")) {
+                    if (payload.has(key) && !payload.isNull(key)) {
+                        Text(key, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
+                        androidx.compose.foundation.text.selection.SelectionContainer {
+                            Text(when (val value = payload.opt(key)) {
+                                is JSONObject -> value.toString(2)
+                                is org.json.JSONArray -> value.toString(2)
+                                else -> value.toString()
+                            }, fontSize = 12.sp)
+                        }
+                    }
                 }
             }
         }

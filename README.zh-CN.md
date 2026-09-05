@@ -2,6 +2,10 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
+> **Android APK（Android 12+）** — 使用 Kotlin 配套应用连接远程 ompgui 服务器，并查看最新会话的只读离线快照。[下载 ompgui Remote v0.6.5](https://github.com/dbc-hbin/ompgui/releases/download/v0.6.5/ompgui-remote-v0.6.5.apk) · [发行说明](https://github.com/dbc-hbin/ompgui/releases/tag/v0.6.5)
+
+> 实验分支的 `android/` 中包含原生 Compose 客户端，通过经过身份验证的 `/relay` WebSocket 提供会话/历史记录控制、流式文件传输以及受支持的 OMP 设置。这不会替代已发布的 v0.6.5 APK，也不会添加托管式/E2E 中继。在 `android/` 中运行 `./gradlew :app:assembleDebug` 进行构建；输出文件为 `android/app/build/outputs/apk/debug/app-debug.apk`。服务器禁用的更新、退出登录以及已存储 API 密钥的修改操作仍不可用。
+
 [oh-my-pi (omp) 编程智能体](https://github.com/can1357/oh-my-pi)的本地 Web UI。ompgui 读取本机的 omp 会话文件，在浏览器中提供一个工作区，支持会话浏览、实时对话、模型配置、技能管理和项目文件预览。
 
 ![ompgui — 浅色主题](docs/screenshot-light.png)

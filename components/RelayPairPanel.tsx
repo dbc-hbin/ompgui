@@ -38,9 +38,11 @@ export function RelayPairPanel() {
         fetch("/api/relay/devices"),
       ]);
       if (statusRes.ok) {
-        const status = await statusRes.json() as { relayUrl?: string };
-        if (status.relayUrl) setRelayUrl((prev) => prev || status.relayUrl);
-        setStatusUrl(status.relayUrl);
+        const status: unknown = await statusRes.json();
+        const suggestedUrl = status !== null && typeof status === "object" &&
+          "relayUrl" in status && typeof status.relayUrl === "string" ? status.relayUrl : undefined;
+        if (suggestedUrl) setRelayUrl((prev) => prev || suggestedUrl);
+        setStatusUrl(suggestedUrl);
       }
       if (devicesRes.ok) {
         const body = await devicesRes.json() as { devices?: DeviceRow[] };

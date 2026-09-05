@@ -306,6 +306,7 @@ function serializeAgentMarkdown(params: {
   tools?: string[];
   model?: string | string[];
   thinkingLevel?: string;
+  blocking?: boolean;
   prewalk?: boolean | string;
   advisor?: boolean | string;
   systemPrompt?: string;
@@ -342,6 +343,7 @@ export async function createAgent(params: {
   tools?: string[];
   model?: string | string[];
   thinkingLevel?: string;
+  blocking?: boolean;
   prewalk?: boolean | string;
   advisor?: boolean | string;
   systemPrompt: string;
@@ -366,6 +368,7 @@ export async function updateAgent(params: {
   tools?: string[];
   model?: string | string[];
   thinkingLevel?: string;
+  blocking?: boolean;
   prewalk?: boolean | string;
   advisor?: boolean | string;
   systemPrompt?: string;
@@ -386,6 +389,7 @@ export async function updateAgent(params: {
     tools: params.tools ?? parsed.tools,
     model: params.model ?? parsed.model,
     thinkingLevel: params.thinkingLevel ?? parsed.thinkingLevel,
+    blocking: params.blocking ?? parsed.blocking,
     prewalk: params.prewalk ?? parsed.prewalk,
     advisor: params.advisor ?? parsed.advisor,
     systemPrompt: params.systemPrompt ?? parsed.systemPrompt,

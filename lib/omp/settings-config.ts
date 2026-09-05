@@ -125,9 +125,9 @@ function filterKnownSection(
 
 /** Return a reviewed, runtime-safe settings subset without changing values.
  * This is exported for the API route so it can merge a patch before writing. */
-export function filterNativeSettings(settings: NativeSettings): NativeSettings {
+export function filterNativeSettings(settings: unknown): NativeSettings {
   if (!isRecord(settings)) throw new Error("Settings must be an object");
-  const source = settings as unknown as Record<string, unknown>;
+  const source = settings;
   const output: Record<string, unknown> = {};
   for (const key of [
     "defaultThinkingLevel", "hideThinkingBlock", "externalThinking", "textVerbosity", "personality",

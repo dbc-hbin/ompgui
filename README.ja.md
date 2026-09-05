@@ -2,6 +2,10 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
+> **Android APK (Android 12+)** — Kotlin 製のコンパニオンアプリでリモートの ompgui サーバーに接続し、最新セッションの読み取り専用オフラインスナップショットを利用できます。[ompgui Remote v0.6.5 をダウンロード](https://github.com/dbc-hbin/ompgui/releases/download/v0.6.5/ompgui-remote-v0.6.5.apk) · [リリースノート](https://github.com/dbc-hbin/ompgui/releases/tag/v0.6.5)
+
+> 実験ブランチの `android/` には、認証済みの `/relay` WebSocket 経由でセッション・履歴の操作、ストリーミングファイル転送、対応する OMP 設定を提供するネイティブ Compose クライアントがあります。これは公開済みの v0.6.5 APK を置き換えるものではなく、ホスト型/E2E リレーを追加するものでもありません。`android/` で `./gradlew :app:assembleDebug` を実行してビルドします。出力先は `android/app/build/outputs/apk/debug/app-debug.apk` です。サーバーで無効化されている更新、ログアウト、保存済み API キーの変更操作は引き続き利用できません。
+
 [oh-my-pi (omp) コーディングエージェント](https://github.com/can1357/oh-my-pi)のローカル Web UI です。ompgui はローカルの omp セッションファイルを読み込み、セッションの閲覧、リアルタイムチャット、モデル設定、スキル管理、プロジェクトファイルのプレビューを行えるブラウザワークスペースを提供します。
 
 ![ompgui — ライトテーマ](docs/screenshot-light.png)

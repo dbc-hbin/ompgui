@@ -30,14 +30,18 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -64,6 +68,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
@@ -73,6 +81,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -82,7 +91,15 @@ import com.dbchbin.ompgui.remote.net.ConnectionState
 import com.dbchbin.ompgui.remote.relay.AttachedImage
 import com.dbchbin.ompgui.remote.relay.DisplayMessage
 import com.dbchbin.ompgui.remote.relay.ModelRef
+import com.dbchbin.ompgui.remote.relay.RelayBranch
+import com.dbchbin.ompgui.remote.relay.RelaySlashCommand
+import com.dbchbin.ompgui.remote.relay.SubagentChip
+import com.dbchbin.ompgui.remote.relay.TodoPhase
 import com.dbchbin.ompgui.remote.relay.RelayModelOption
+import com.dbchbin.ompgui.remote.relay.RelayRequester
+import com.dbchbin.ompgui.remote.relay.TodoItem
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -154,6 +171,7 @@ private fun readBounded(resolver: android.content.ContentResolver, uri: Uri, max
                 out.write(buf, 0, n)
                 total += n
             }
+            if (stream.read() != -1) return null
             out.toByteArray()
         }
     } catch (_: Exception) {
@@ -230,6 +248,7 @@ private fun loadAttachment(context: Context, uri: Uri): AttachmentItem? {
     return try {
         if (isImage) {
             val (compressedBytes, actualMime) = compressImageForRelay(resolver, uri) ?: return null
+            if (compressedBytes.size > MAX_IMAGE_BYTES) return null
             AttachmentItem(
                 name = name,
                 isImage = true,
@@ -258,12 +277,7 @@ private fun loadAttachment(context: Context, uri: Uri): AttachmentItem? {
                 textContent = text,
             )
         } else {
-            AttachmentItem(
-                name = name,
-                isImage = false,
-                mimeType = mime,
-                sizeBytes = size,
-            )
+            null
         }
     } catch (_: Exception) {
         null
@@ -287,6 +301,14 @@ private fun trimFileName(name: String, max: Int = 16): String {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
+    requester: RelayRequester,
+    onOpenSession: (String) -> Unit,
+    extensionDialogs: List<com.dbchbin.ompgui.remote.relay.EventProjector.ChatExtensionRequest>,
+    chatNotices: List<com.dbchbin.ompgui.remote.relay.EventProjector.ChatNotice>,
+    extensionStatus: Map<String, String>,
+    extensionWidgets: Map<String, List<String>>,
+    onDismissExtensionDialog: (String) -> Unit,
+    onDismissChatNotice: (String) -> Unit,
     title: String,
     messages: List<DisplayMessage>,
     draft: String,
@@ -309,21 +331,86 @@ fun ChatScreen(
     thinkingLevel: String = "auto",
     onThinkingLevelChange: (String) -> Unit = {},
     usageFraction: Double? = null,
+    slashCommands: List<RelaySlashCommand> = emptyList(),
+    todos: List<TodoPhase> = emptyList(),
+    subagents: List<SubagentChip> = emptyList(),
+    filesPath: String = "",
+    sessionId: String = "",
+    sessionCwd: String = "",
+    branches: List<RelayBranch> = emptyList(),
+    branchLeafId: String? = null,
+    onSetLeaf: (String, String) -> Unit = { _, _ -> },
+    onFetchBranches: (String) -> Unit = {},
+    queueSteering: List<String> = emptyList(),
+    queueFollowUp: List<String> = emptyList(),
+    fastMode: Boolean? = null,
+    autoRetry: Boolean? = null,
+    interruptMode: String? = null,
+    autoCompaction: Boolean? = null,
+    steeringMode: String? = null,
+    followUpMode: String? = null,
+    onOpenPalette: () -> Unit,
 ) {
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var attachedFiles by remember { mutableStateOf<List<AttachmentItem>>(emptyList()) }
+    var attachWarning by remember { mutableStateOf<String?>(null) }
     var thinkingPickerOpen by remember { mutableStateOf(false) }
+    var filesOpen by remember { mutableStateOf(false) }
+    var branchesOpen by remember { mutableStateOf(false) }
+    var followLocked by remember(sessionId) { mutableStateOf(true) }
+    var historicalView by remember(sessionId) { mutableStateOf(false) }
+    var commandError by remember(sessionId) { mutableStateOf<String?>(null) }
+    var runtimeState by remember(sessionId) { mutableStateOf(JSONObject()) }
+    val commandScope = androidx.compose.runtime.key(sessionId) { rememberCoroutineScope() }
+    fun execute(command: JSONObject, completed: (JSONObject) -> Unit = {}) {
+        commandScope.launch {
+            commandError = null
+            try {
+                val response = com.dbchbin.ompgui.remote.relay.ChatRequests.command(requester, sessionId, command)
+                completed(response.optJSONObject("result") ?: response)
+                val stateResponse = com.dbchbin.ompgui.remote.relay.ChatRequests.sessionState(requester, sessionId)
+                runtimeState = stateResponse.optJSONObject("state") ?: stateResponse
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                commandError = failure.message ?: "Command failed"
+            }
+        }
+    }
+    LaunchedEffect(sessionId) {
+        attachedFiles = emptyList()
+        attachWarning = null
+        filesOpen = false
+        branchesOpen = false
+    }
+    LaunchedEffect(sessionId, running) {
+        try {
+            val response = com.dbchbin.ompgui.remote.relay.ChatRequests.sessionState(requester, sessionId)
+            runtimeState = response.optJSONObject("state") ?: response
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            commandError = failure.message ?: "Session state unavailable"
+        }
+    }
+    val korean = remember { Locale.getDefault().language == "ko" }
     val pickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetMultipleContents(),
     ) { uris ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
         scope.launch {
-            val items = withContext(Dispatchers.IO) {
+            val loaded = withContext(Dispatchers.IO) {
                 uris.mapNotNull { uri -> loadAttachment(context, uri) }
             }
-            attachedFiles = (attachedFiles + items).take(MAX_ATTACHMENTS)
+            val remaining = MAX_ATTACHMENTS - attachedFiles.size
+            attachWarning = when {
+                loaded.size != uris.size -> "Some files could not be attached. Text must be at most 128 KiB; use Files to upload larger or binary files (up to 25 MiB)."
+                loaded.size > remaining -> "Only $MAX_ATTACHMENTS attachments are allowed. Extra selections were not attached."
+                else -> null
+            }
+            attachedFiles = attachedFiles + loaded.take(remaining)
         }
     }
     val sendWithComposer: () -> Unit = {
@@ -354,13 +441,16 @@ fun ChatScreen(
             }
         }
     }
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
-    }
-    LaunchedEffect(messages.lastOrNull()?.text) {
-        if (messages.isNotEmpty() && !listState.canScrollForward) {
-            listState.scrollToItem(messages.lastIndex)
+    val scrollIntent = remember(sessionId) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput && available.y > 0f) followLocked = false
+                return Offset.Zero
+            }
         }
+    }
+    LaunchedEffect(messages.size, messages.lastOrNull()?.text, followLocked) {
+        if (messages.isNotEmpty() && followLocked) listState.scrollToItem(messages.lastIndex)
     }
 
     Column(
@@ -380,6 +470,13 @@ fun ChatScreen(
             onAbort = onAbort,
             onOpenPicker = onOpenPicker,
             onOpenSettings = onOpenSettings,
+            branchesAvailable = branches.isNotEmpty(),
+            branchLabel = branches.firstOrNull { it.id == branchLeafId }?.label
+                ?: branches.firstOrNull()?.label,
+            onOpenBranches = {
+                if (sessionId.isNotBlank()) onFetchBranches(sessionId)
+                branchesOpen = true
+            },
         )
         if (!error.isNullOrBlank()) {
             Text(
@@ -389,11 +486,28 @@ fun ChatScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
         }
+        if (!attachWarning.isNullOrBlank()) {
+            Text(
+                attachWarning!!,
+                color = OmpColors.StatusWarning,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
+        if (commandError != null) {
+            Text(commandError!!, color = OmpColors.StatusError, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+        }
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ChatHistoryHost(requester = requester, sessionId = sessionId, leafId = if (historicalView) branchLeafId else null, onOpenSession = onOpenSession, onEditMessage = onDraftChange)
+            ChatStatsHost(requester = requester, sessionId = sessionId)
+            ChatSlashHost(requester = requester, sessionCwd = sessionCwd, slashCommands = slashCommands, draft = draft, onInsertSlash = onDraftChange)
+        }
         LazyColumn(
             state = listState,
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .nestedScroll(scrollIntent),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
@@ -401,7 +515,20 @@ fun ChatScreen(
                 items = messages,
                 key = { index, message -> "${message.role}_${message.timestamp ?: index}_$index" },
             ) { _, message ->
-                if (message.role == "user") UserMessage(message) else AssistantMessage(message)
+                if (message.role == "user") {
+                    UserMessage(message)
+                } else {
+                    AssistantMessage(
+                        message = message,
+                        requester = requester,
+                        sessionId = sessionId,
+                    )
+                }
+            }
+        }
+        if (!followLocked) {
+            androidx.compose.material3.TextButton(onClick = { followLocked = true }) {
+                Text("Jump to latest", color = OmpColors.Accent)
             }
         }
         Column(
@@ -411,6 +538,89 @@ fun ChatScreen(
                 .padding(bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+            ChatExtensionHost(
+                requester = requester, sessionId = sessionId,
+                requests = extensionDialogs, notices = chatNotices,
+                status = extensionStatus, widgets = extensionWidgets,
+                onDismissNotice = onDismissChatNotice,
+                onDismissRequest = onDismissExtensionDialog,
+            )
+            TodoPanel(todos = todos)
+            SubagentPanel(
+                requester = requester,
+                sessionId = sessionId,
+                subagents = subagents,
+            )
+            if (!historicalView) {
+            QueuePanel(
+                running = running,
+                steering = queueSteering,
+                followUp = queueFollowUp,
+                draft = draft,
+                onSteer = { text -> execute(JSONObject().put("type", "steer").put("message", text)) { onDraftChange("") } },
+                onFollowUp = { text -> execute(JSONObject().put("type", "follow_up").put("message", text)) { onDraftChange("") } },
+                onInterrupt = { text -> execute(JSONObject().put("type", "abort_and_prompt").put("message", text)) { onDraftChange("") } },
+
+            )
+            RuntimePanel(
+                requester = requester,
+                sessionId = sessionId,
+                running = running,
+                fastMode = if (runtimeState.has("fastModeEnabled")) runtimeState.optBoolean("fastModeEnabled") else fastMode,
+                autoRetry = if (runtimeState.has("autoRetryEnabled")) runtimeState.optBoolean("autoRetryEnabled") else autoRetry,
+                interruptMode = runtimeState.optString("interruptMode").takeIf { it.isNotBlank() } ?: interruptMode,
+                autoCompaction = if (runtimeState.has("autoCompactionEnabled")) runtimeState.optBoolean("autoCompactionEnabled") else autoCompaction,
+                steeringMode = runtimeState.optString("steeringMode").takeIf { it.isNotBlank() } ?: steeringMode,
+                followUpMode = runtimeState.optString("followUpMode").takeIf { it.isNotBlank() } ?: followUpMode,
+                onFastModeChange = { execute(JSONObject().put("type", "set_fast_mode").put("enabled", it)) },
+                onAutoRetryChange = { execute(JSONObject().put("type", "set_auto_retry").put("enabled", it)) },
+                onInterruptModeChange = { execute(JSONObject().put("type", "set_interrupt_mode").put("mode", it)) },
+                onAutoCompactionChange = { execute(JSONObject().put("type", "set_auto_compaction").put("enabled", it)) },
+                onSteeringModeChange = { execute(JSONObject().put("type", "set_steering_mode").put("mode", it)) },
+                onFollowUpModeChange = { execute(JSONObject().put("type", "set_follow_up_mode").put("mode", it)) },
+                onCycleModel = { execute(JSONObject().put("type", "cycle_model")) },
+                onBash = { execute(JSONObject().put("type", "bash").put("command", it.removePrefix("!")).put("excludeFromContext", it.startsWith("!!"))) },
+                onHandoff = { execute(JSONObject().put("type", "handoff")) },
+                onReload = { execute(JSONObject().put("type", "reload")) },
+                onRetryAbort = { execute(JSONObject().put("type", "abort_retry")) },
+                onAbortBash = { execute(JSONObject().put("type", "abort_bash")) },
+                onCompact = { execute(JSONObject().put("type", "compact")) },
+                onCustomCompact = { execute(JSONObject().put("type", "compact").put("customInstructions", it)) },
+
+                onCopyLast = {
+                    execute(JSONObject().put("type", "get_last_assistant_text")) { result ->
+                        val text = result.optString("text")
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Assistant message", text))
+                    }
+                },
+                onExport = {
+                    commandScope.launch {
+                        try {
+                            shareSessionExport(context, requester, sessionId)
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                            throw cancelled
+                        } catch (failure: Exception) {
+                            commandError = failure.message ?: "Export failed"
+                        }
+                    }
+                },
+                onOpenPalette = onOpenPalette,
+                onAbort = { execute(JSONObject().put("type", "abort")) },
+            )
+            }
+            }
+            if (historicalView) {
+                Text("Historical branch — read only. Fork a user entry in History to continue separately.", color = OmpColors.TextMuted)
+                androidx.compose.material3.TextButton(onClick = {
+                    historicalView = false
+                    onOpenSession(sessionId)
+                }) { Text("Return to live session", color = OmpColors.Accent) }
+            } else {
             ComposerCard(
                 draft = draft,
                 running = running,
@@ -426,7 +636,10 @@ fun ChatScreen(
                 onRemoveAttachment = { item -> attachedFiles = attachedFiles - item },
                 onOpenUsage = onOpenUsage,
                 onOpenThinkingPicker = { thinkingPickerOpen = true },
+                onCompact = { execute(JSONObject().put("type", "compact")) },
+                onOpenFiles = { filesOpen = true },
             )
+            }
         }
     }
     if (pickerOpen) {
@@ -449,6 +662,30 @@ fun ChatScreen(
             },
         )
     }
+    if (filesOpen) {
+        FileBrowserSheet(
+            requester = requester,
+            path = filesPath.ifBlank { sessionCwd },
+            cwd = sessionCwd,
+            onDismiss = { filesOpen = false },
+        )
+    }
+    if (branchesOpen) {
+        BranchSheet(
+            branches = branches,
+            leafId = branchLeafId,
+            korean = korean,
+            onPick = { branch ->
+                if (sessionId.isNotBlank()) {
+                    onSetLeaf(sessionId, branch.id)
+                    historicalView = true
+                }
+                branchesOpen = false
+            },
+            onDismiss = { branchesOpen = false },
+        )
+    }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -466,7 +703,11 @@ private fun ChatTopBar(
     onAbort: () -> Unit,
     onOpenPicker: () -> Unit,
     onOpenSettings: () -> Unit,
+    branchesAvailable: Boolean = false,
+    branchLabel: String? = null,
+    onOpenBranches: () -> Unit = {},
 ) {
+    val korean = remember { Locale.getDefault().language == "ko" }
     Column(modifier = Modifier.fillMaxWidth().background(OmpColors.Bg)) {
         Row(
             modifier = Modifier
@@ -530,6 +771,32 @@ private fun ChatTopBar(
                             modifier = Modifier.size(14.dp),
                             tint = OmpColors.TextMuted,
                         )
+                    }
+                    Text(
+                        " · ",
+                        fontSize = 12.sp,
+                        color = OmpColors.TextDim,
+                    )
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(OmpColors.BgHover)
+                            .border(1.dp, OmpColors.Border, RoundedCornerShape(6.dp))
+                            .clickable(onClick = onOpenBranches)
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            branchLabel?.takeIf { it.isNotBlank() }
+                                ?: if (korean) "가지" else "Branches",
+                            fontSize = 12.sp,
+                            color = OmpColors.TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (branchesAvailable) {
+                            Text(" ▾", fontSize = 12.sp, color = OmpColors.TextMuted)
+                        }
                     }
                     Text(
                         " · ",
@@ -602,10 +869,21 @@ private fun formatTimestamp(ts: Long?): String {
 }
 
 @Composable
-private fun AssistantMessage(message: DisplayMessage) {
+private fun AssistantMessage(
+    message: DisplayMessage,
+    requester: RelayRequester,
+    sessionId: String,
+) {
     val stamp = remember(message.timestamp) { formatTimestamp(message.timestamp) }
+    val needsFull = remember(message.text) {
+        com.dbchbin.ompgui.remote.relay.EventProjector.needsFullText(message.text)
+    }
     Column(modifier = Modifier.fillMaxWidth()) {
-        MarkdownText(text = message.text, modifier = Modifier.fillMaxWidth())
+        if (needsFull) {
+            LongMessageText(message = message, requester = requester, sessionId = sessionId)
+        } else {
+            MarkdownText(text = message.text, modifier = Modifier.fillMaxWidth())
+        }
         if (stamp.isNotEmpty()) {
             Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                 Text(stamp, fontSize = 11.sp, color = OmpColors.TextDim)
@@ -670,6 +948,8 @@ private fun ComposerCard(
     onRemoveAttachment: (AttachmentItem) -> Unit,
     onOpenUsage: () -> Unit,
     onOpenThinkingPicker: () -> Unit,
+    onCompact: () -> Unit = {},
+    onOpenFiles: () -> Unit = {},
 ) {
     val shape = RoundedCornerShape(14.dp)
     Column(
@@ -778,6 +1058,26 @@ private fun ComposerCard(
                 Text("$thinkingLevel ▾", fontSize = 12.sp, color = OmpColors.TextMuted)
             }
             Spacer(modifier = Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .height(32.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onOpenFiles)
+                    .padding(horizontal = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("files", fontSize = 11.sp, color = OmpColors.TextMuted)
+            }
+            Box(
+                modifier = Modifier
+                    .height(32.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(enabled = !running, onClick = onCompact)
+                    .padding(horizontal = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("compact", fontSize = 11.sp, color = OmpColors.TextMuted)
+            }
             Box(
                 modifier = Modifier
                     .size(32.dp)
@@ -1051,3 +1351,68 @@ private fun ThinkingPickerSheet(
         }
     }
 }
+
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BranchSheet(
+    branches: List<RelayBranch>,
+    leafId: String?,
+    korean: Boolean,
+    onPick: (RelayBranch) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = OmpColors.BgPanel,
+        contentColor = OmpColors.Text,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                if (korean) "가지" else "Branches",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = OmpColors.Text,
+                modifier = Modifier.padding(vertical = 8.dp),
+            )
+            if (branches.isEmpty()) {
+                Text(
+                    if (korean) "가지가 없습니다" else "No branches",
+                    fontSize = 14.sp,
+                    color = OmpColors.TextMuted,
+                )
+            } else {
+                branches.forEach { branch ->
+                    val selected = branch.id == leafId
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (selected) OmpColors.BgHover else OmpColors.BgPanel)
+                            .clickable { onPick(branch) }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(branch.label.ifBlank { branch.id }, fontSize = 14.sp, color = OmpColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            if (!branch.role.isNullOrBlank()) {
+                                Text(branch.role, fontSize = 12.sp, color = OmpColors.TextMuted, maxLines = 1)
+                            }
+                        }
+                        if (selected) {
+                            Text("✓", fontSize = 14.sp, color = OmpColors.Accent)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
