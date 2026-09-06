@@ -40,16 +40,29 @@ class PairingUriTest {
     fun scannerAcceptsValidPairCodeWithWhitespace() {
         // QR payloads may carry stray whitespace; the scanner gates on this parse.
         val url = URLEncoder.encode("wss://mac.example.ts.net/relay", StandardCharsets.UTF_8.name())
-        val uri = "  ompgui://pair#v=1&url=$url&sid=s_abc&secret=topsecret123  "
+        val uri = "  ompgui://pair#v=1&url=$url&sid=s_abc&secret=topsecret123_abcdefghijklmnopqrstuvwxyz  "
         val parsed = parsePairingUri(uri)
         assertEquals(
             PairingOffer(
                 url = "wss://mac.example.ts.net/relay",
                 serverId = "s_abc",
-                secret = "topsecret123",
+                secret = "topsecret123_abcdefghijklmnopqrstuvwxyz",
             ),
             parsed,
         )
+    }
+
+    @Test
+    fun scannerEnforcesProtocolSecretLengthAndAlphabet() {
+        val prefix = "ompgui://pair#v=1&url=wss://mac.example.ts.net/relay&sid=s_abc&secret="
+        assertNull(parsePairingUri(prefix + "a".repeat(31)))
+        assertNull(parsePairingUri(prefix + "a".repeat(129)))
+        assertNull(parsePairingUri(prefix + "a".repeat(31) + "."))
+        assertNull(parsePairingUri(prefix + "a".repeat(31) + "~"))
+        val shortest = "a".repeat(30) + "_-"
+        assertEquals(shortest, parsePairingUri(prefix + shortest)?.secret)
+        val longest = "a".repeat(128)
+        assertEquals(longest, parsePairingUri(prefix + longest)?.secret)
     }
 
     @Test
@@ -58,7 +71,7 @@ class PairingUriTest {
         assertNull(parsePairingUri("ompgui://pair#v=1&url=&sid=&secret="))
         assertNull(
             parsePairingUri(
-                "ompgui://pair#v=1&url=wss://mac.example.ts.net/relay&sid=bad sid&secret=topsecret123",
+                "ompgui://pair#v=1&url=wss://mac.example.ts.net/relay&sid=bad sid&secret=topsecret123_abcdefghijklmnopqrstuvwxyz",
             ),
         )
     }

@@ -90,7 +90,40 @@ export async function openRelaySession(
   emit: (event: AgentEvent) => void,
 ): Promise<RelayOpenResult> {
   const filePath = await resolveSessionPath(sessionId);
-  if (!filePath) throw new RelaySessionError("session_not_found", "Session not found");
+  if (!filePath) {
+    // OMP keeps a new session in memory until its first assistant message.
+    // A live process is authoritative even before its allocated path exists.
+    const live = getRpcSession(sessionId);
+    if (!live?.isAlive()) throw new RelaySessionError("session_not_found", "Session not found");
+    const state = await live.send({ type: "get_state" });
+    const transcript = await live.send({ type: "get_messages" });
+    if (typeof transcript !== "object" || transcript === null || !("messages" in transcript) || !Array.isArray(transcript.messages)) {
+      throw new RelaySessionError("rpc_command_failed", "Live session transcript is unavailable");
+    }
+    const projected = projectRemoteReplica({
+      origin: "https://ompgui.relay",
+      session: { id: sessionId, cwd: live.cwd },
+      messages: transcript.messages,
+    });
+    if (!live.isAlive() || getRpcSession(sessionId) !== live) throw new RelaySessionError("session_not_found", "Session not found");
+    let disposed = false;
+    const unsubscribe = live.onEvent((event) => {
+      if (!disposed && live.sessionId === sessionId && getRpcSession(sessionId) === live) emit(event);
+    });
+    const unsubscribeDestroy = live.onDestroy(() => {
+      if (!disposed && live.sessionId === sessionId) emit({ type: "session_closed", sessionId });
+    });
+    emit({ type: "connected", sessionId });
+    return {
+      snapshot: { cwd: live.cwd, leafId: null, messages: projected?.session.messages ?? [], agent: { running: live.isRunning(), ready: true, state } },
+      dispose: () => {
+        if (disposed) return;
+        disposed = true;
+        unsubscribe();
+        unsubscribeDestroy();
+      },
+    };
+  }
 
   const document = getSessionDocument(filePath);
   if (document.error === "too_large") {
@@ -174,9 +207,13 @@ export async function openRelaySession(
   };
 }
 
-export async function sendRelayCommand(sessionId: string, command: Record<string, unknown>): Promise<unknown> {
+export async function sendRelayCommand(
+  sessionId: string,
+  command: Record<string, unknown>,
+  prepareCommand?: () => Record<string, unknown>,
+): Promise<unknown> {
   const existing = getRpcSession(sessionId);
-  if (existing?.isAlive()) return existing.send(command);
+  if (existing?.isAlive()) return existing.send(prepareCommand ? prepareCommand() : command);
 
   const filePath = await resolveSessionPath(sessionId);
   if (!filePath) throw new RelaySessionError("session_not_found", "Session not found");
@@ -184,7 +221,7 @@ export async function sendRelayCommand(sessionId: string, command: Record<string
   const { cwd } = resolveSpawnCwdResult(header?.cwd);
   try {
     const { session } = await startRpcSession(sessionId, filePath, cwd, undefined, false, header?.cwd);
-    return await session.send(command);
+    return await session.send(prepareCommand ? prepareCommand() : command);
   } catch (error) {
     if (error instanceof WebRpcError || error instanceof RpcCommandError || error instanceof RelaySessionError) {
       throw error;

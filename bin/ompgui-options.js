@@ -27,6 +27,8 @@ Commands:
 function parseLaunchOptions(args = process.argv.slice(2), env = process.env) {
   const { values: cliArgs, positionals } = parseArgs({ args, options: { port:{type:"string",short:"p"}, hostname:{type:"string",short:"H"}, password:{type:"string"}, help:{type:"boolean",short:"h"}, version:{type:"boolean"}, "no-open":{type:"boolean"}, url:{type:"string"} }, strict:false, allowPositionals:true });
   const result = { command: positionals[0], extraPositionals: positionals.slice(1), port: cliArgs.port ?? env.OMPGUI_PORT ?? env.PORT ?? env.OMP_WEB_PORT ?? "30177", hostname: cliArgs.hostname ?? env.OMPGUI_HOSTNAME ?? env.OMP_WEB_HOSTNAME ?? "127.0.0.1", password: cliArgs.password ?? env.OMPGUI_PASSWORD ?? env.OMP_WEB_PASSWORD, relayUrl: cliArgs.url ?? env.OMPGUI_RELAY_URL ?? env.OMP_WEB_RELAY_URL, openBrowser: !cliArgs["no-open"] && !isEnabled(env.OMPGUI_NO_OPEN) && !isEnabled(env.OMP_WEB_NO_OPEN) };
+  if (result.hostname.startsWith("[") && result.hostname.endsWith("]")) result.hostname = result.hostname.slice(1, -1);
+  result.baseUrl = `http://${result.hostname.includes(":") ? `[${result.hostname}]` : result.hostname}:${result.port}`;
   if (cliArgs.help) { printHelp(); result.help = true; }
   if (cliArgs.version) { try { result.version = true; console.log(require("../package.json").version ?? "0.0.0"); } catch { result.version = true; } }
   return result;

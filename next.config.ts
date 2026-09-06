@@ -54,7 +54,9 @@ const nextConfig = (phase: string): NextConfig => {
       ];
       const headers = [
         {
-          source: "/:path*",
+          // File routes supply their own document policy. Applying the app's
+          // script-enabled CSP here overrides their inert SVG/DOCX responses.
+          source: "/:path((?!api/files(?:/|$)).*)",
           headers: securityHeaders,
         },
         {

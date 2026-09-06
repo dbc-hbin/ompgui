@@ -1,14 +1,12 @@
 package com.dbchbin.ompgui.remote.ui
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
-import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,6 +28,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
@@ -44,6 +43,14 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -51,6 +58,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
@@ -73,11 +81,14 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -88,7 +99,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dbchbin.ompgui.remote.R
 import com.dbchbin.ompgui.remote.net.ConnectionState
-import com.dbchbin.ompgui.remote.relay.AttachedImage
+import com.dbchbin.ompgui.remote.relay.AttachmentSource
+import com.dbchbin.ompgui.remote.relay.AttachmentTransfer
+import com.dbchbin.ompgui.remote.relay.RelayProtocol
 import com.dbchbin.ompgui.remote.relay.DisplayMessage
 import com.dbchbin.ompgui.remote.relay.ModelRef
 import com.dbchbin.ompgui.remote.relay.RelayBranch
@@ -114,14 +127,14 @@ data class AttachmentItem(
     val isImage: Boolean,
     val mimeType: String,
     val sizeBytes: Long,
-    val base64Data: String? = null,
+    val source: AttachmentSource? = null,
     val textContent: String? = null,
     val bitmap: ImageBitmap? = null,
 )
 
-private const val MAX_ATTACHMENTS = 10
-private const val MAX_IMAGE_BYTES = 4 * 1024 * 1024
-private const val MAX_TEXT_BYTES = 128 * 1024
+private const val MAX_ATTACHMENTS = AttachmentTransfer.MAX_PER_KIND
+private const val MAX_IMAGE_BYTES = AttachmentTransfer.MAX_IMAGE_BYTES
+private const val MAX_TEXT_BYTES = AttachmentTransfer.MAX_TEXT_BYTES
 private val THINKING_LEVELS = listOf("auto", "minimal", "low", "medium", "high", "xhigh", "max")
 
 private fun guessMimeType(name: String): String {
@@ -179,42 +192,17 @@ private fun readBounded(resolver: android.content.ContentResolver, uri: Uri, max
     }
 }
 
-private fun compressImageForRelay(resolver: android.content.ContentResolver, uri: Uri): Pair<ByteArray, String>? {
+private fun previewBitmap(resolver: android.content.ContentResolver, uri: Uri): ImageBitmap? {
     return try {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         var sample = 1
-        while (bounds.outWidth / sample > 1280 || bounds.outHeight / sample > 1280) {
-            sample *= 2
+        while (bounds.outWidth / sample > 96 || bounds.outHeight / sample > 96) sample *= 2
+        resolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
         }
-        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-        val bitmap = resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) } ?: return null
-        try {
-            val out = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
-            Pair(out.toByteArray(), "image/jpeg")
-        } finally {
-            bitmap.recycle()
-        }
-    } catch (_: Exception) {
-        null
-    }
-}
-
-private fun previewBitmap(bytes: ByteArray): ImageBitmap? {
-    return try {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        var sample = 1
-        while (bounds.outWidth / sample > 96 || bounds.outHeight / sample > 96) {
-            sample *= 2
-        }
-        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
-    } catch (_: Exception) {
-        null
-    }
+    } catch (_: Exception) { null }
 }
 
 private fun loadAttachment(context: Context, uri: Uri): AttachmentItem? {
@@ -247,27 +235,35 @@ private fun loadAttachment(context: Context, uri: Uri): AttachmentItem? {
     val isImage = mime.startsWith("image/")
     return try {
         if (isImage) {
-            val (compressedBytes, actualMime) = compressImageForRelay(resolver, uri) ?: return null
-            if (compressedBytes.size > MAX_IMAGE_BYTES) return null
+            // Count without retaining the image; provider metadata is not a trusted size.
+            val actualSize = resolver.openInputStream(uri)?.use { input ->
+                val buffer = ByteArray(8192)
+                var total = 0L
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    if (total > MAX_IMAGE_BYTES) return null
+                }
+                total
+            } ?: return null
+            if (actualSize <= 0) return null
             AttachmentItem(
                 name = name,
                 isImage = true,
-                mimeType = actualMime,
-                sizeBytes = compressedBytes.size.toLong(),
-                base64Data = Base64.encodeToString(compressedBytes, Base64.NO_WRAP),
-                bitmap = previewBitmap(compressedBytes),
+                mimeType = mime,
+                sizeBytes = actualSize,
+                source = AttachmentSource(mime, actualSize) {
+                    resolver.openInputStream(uri) ?: throw java.io.IOException("Cannot reopen $name; select it again")
+                },
+                bitmap = previewBitmap(resolver, uri),
             )
         } else if (isTextish(mime, name)) {
             val bytes = readBounded(resolver, uri, MAX_TEXT_BYTES) ?: return null
             val text = try {
-                bytes.toString(Charsets.UTF_8)
+                Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes)).toString()
             } catch (_: Exception) {
-                return AttachmentItem(
-                    name = name,
-                    isImage = false,
-                    mimeType = mime,
-                    sizeBytes = if (size > 0) size else bytes.size.toLong(),
-                )
+                return null
             }
             AttachmentItem(
                 name = name,
@@ -298,7 +294,7 @@ private fun trimFileName(name: String, max: Int = 16): String {
     return name.take(max) + "…"
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun ChatScreen(
     requester: RelayRequester,
@@ -325,7 +321,7 @@ fun ChatScreen(
     onOpenPicker: () -> Unit,
     onClosePicker: () -> Unit,
     onSelectModel: (RelayModelOption) -> Unit,
-    onSendWithAttachments: ((String, List<AttachedImage>) -> Boolean)? = null,
+    onSendWithAttachments: (suspend (String, List<AttachmentSource>) -> Boolean)? = null,
     onOpenUsage: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
     thinkingLevel: String = "auto",
@@ -351,11 +347,18 @@ fun ChatScreen(
     followUpMode: String? = null,
     onOpenPalette: () -> Unit,
 ) {
+    var historyOpen by remember(sessionId) { mutableStateOf(false) }
+    var statsOpen by remember(sessionId) { mutableStateOf(false) }
+    var commandsOpen by remember(sessionId) { mutableStateOf(false) }
+    var activityExpanded by remember(sessionId) { mutableStateOf(false) }
+    var runtimeExpanded by remember(sessionId) { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var attachedFiles by remember { mutableStateOf<List<AttachmentItem>>(emptyList()) }
-    var attachWarning by remember { mutableStateOf<String?>(null) }
+    val latestDraft by androidx.compose.runtime.rememberUpdatedState(draft)
+    var attachedFiles by remember(sessionId) { mutableStateOf<List<AttachmentItem>>(emptyList()) }
+    var attachWarning by remember(sessionId) { mutableStateOf<String?>(null) }
+    var sending by remember(sessionId) { mutableStateOf(false) }
+    var sendJob by remember(sessionId) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var thinkingPickerOpen by remember { mutableStateOf(false) }
     var filesOpen by remember { mutableStateOf(false) }
     var branchesOpen by remember { mutableStateOf(false) }
@@ -375,7 +378,7 @@ fun ChatScreen(
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
-                commandError = failure.message ?: "Command failed"
+                commandError = failure.message ?: context.getString(R.string.chat_error_command_failed)
             }
         }
     }
@@ -392,52 +395,59 @@ fun ChatScreen(
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
-            commandError = failure.message ?: "Session state unavailable"
+            commandError = failure.message ?: context.getString(R.string.chat_error_session_state)
         }
     }
-    val korean = remember { Locale.getDefault().language == "ko" }
     val pickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetMultipleContents(),
     ) { uris ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
-        scope.launch {
+        commandScope.launch {
             val loaded = withContext(Dispatchers.IO) {
                 uris.mapNotNull { uri -> loadAttachment(context, uri) }
             }
-            val remaining = MAX_ATTACHMENTS - attachedFiles.size
+            val combined = attachedFiles + loaded
             attachWarning = when {
-                loaded.size != uris.size -> "Some files could not be attached. Text must be at most 128 KiB; use Files to upload larger or binary files (up to 25 MiB)."
-                loaded.size > remaining -> "Only $MAX_ATTACHMENTS attachments are allowed. Extra selections were not attached."
+                loaded.size != uris.size -> context.getString(R.string.chat_error_attach_selection)
+                combined.count { it.isImage } > MAX_ATTACHMENTS || combined.count { !it.isImage } > MAX_ATTACHMENTS ->
+                    context.getString(R.string.chat_error_attach_limit)
                 else -> null
             }
-            attachedFiles = attachedFiles + loaded.take(remaining)
+            if (attachWarning == null) attachedFiles = combined
         }
     }
     val sendWithComposer: () -> Unit = {
-        if (attachedFiles.isEmpty()) {
-            onSend()
-        } else {
-            val textFiles = attachedFiles.filter { it.textContent != null }
-            val imageFiles = attachedFiles.filter { it.isImage && it.base64Data != null }
-            val inline = textFiles.joinToString("\n\n") { f ->
-                "--- file: ${f.name} ---\n${f.textContent}\n--- end file ---"
-            }
-            val finalText = when {
-                draft.isBlank() -> inline
-                inline.isBlank() -> draft
-                else -> "$draft\n\n$inline"
-            }
-            val images = imageFiles.map { AttachedImage(data = it.base64Data!!, mimeType = it.mimeType) }
-            if (onSendWithAttachments != null) {
-                val sent = onSendWithAttachments(finalText, images)
-                if (sent) {
-                    attachedFiles = emptyList()
-                    onDraftChange("")
+        if (!sending && !running) {
+            sending = true
+            val sendFiles = attachedFiles
+            sendJob = commandScope.launch {
+                try {
+                    val inline = sendFiles.filter { it.textContent != null }.joinToString("\n\n") { f ->
+                        "--- file: ${f.name} ---\n${f.textContent}\n--- end file ---"
+                    }
+                    val finalText = when {
+                        draft.isBlank() -> inline
+                        inline.isBlank() -> draft
+                        else -> "$draft\n\n$inline"
+                    }
+                    require(finalText.length <= RelayProtocol.MAX_PROMPT_CHARS) { "Composed prompt exceeds 3 Mi characters" }
+                    val sender = onSendWithAttachments ?: throw IllegalStateException("Acknowledged sending is unavailable")
+                    val accepted = sender(finalText, sendFiles.mapNotNull { it.source })
+                    if (accepted) {
+                        attachedFiles = attachedFiles.filterNot { it in sendFiles }
+                        if (latestDraft == draft || latestDraft.isEmpty()) onDraftChange("")
+                        attachWarning = null
+                    } else {
+                        attachWarning = context.getString(R.string.chat_error_prompt_rejected)
+                    }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    attachWarning = context.getString(R.string.chat_error_send_cancelled)
+                    throw cancelled
+                } catch (failure: Exception) {
+                    attachWarning = failure.message ?: context.getString(R.string.chat_error_send_failed)
+                } finally {
+                    sending = false
                 }
-            } else {
-                attachedFiles = emptyList()
-                onDraftChange(finalText)
-                onSend()
             }
         }
     }
@@ -453,26 +463,29 @@ fun ChatScreen(
         if (messages.isNotEmpty() && followLocked) listState.scrollToItem(messages.lastIndex)
     }
 
-    Column(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(OmpColors.Bg)
             .safeDrawingPadding()
             .imePadding(),
     ) {
+        val activityViewportMax = minOf(
+            176.dp,
+            maxHeight * 0.4f,
+        )
+        Column(Modifier.fillMaxSize()) {
         ChatTopBar(
             title = title,
-            currentModel = currentModel,
             connection = connection,
             running = running,
-            modelsAvailable = models.isNotEmpty(),
             onBack = onBack,
-            onAbort = onAbort,
-            onOpenPicker = onOpenPicker,
             onOpenSettings = onOpenSettings,
-            branchesAvailable = branches.isNotEmpty(),
-            branchLabel = branches.firstOrNull { it.id == branchLeafId }?.label
-                ?: branches.firstOrNull()?.label,
+            onOpenHistory = { historyOpen = true },
+            onOpenStats = { statsOpen = true },
+            onOpenCommands = { commandsOpen = true },
+            runtimeEnabled = !historicalView,
+            onOpenRuntime = { runtimeExpanded = true },
             onOpenBranches = {
                 if (sessionId.isNotBlank()) onFetchBranches(sessionId)
                 branchesOpen = true
@@ -486,6 +499,19 @@ fun ChatScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
         }
+        if (sending) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (attachedFiles.any { it.isImage }) stringResource(R.string.chat_status_uploading)
+                    else stringResource(R.string.chat_status_sending),
+                    color = OmpColors.TextDim,
+                    modifier = Modifier.weight(1f).padding(12.dp),
+                )
+                IconButton(onClick = { sendJob?.cancel() }) {
+                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.chat_status_cancel_send), tint = OmpColors.TextDim)
+                }
+            }
+        }
         if (!attachWarning.isNullOrBlank()) {
             Text(
                 attachWarning!!,
@@ -497,11 +523,6 @@ fun ChatScreen(
         if (commandError != null) {
             Text(commandError!!, color = OmpColors.StatusError, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
         }
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ChatHistoryHost(requester = requester, sessionId = sessionId, leafId = if (historicalView) branchLeafId else null, onOpenSession = onOpenSession, onEditMessage = onDraftChange)
-            ChatStatsHost(requester = requester, sessionId = sessionId)
-            ChatSlashHost(requester = requester, sessionCwd = sessionCwd, slashCommands = slashCommands, draft = draft, onInsertSlash = onDraftChange)
-        }
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -509,7 +530,7 @@ fun ChatScreen(
                 .fillMaxWidth()
                 .nestedScroll(scrollIntent),
             contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             itemsIndexed(
                 items = messages,
@@ -528,27 +549,62 @@ fun ChatScreen(
         }
         if (!followLocked) {
             androidx.compose.material3.TextButton(onClick = { followLocked = true }) {
-                Text("Jump to latest", color = OmpColors.Accent)
+                Text(stringResource(R.string.chat_jump_to_latest), color = OmpColors.Accent)
             }
         }
+        ChatHistoryHost(requester = requester, sessionId = sessionId, leafId = if (historicalView) branchLeafId else null, onOpenSession = onOpenSession, onEditMessage = onDraftChange, expanded = historyOpen, onDismiss = { historyOpen = false })
+        ChatStatsHost(requester = requester, sessionId = sessionId, open = statsOpen, onDismiss = { statsOpen = false })
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp)
                 .padding(bottom = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Column(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
             ChatExtensionHost(
                 requester = requester, sessionId = sessionId,
-                requests = extensionDialogs, notices = chatNotices,
+                requests = extensionDialogs, notices = chatNotices.filter { it.type != "info" },
                 status = extensionStatus, widgets = extensionWidgets,
                 onDismissNotice = onDismissChatNotice,
                 onDismissRequest = onDismissExtensionDialog,
             )
+            val hasActivity = todos.any { it.tasks.isNotEmpty() } || subagents.isNotEmpty() ||
+                chatNotices.any { it.type == "info" } || running || queueSteering.isNotEmpty() || queueFollowUp.isNotEmpty()
+            if (hasActivity || activityExpanded) Row(
+                Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(8.dp))
+                    .clickable { activityExpanded = !activityExpanded }.padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val tasks = remember(todos) { todos.flatMap { it.tasks } }
+                val summary = buildList {
+                    if (tasks.isNotEmpty()) {
+                        add(context.getString(R.string.chat_activity_todos, tasks.count { it.status == "completed" }, tasks.size))
+                    }
+                    if (subagents.isNotEmpty()) {
+                        add(context.getString(R.string.chat_activity_agents, subagents.size))
+                    }
+                    if (chatNotices.any { it.type == "info" }) {
+                        add(context.getString(R.string.chat_activity_notices, chatNotices.count { it.type == "info" }))
+                    }
+                    if (running || queueSteering.isNotEmpty() || queueFollowUp.isNotEmpty()) {
+                        add(context.getString(R.string.chat_activity_run_queue))
+                    }
+                }.joinToString(" · ").ifBlank { context.getString(R.string.chat_activity) }
+                Text(summary, modifier = Modifier.weight(1f), fontSize = 12.sp, color = OmpColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Icon(
+                    if (activityExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                    stringResource(R.string.chat_activity_details),
+                    Modifier.size(18.dp),
+                    tint = OmpColors.TextMuted,
+                )
+            }
+            Column(
+                modifier = Modifier.fillMaxWidth().heightIn(max = if (activityExpanded) activityViewportMax else 0.dp)
+                    .then(if (activityExpanded) Modifier else Modifier.clearAndSetSemantics {})
+                    .clipToBounds().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+            ExtensionNoticeList(chatNotices.filter { it.type == "info" }, onDismissChatNotice)
             TodoPanel(todos = todos)
             SubagentPanel(
                 requester = requester,
@@ -566,7 +622,11 @@ fun ChatScreen(
                 onInterrupt = { text -> execute(JSONObject().put("type", "abort_and_prompt").put("message", text)) { onDraftChange("") } },
 
             )
+            }
+            }
             RuntimePanel(
+                expanded = runtimeExpanded && !historicalView,
+                onExpandedChange = { runtimeExpanded = it },
                 requester = requester,
                 sessionId = sessionId,
                 running = running,
@@ -595,7 +655,7 @@ fun ChatScreen(
                     execute(JSONObject().put("type", "get_last_assistant_text")) { result ->
                         val text = result.optString("text")
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Assistant message", text))
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText(context.getString(R.string.chat_clipboard_assistant), text))
                     }
                 },
                 onExport = {
@@ -605,21 +665,20 @@ fun ChatScreen(
                         } catch (cancelled: kotlinx.coroutines.CancellationException) {
                             throw cancelled
                         } catch (failure: Exception) {
-                            commandError = failure.message ?: "Export failed"
+                            commandError = failure.message ?: context.getString(R.string.chat_error_export_failed)
                         }
                     }
                 },
                 onOpenPalette = onOpenPalette,
                 onAbort = { execute(JSONObject().put("type", "abort")) },
             )
-            }
-            }
+            ChatSlashHost(requester = requester, sessionCwd = sessionCwd, slashCommands = slashCommands, draft = draft, onInsertSlash = onDraftChange, expanded = commandsOpen, onDismiss = { commandsOpen = false })
             if (historicalView) {
-                Text("Historical branch — read only. Fork a user entry in History to continue separately.", color = OmpColors.TextMuted)
+                Text(stringResource(R.string.chat_historical_readonly), color = OmpColors.TextMuted)
                 androidx.compose.material3.TextButton(onClick = {
                     historicalView = false
                     onOpenSession(sessionId)
-                }) { Text("Return to live session", color = OmpColors.Accent) }
+                }) { Text(stringResource(R.string.chat_return_live), color = OmpColors.Accent) }
             } else {
             ComposerCard(
                 draft = draft,
@@ -628,12 +687,13 @@ fun ChatScreen(
                 attachedFiles = attachedFiles,
                 thinkingLevel = thinkingLevel,
                 usageFraction = usageFraction,
-                onDraftChange = onDraftChange,
+                onDraftChange = { if (!sending) onDraftChange(it) },
+                sending = sending,
                 onSend = sendWithComposer,
                 onAbort = onAbort,
                 onOpenPicker = onOpenPicker,
-                onPickFiles = { pickerLauncher.launch("*/*") },
-                onRemoveAttachment = { item -> attachedFiles = attachedFiles - item },
+                onPickFiles = { if (!sending) pickerLauncher.launch("*/*") },
+                onRemoveAttachment = { item -> if (!sending) attachedFiles = attachedFiles - item },
                 onOpenUsage = onOpenUsage,
                 onOpenThinkingPicker = { thinkingPickerOpen = true },
                 onCompact = { execute(JSONObject().put("type", "compact")) },
@@ -641,15 +701,18 @@ fun ChatScreen(
             )
             }
         }
+        }
     }
     if (pickerOpen) {
-        ModelPickerSheet(
-            models = models,
-            currentModel = currentModel,
-            running = running,
-            onClosePicker = onClosePicker,
-            onSelectModel = onSelectModel,
-        )
+        androidx.compose.runtime.key(sessionId) {
+            ModelPickerSheet(
+                models = models,
+                currentModel = currentModel,
+                running = running,
+                onClosePicker = onClosePicker,
+                onSelectModel = onSelectModel,
+            )
+        }
     }
     if (thinkingPickerOpen) {
         ThinkingPickerSheet(
@@ -674,7 +737,6 @@ fun ChatScreen(
         BranchSheet(
             branches = branches,
             leafId = branchLeafId,
-            korean = korean,
             onPick = { branch ->
                 if (sessionId.isNotBlank()) {
                     onSetLeaf(sessionId, branch.id)
@@ -695,158 +757,53 @@ fun ChatScreen(
 @Composable
 private fun ChatTopBar(
     title: String,
-    currentModel: ModelRef?,
     connection: ConnectionState,
     running: Boolean,
-    modelsAvailable: Boolean,
     onBack: () -> Unit,
-    onAbort: () -> Unit,
-    onOpenPicker: () -> Unit,
     onOpenSettings: () -> Unit,
-    branchesAvailable: Boolean = false,
-    branchLabel: String? = null,
     onOpenBranches: () -> Unit = {},
+    onOpenHistory: () -> Unit,
+    onOpenStats: () -> Unit,
+    onOpenCommands: () -> Unit,
+    onOpenRuntime: () -> Unit,
+    runtimeEnabled: Boolean,
 ) {
-    val korean = remember { Locale.getDefault().language == "ko" }
-    Column(modifier = Modifier.fillMaxWidth().background(OmpColors.Bg)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(
-                onClick = onBack,
-                modifier = Modifier.size(44.dp).clip(CircleShape),
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.chat_back),
-                    tint = OmpColors.Text,
-                )
+    var menuOpen by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().background(OmpColors.Bg)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.chat_back), tint = OmpColors.Text)
             }
-            Column(
-                modifier = Modifier.weight(1f).padding(end = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Text(
-                    title,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = OmpColors.Text,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(OmpColors.BgHover)
-                            .border(1.dp, OmpColors.Border, RoundedCornerShape(6.dp))
-                            .clickable(
-                                enabled = !running && modelsAvailable,
-                                onClick = onOpenPicker,
-                            )
-                            .padding(horizontal = 8.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            Icons.Filled.AutoAwesome,
-                            contentDescription = null,
-                            modifier = Modifier.size(12.dp),
-                            tint = OmpColors.Accent,
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            currentModel?.displayName() ?: stringResource(R.string.chat_model),
-                            fontSize = 12.sp,
-                            color = OmpColors.TextMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Icon(
-                            Icons.Filled.KeyboardArrowDown,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint = OmpColors.TextMuted,
-                        )
-                    }
-                    Text(
-                        " · ",
-                        fontSize = 12.sp,
-                        color = OmpColors.TextDim,
-                    )
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(OmpColors.BgHover)
-                            .border(1.dp, OmpColors.Border, RoundedCornerShape(6.dp))
-                            .clickable(onClick = onOpenBranches)
-                            .padding(horizontal = 8.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            branchLabel?.takeIf { it.isNotBlank() }
-                                ?: if (korean) "가지" else "Branches",
-                            fontSize = 12.sp,
-                            color = OmpColors.TextMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        if (branchesAvailable) {
-                            Text(" ▾", fontSize = 12.sp, color = OmpColors.TextMuted)
-                        }
-                    }
-                    Text(
-                        " · ",
-                        fontSize = 12.sp,
-                        color = OmpColors.TextDim,
-                    )
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(
-                                when (connection) {
-                                    ConnectionState.Connected -> OmpColors.StatusSuccess
-                                    ConnectionState.Connecting -> OmpColors.StatusWarning
-                                    else -> OmpColors.TextDim
-                                },
-                            ),
-                    )
+            Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
+                Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = OmpColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(when (connection) {
+                    ConnectionState.Connected -> if (running) stringResource(R.string.chat_status_running) else stringResource(R.string.chat_status_connected)
+                    ConnectionState.Connecting -> stringResource(R.string.chat_status_connecting)
+                    else -> stringResource(R.string.chat_status_disconnected)
+                }, fontSize = 12.sp, color = OmpColors.TextMuted)
+            }
+            IconButton(onClick = onOpenRuntime, enabled = runtimeEnabled, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Filled.Tune, stringResource(R.string.chat_menu_session_controls),
+                    tint = if (runtimeEnabled) OmpColors.TextMuted else OmpColors.TextDim)
+            }
+            IconButton(onClick = onOpenBranches, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Filled.AccountTree, stringResource(R.string.chat_menu_branches), tint = OmpColors.TextMuted)
+            }
+            Box {
+                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.Filled.MoreHoriz, stringResource(R.string.chat_menu_session_menu), tint = OmpColors.TextMuted)
                 }
-            }
-            if (running) {
-                Box(
-                    modifier = Modifier
-                        .padding(end = 8.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(OmpColors.AccentStrong)
-                        .clickable(onClick = onAbort)
-                        .padding(horizontal = 14.dp, vertical = 7.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        stringResource(R.string.chat_abort),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = androidx.compose.ui.graphics.Color.White,
-                    )
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_history)) }, leadingIcon = { Icon(Icons.Filled.History, null, Modifier.size(20.dp)) }, onClick = { menuOpen = false; onOpenHistory() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_session_info)) }, leadingIcon = { Icon(Icons.Filled.Info, null, Modifier.size(20.dp)) }, onClick = { menuOpen = false; onOpenStats() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_commands)) }, leadingIcon = { Icon(Icons.Filled.Terminal, null, Modifier.size(20.dp)) }, onClick = { menuOpen = false; onOpenCommands() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_session_controls)) }, leadingIcon = { Icon(Icons.Filled.Tune, null, Modifier.size(20.dp)) }, enabled = runtimeEnabled, onClick = { menuOpen = false; onOpenRuntime() })
+                    HorizontalDivider(color = OmpColors.Border)
+                    DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_settings)) }, leadingIcon = { Icon(Icons.Filled.Settings, null, Modifier.size(20.dp)) }, onClick = { menuOpen = false; onOpenSettings() })
                 }
-            }
-            IconButton(
-                onClick = onOpenSettings,
-                modifier = Modifier.size(44.dp).clip(CircleShape),
-            ) {
-                Icon(
-                    Icons.Filled.Settings,
-                    contentDescription = "Settings",
-                    tint = OmpColors.TextMuted,
-                )
             }
         }
-        HorizontalDivider(color = OmpColors.Border, thickness = 1.dp)
+        HorizontalDivider(color = OmpColors.Border)
     }
 }
 
@@ -878,15 +835,36 @@ private fun AssistantMessage(
     val needsFull = remember(message.text) {
         com.dbchbin.ompgui.remote.relay.EventProjector.needsFullText(message.text)
     }
-    Column(modifier = Modifier.fillMaxWidth()) {
+    var expanded by remember(message.timestamp, message.role) { mutableStateOf(false) }
+    val toolOutput = message.role == "toolResult" || message.role == "tool"
+    Column(modifier = if (toolOutput) Modifier.fillMaxWidth()
+        .background(OmpColors.ToolBg, RoundedCornerShape(8.dp))
+        .border(1.dp, OmpColors.Border, RoundedCornerShape(8.dp)).padding(horizontal = 12.dp)
+        else Modifier.fillMaxWidth()) {
+        if (toolOutput) {
+            androidx.compose.material3.TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    if (expanded) stringResource(R.string.chat_tool_hide) else stringResource(R.string.chat_tool_show),
+                    fontSize = 13.sp,
+                    color = OmpColors.TextMuted,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                    contentDescription = null, modifier = Modifier.size(18.dp), tint = OmpColors.TextMuted)
+            }
+        }
+        if (!toolOutput || expanded) {
         if (needsFull) {
             LongMessageText(message = message, requester = requester, sessionId = sessionId)
-        } else {
+        } else if (toolOutput) {
             MarkdownText(text = message.text, modifier = Modifier.fillMaxWidth())
+        } else {
+            MessageText(text = message.text, modifier = Modifier.fillMaxWidth())
+        }
         }
         if (stamp.isNotEmpty()) {
             Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                Text(stamp, fontSize = 11.sp, color = OmpColors.TextDim)
+                Text(stamp, fontSize = 12.sp, color = OmpColors.TextDim)
             }
         }
     }
@@ -903,23 +881,18 @@ private fun UserMessage(message: DisplayMessage) {
         ) {
             Box(
                 modifier = Modifier
-                    .width(bubbleMax)
-                    .clip(RoundedCornerShape(14.dp))
+                    .widthIn(max = bubbleMax)
+                    .clip(RoundedCornerShape(12.dp))
                     .background(OmpColors.UserBg)
-                    .border(1.dp, OmpColors.Border, RoundedCornerShape(14.dp))
+                    .border(1.dp, OmpColors.Border, RoundedCornerShape(12.dp))
                     .padding(horizontal = 14.dp, vertical = 10.dp),
             ) {
-                Text(
-                    message.text,
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp,
-                    color = OmpColors.Text,
-                )
+                MessageText(text = message.text, plainText = true)
             }
             if (stamp.isNotEmpty()) {
                 Text(
                     stamp,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     color = OmpColors.TextDim,
                     modifier = Modifier.padding(top = 4.dp, end = 4.dp),
                 )
@@ -938,6 +911,7 @@ private fun ComposerCard(
     running: Boolean,
     currentModel: ModelRef?,
     attachedFiles: List<AttachmentItem>,
+    sending: Boolean,
     thinkingLevel: String,
     usageFraction: Double?,
     onDraftChange: (String) -> Unit,
@@ -951,14 +925,17 @@ private fun ComposerCard(
     onCompact: () -> Unit = {},
     onOpenFiles: () -> Unit = {},
 ) {
-    val shape = RoundedCornerShape(14.dp)
+    var utilitiesOpen by remember { mutableStateOf(false) }
+    val utilitiesDesc = stringResource(R.string.chat_composer_utilities)
+    val usageLabel = usageFraction?.let { "${(it.coerceIn(0.0, 1.0) * 100).toInt()}%" } ?: "—"
+    val shape = RoundedCornerShape(12.dp)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(OmpColors.BgPanel)
             .border(1.dp, OmpColors.Border, shape)
-            .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 8.dp),
+            .padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
     ) {
         if (attachedFiles.isNotEmpty()) {
             LazyRow(
@@ -966,7 +943,7 @@ private fun ComposerCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(bottom = 8.dp),
             ) {
-                items(attachedFiles, key = { "${it.name}_${it.sizeBytes}_${it.mimeType}" }) { item ->
+                items(attachedFiles) { item ->
                     AttachmentChip(item = item, onRemove = { onRemoveAttachment(item) })
                 }
             }
@@ -976,7 +953,8 @@ private fun ComposerCard(
             onValueChange = onDraftChange,
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 24.dp, max = 144.dp),
+                .heightIn(min = 48.dp, max = 144.dp)
+                .padding(horizontal = 8.dp),
             textStyle = TextStyle(fontSize = 14.sp, color = OmpColors.Text),
             cursorBrush = SolidColor(OmpColors.Accent),
             maxLines = 6,
@@ -984,7 +962,7 @@ private fun ComposerCard(
                 Box(modifier = Modifier.fillMaxWidth()) {
                     if (draft.isEmpty()) {
                         Text(
-                            "메시지… 명령어는 /, 파일은 @ 입력",
+                            stringResource(R.string.chat_composer_placeholder),
                             fontSize = 14.sp,
                             color = OmpColors.TextDim,
                         )
@@ -993,132 +971,50 @@ private fun ComposerCard(
                 }
             },
         )
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth().height(44.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .clickable(onClick = onPickFiles),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.AttachFile,
-                    contentDescription = "Attach file",
-                    modifier = Modifier.size(20.dp),
-                    tint = OmpColors.TextMuted,
-                )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onPickFiles, enabled = !sending, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Filled.AttachFile, stringResource(R.string.chat_composer_attach), Modifier.size(20.dp), tint = OmpColors.TextMuted)
             }
-            Spacer(modifier = Modifier.width(8.dp))
             Row(
-                modifier = Modifier
-                    .height(32.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(OmpColors.BgHover)
-                    .border(1.dp, OmpColors.Border, RoundedCornerShape(8.dp))
-                    .clickable(onClick = onOpenPicker)
-                    .padding(horizontal = 10.dp),
+                Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(8.dp))
+                    .clickable(enabled = !running && !sending, onClick = onOpenPicker).padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    Icons.Filled.AutoAwesome,
-                    contentDescription = null,
-                    modifier = Modifier.size(12.dp),
-                    tint = OmpColors.Accent,
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    currentModel?.displayName() ?: stringResource(R.string.chat_model),
-                    fontSize = 12.sp,
-                    color = OmpColors.Text,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Icon(
-                    Icons.Filled.KeyboardArrowDown,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = OmpColors.TextMuted,
-                )
+                Text(currentModel?.displayName() ?: stringResource(R.string.chat_model), modifier = Modifier.weight(1f), fontSize = 12.sp, color = OmpColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Icon(Icons.Filled.KeyboardArrowDown, null, Modifier.size(16.dp), tint = OmpColors.TextMuted)
             }
-            Spacer(modifier = Modifier.width(8.dp))
-            Box(
-                modifier = Modifier
-                    .height(32.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(OmpColors.BgHover)
-                    .border(1.dp, OmpColors.Border, RoundedCornerShape(8.dp))
-                    .clickable(onClick = onOpenThinkingPicker)
-                    .padding(horizontal = 10.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("$thinkingLevel ▾", fontSize = 12.sp, color = OmpColors.TextMuted)
+            Box(Modifier.width(64.dp).heightIn(min = 48.dp).clip(RoundedCornerShape(8.dp))
+                .clickable(enabled = !running && !sending, onClick = onOpenThinkingPicker).padding(horizontal = 4.dp), contentAlignment = Alignment.Center) {
+                Text("$thinkingLevel ▾", fontSize = 12.sp, color = OmpColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Spacer(modifier = Modifier.weight(1f))
-            Box(
-                modifier = Modifier
-                    .height(32.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(onClick = onOpenFiles)
-                    .padding(horizontal = 8.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("files", fontSize = 11.sp, color = OmpColors.TextMuted)
+            Box {
+                IconButton(onClick = { utilitiesOpen = true }, modifier = Modifier.size(48.dp)) {
+                    Box(Modifier.size(28.dp).semantics { contentDescription = utilitiesDesc }, contentAlignment = Alignment.Center) {
+                        androidx.compose.foundation.Canvas(Modifier.fillMaxSize().padding(1.dp)) {
+                            val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
+                            drawCircle(color = OmpColors.Border, style = stroke)
+                            usageFraction?.let { fraction ->
+                                drawArc(color = OmpColors.TextMuted, startAngle = -90f,
+                                    sweepAngle = (fraction.coerceIn(0.0, 1.0) * 360).toFloat(),
+                                    useCenter = false, style = stroke)
+                            }
+                        }
+                        Text(usageLabel, fontSize = 9.sp, color = OmpColors.TextMuted, maxLines = 1)
+                    }
+                }
+                DropdownMenu(expanded = utilitiesOpen, onDismissRequest = { utilitiesOpen = false }) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.chat_composer_files)) }, onClick = { utilitiesOpen = false; onOpenFiles() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.chat_composer_compact)) }, enabled = !running && !sending, onClick = { utilitiesOpen = false; onCompact() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.chat_composer_context_usage, usageLabel)) }, onClick = { utilitiesOpen = false; onOpenUsage() })
+                }
             }
-            Box(
-                modifier = Modifier
-                    .height(32.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(enabled = !running, onClick = onCompact)
-                    .padding(horizontal = 8.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("compact", fontSize = 11.sp, color = OmpColors.TextMuted)
-            }
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .clickable(onClick = onOpenUsage),
-                contentAlignment = Alignment.Center,
-            ) {
-                ContextRingContent(fraction = usageFraction)
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            val canSend = (draft.isNotBlank() || attachedFiles.isNotEmpty()) && !running
-            val active = running || canSend
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(if (active) OmpColors.AccentStrong else OmpColors.BgHover)
-                    .clickable(
-                        enabled = active,
-                        onClick = { if (running) onAbort() else onSend() },
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (running) {
-                    Icon(
-                        Icons.Filled.Stop,
-                        contentDescription = stringResource(R.string.chat_abort),
-                        modifier = Modifier.size(16.dp),
-                        tint = androidx.compose.ui.graphics.Color.White,
-                    )
-                } else {
-                    Icon(
-                        Icons.Filled.ArrowUpward,
-                        contentDescription = stringResource(R.string.chat_send),
-                        modifier = Modifier.size(18.dp),
-                        tint = if (canSend) {
-                            androidx.compose.ui.graphics.Color.White
-                        } else {
-                            OmpColors.TextDim
-                        },
-                    )
+            val canSend = draft.isNotBlank() || attachedFiles.isNotEmpty()
+            val active = !sending && (running || canSend)
+            IconButton(onClick = { if (running) onAbort() else onSend() }, enabled = active, modifier = Modifier.size(48.dp)) {
+                Box(Modifier.size(32.dp).clip(CircleShape).background(if (active) OmpColors.AccentStrong else OmpColors.BgHover), contentAlignment = Alignment.Center) {
+                    Icon(if (running) Icons.Filled.Stop else Icons.Filled.ArrowUpward,
+                        stringResource(if (running) R.string.chat_abort else R.string.chat_send), Modifier.size(18.dp),
+                        tint = if (active) androidx.compose.material3.MaterialTheme.colorScheme.onPrimary else OmpColors.TextDim)
                 }
             }
         }
@@ -1133,7 +1029,7 @@ private fun AttachmentChip(item: AttachmentItem, onRemove: () -> Unit) {
             .clip(chipShape)
             .background(OmpColors.BgHover)
             .border(1.dp, OmpColors.Border, chipShape)
-            .padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (item.isImage && item.bitmap != null) {
@@ -1170,7 +1066,7 @@ private fun AttachmentChip(item: AttachmentItem, onRemove: () -> Unit) {
             )
             Text(
                 formatAttachmentSize(item.sizeBytes),
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 color = OmpColors.TextMuted,
                 maxLines = 1,
             )
@@ -1178,45 +1074,18 @@ private fun AttachmentChip(item: AttachmentItem, onRemove: () -> Unit) {
         Spacer(modifier = Modifier.width(4.dp))
         Box(
             modifier = Modifier
-                .sizeIn(minWidth = 36.dp, minHeight = 36.dp)
+                .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                 .clip(CircleShape)
                 .clickable(onClick = onRemove),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 Icons.Filled.Close,
-                contentDescription = "Remove attachment",
+                contentDescription = stringResource(R.string.chat_composer_remove_attachment),
                 modifier = Modifier.size(14.dp),
                 tint = OmpColors.TextMuted,
             )
         }
-    }
-}
-
-@Composable
-private fun ContextRingContent(fraction: Double?) {
-    val clamped = fraction?.coerceIn(0.0, 1.0)
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            drawCircle(color = OmpColors.Border, style = Stroke(width = 3f))
-            if (clamped != null) {
-                drawArc(
-                    color = OmpColors.Accent,
-                    startAngle = -90f,
-                    sweepAngle = (360f * clamped).toFloat(),
-                    useCenter = false,
-                    style = Stroke(width = 3f),
-                )
-            }
-        }
-        Text(
-            text = if (clamped == null) "—" else "${(clamped * 100).toInt()}%",
-            fontSize = 7.sp,
-            color = OmpColors.TextMuted,
-        )
     }
 }
 
@@ -1233,34 +1102,40 @@ private fun ModelPickerSheet(
     onClosePicker: () -> Unit,
     onSelectModel: (RelayModelOption) -> Unit,
 ) {
+    var query by remember { mutableStateOf("") }
+    val filteredModels = remember(models, query) {
+        val q = query.trim()
+        models.filter { q.isEmpty() || it.name.contains(q, ignoreCase = true) || it.id.contains(q, ignoreCase = true) || it.provider.contains(q, ignoreCase = true) }
+    }
     ModalBottomSheet(
+        dragHandle = { OmpSheetDragHandle() },
         onDismissRequest = onClosePicker,
-        containerColor = OmpColors.BgPanel,
+        containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
     ) {
-        Text(
-            "모델 선택",
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold,
-            color = OmpColors.Text,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
+        OmpDialogSystemBars()
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.chat_model_picker), fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold, color = OmpColors.Text, modifier = Modifier.weight(1f))
+            IconButton(onClick = onClosePicker) { Icon(Icons.Filled.Close, stringResource(R.string.chat_model_close), tint = OmpColors.TextMuted) }
+        }
+        ModelSearchField(query, { query = it }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
         LazyColumn(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            if (models.isEmpty()) {
+            if (filteredModels.isEmpty()) {
                 item {
                     Text(
-                        stringResource(R.string.chat_model_empty),
+                        if (query.isBlank()) stringResource(R.string.chat_model_empty) else stringResource(R.string.chat_model_no_matches),
                         fontSize = 14.sp,
                         color = OmpColors.TextMuted,
                         modifier = Modifier.padding(vertical = 8.dp),
                     )
                 }
             }
-            items(models, key = { "${it.provider}/${it.id}" }) { option ->
+            items(filteredModels, key = { "${it.provider}/${it.id}" }) { option ->
                 val selected = currentModel?.provider == option.provider &&
                     currentModel?.id == option.id
                 Row(
@@ -1269,6 +1144,7 @@ private fun ModelPickerSheet(
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (selected) OmpColors.BgHover else OmpColors.BgPanel)
                         .clickable(enabled = !running) { onSelectModel(option) }
+                        .heightIn(min = 48.dp)
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -1303,22 +1179,21 @@ private fun ThinkingPickerSheet(
     onSelect: (String) -> Unit,
 ) {
     ModalBottomSheet(
+        dragHandle = { OmpSheetDragHandle() },
         onDismissRequest = onClose,
-        containerColor = OmpColors.BgPanel,
+        containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
     ) {
-        Text(
-            "Thinking level",
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold,
-            color = OmpColors.Text,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
+        OmpDialogSystemBars()
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.chat_thinking_level), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = OmpColors.Text, modifier = Modifier.weight(1f))
+            IconButton(onClick = onClose) { Icon(Icons.Filled.Close, stringResource(R.string.chat_thinking_close), tint = OmpColors.TextMuted) }
+        }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .padding(bottom = 24.dp),
+                .heightIn(max = 332.dp).verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             THINKING_LEVELS.forEach { level ->
@@ -1328,7 +1203,7 @@ private fun ThinkingPickerSheet(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (isSelected) OmpColors.BgHover else OmpColors.BgPanel)
-                        .clickable(enabled = !running) { onSelect(level) }
+                        .clickable(enabled = !running) { onSelect(level) }.heightIn(min = 48.dp)
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -1359,32 +1234,32 @@ private fun ThinkingPickerSheet(
 private fun BranchSheet(
     branches: List<RelayBranch>,
     leafId: String?,
-    korean: Boolean,
     onPick: (RelayBranch) -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(
+        dragHandle = { OmpSheetDragHandle() },
         onDismissRequest = onDismiss,
-        containerColor = OmpColors.BgPanel,
+        containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
     ) {
+        OmpDialogSystemBars()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(max = 560.dp).verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
-                .padding(bottom = 28.dp),
+                .padding(bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(
-                if (korean) "가지" else "Branches",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = OmpColors.Text,
-                modifier = Modifier.padding(vertical = 8.dp),
-            )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.chat_menu_branches), fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                    color = OmpColors.Text, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, stringResource(R.string.chat_branches_close), tint = OmpColors.TextMuted) }
+            }
             if (branches.isEmpty()) {
                 Text(
-                    if (korean) "가지가 없습니다" else "No branches",
+                    stringResource(R.string.chat_branches_empty),
                     fontSize = 14.sp,
                     color = OmpColors.TextMuted,
                 )
@@ -1396,7 +1271,7 @@ private fun BranchSheet(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
                             .background(if (selected) OmpColors.BgHover else OmpColors.BgPanel)
-                            .clickable { onPick(branch) }
+                            .clickable { onPick(branch) }.heightIn(min = 48.dp)
                             .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {

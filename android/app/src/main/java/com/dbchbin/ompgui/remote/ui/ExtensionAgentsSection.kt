@@ -1,5 +1,15 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.dbchbin.ompgui.remote.ui
 
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.FilterChip
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +28,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -28,6 +40,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.dbchbin.ompgui.remote.R
 import androidx.compose.ui.unit.dp
 import com.dbchbin.ompgui.remote.relay.RelayRequestException
 import com.dbchbin.ompgui.remote.relay.RelayRequester
@@ -43,11 +58,12 @@ fun ExtensionAgentsSection(requester: RelayRequester, cwd: String) {
 
 @Composable
 private fun AgentsInventory(requester: RelayRequester, cwd: String) {
-    var query by remember { mutableStateOf("") }
-    var source by remember { mutableStateOf("all") }
-    var appliedQuery by remember { mutableStateOf("") }
-    var appliedSource by remember { mutableStateOf("all") }
-    var offset by remember { mutableStateOf(0) }
+    val context = LocalContext.current
+    var query by rememberSaveable { mutableStateOf("") }
+    var source by rememberSaveable { mutableStateOf("all") }
+    var appliedQuery by rememberSaveable { mutableStateOf("") }
+    var appliedSource by rememberSaveable { mutableStateOf("all") }
+    var offset by rememberSaveable { mutableStateOf(0) }
     var revision by remember { mutableStateOf(0) }
     var rows by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     var total by remember { mutableStateOf(0) }
@@ -77,36 +93,38 @@ private fun AgentsInventory(requester: RelayRequester, cwd: String) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            error = "Could not load agents: ${if (e is RelayRequestException) "${e.code}: ${e.message}" else e.message ?: "Request failed"}. Retry or check the desktop connection."
+            error = context.getString(R.string.extension_agents_load_failed, relayErrorDetail(e, context.getString(R.string.extension_request_failed)))
         } finally {
             loading = false
         }
     }
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Agents", color = OmpColors.Text)
-        AgentTextField("Search name, description or prompt", query, { query = it }, enabled = !busy)
-        AgentChoice("Inventory source", source, listOf("all", "user", "project", "bundled", "extension"), !busy) { source = it }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = {
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.extension_agents_title), color = OmpColors.Text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Button(onClick = { editor = JSONObject() }, enabled = !busy, shape = MaterialTheme.shapes.small) { Text(stringResource(R.string.extension_agents_create_agent)) }
+        }
+        AgentTextField(stringResource(R.string.extension_agents_search_label), query, { query = it }, enabled = !busy)
+        AgentChoice(stringResource(R.string.extension_agents_inventory_source), source, listOf("all", "user", "project", "bundled", "extension"), !busy) { source = it }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = {
                 appliedQuery = query.trim()
                 appliedSource = source
                 offset = 0
                 revision++
-            }, enabled = !loading && !busy) { Text("Search / refresh") }
-            Button(onClick = { editor = JSONObject() }, enabled = !busy) { Text("Create") }
+            }, enabled = !loading && !busy) { Text(stringResource(R.string.extension_agents_search_refresh)) }
+            TextButton(onClick = { unpack = true }, enabled = !busy) { Text(stringResource(R.string.extension_agents_unpack_bundled)) }
         }
-        OutlinedButton(onClick = { unpack = true }, enabled = !busy) { Text("Unpack bundled agents") }
-        if (loading) Text("Loading agents…", color = OmpColors.TextMuted)
+        if (loading) Text(stringResource(R.string.extension_agents_loading), color = OmpColors.TextMuted)
         error?.let { Text(it, color = OmpColors.StatusError) }
         notice?.let { Text(it, color = OmpColors.TextMuted) }
-        if (!loading && error == null && rows.isEmpty()) Text("No agents match these filters.", color = OmpColors.TextMuted)
+        if (!loading && error == null && rows.isEmpty()) Text(stringResource(R.string.extension_agents_no_matches), color = OmpColors.TextMuted)
         if (!loading && error == null) rows.forEach { row ->
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(row.getString("name"), color = OmpColors.Text)
-                Text(row.getString("description"), color = OmpColors.TextMuted)
-                Text(row.getString("source") + if (row.optBoolean("disabled")) " · disabled" else "", color = OmpColors.TextMuted)
-                OutlinedButton(onClick = {
+                Text(row.getString("name"), color = OmpColors.Text, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(row.getString("description"), color = OmpColors.TextMuted, style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                Text(row.getString("source") + if (row.optBoolean("disabled")) stringResource(R.string.extension_agents_disabled_suffix) else stringResource(R.string.extension_agents_enabled_suffix), color = OmpColors.TextMuted, style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = {
                     busy = true
                     error = null
                     scope.launch {
@@ -118,17 +136,17 @@ private fun AgentsInventory(requester: RelayRequester, cwd: String) {
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
-                            error = "Could not open the full agent: ${if (e is RelayRequestException) "${e.code}: ${e.message}" else e.message ?: "Request failed"}. Retry View / edit."
+                            error = context.getString(R.string.extension_agents_open_failed, relayErrorDetail(e, context.getString(R.string.extension_request_failed)))
                         } finally { busy = false }
                     }
-                }, enabled = !busy) { Text("View / edit") }
+                }, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.extension_view_edit)) }
                 HorizontalDivider(color = OmpColors.Border)
             }
         }
-        Text(if (total == 0) "0 agents" else "${offset + 1}–${minOf(offset + rows.size, total)} of $total", color = OmpColors.TextMuted)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { offset = maxOf(0, offset - pageLimit) }, enabled = offset > 0 && !loading && !busy) { Text("Previous") }
-            OutlinedButton(onClick = { offset += pageLimit }, enabled = hasMore && !loading && !busy && error == null) { Text("Next") }
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(if (total == 0) stringResource(R.string.extension_agents_count_zero) else stringResource(R.string.extension_agents_count_range, offset + 1, minOf(offset + rows.size, total), total), color = OmpColors.TextMuted, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = { offset = maxOf(0, offset - pageLimit) }, enabled = offset > 0 && !loading && !busy) { Text(stringResource(R.string.extension_previous)) }
+            TextButton(onClick = { offset += pageLimit }, enabled = hasMore && !loading && !busy && error == null) { Text(stringResource(R.string.extension_next)) }
         }
     }
     editor?.let { initial ->
@@ -164,6 +182,7 @@ private fun AgentEditor(
     onChanged: () -> Unit,
     onCopy: () -> Unit,
 ) {
+    val context = LocalContext.current
     val existing = initial.optString("name").isNotBlank()
     val source = initial.optString("source")
     val writable = !existing || source == "user" || source == "project"
@@ -185,6 +204,9 @@ private fun AgentEditor(
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     var deleting by remember { mutableStateOf(false) }
+    var runtimeSettings by remember { mutableStateOf(false) }
+    val overrideState = rememberSaveableStateHolder()
+    var advanced by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     fun mutate(action: String, args: JSONObject, close: Boolean = false) {
@@ -195,11 +217,11 @@ private fun AgentEditor(
             try {
                 requester.request("extensions", action, args)
                 onChanged()
-                if (close) onClose() else notice = "Changes saved."
+                if (close) onClose() else notice = context.getString(R.string.extension_agents_changes_saved)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                error = "$action failed: ${if (e is RelayRequestException) "${e.code}: ${e.message}" else e.message ?: "Request failed"}. Your input is retained; correct it or reconnect, then retry."
+                error = context.getString(R.string.extension_agents_action_failed, action, relayErrorDetail(e, context.getString(R.string.extension_request_failed)))
             } finally { busy = false }
         }
     }
@@ -207,87 +229,110 @@ private fun AgentEditor(
     AlertDialog(
         onDismissRequest = { if (!busy) onClose() },
         containerColor = OmpColors.BgPanel,
-        title = { Text(if (!existing) "Create agent" else "Agent: $name", color = OmpColors.Text) },
+        modifier = Modifier.fillMaxWidth().padding(12.dp),
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        title = { OmpDialogSystemBars(); Text(if (!existing) stringResource(R.string.extension_agents_create_agent) else name, color = OmpColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis) },
         text = {
             Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (existing) {
-                    Text("Source: $source", color = OmpColors.TextMuted)
-                    initial.optString("filePath").takeIf { it.isNotBlank() }?.let { Text(it, color = OmpColors.TextMuted) }
-                    if (!writable) Text("This source is read-only. Copy it to user or project scope to edit its definition. Disabled state and overrides can still be changed.", color = OmpColors.TextMuted)
-                }
-                AgentTextField("Name (kebab-case)", name, { name = it }, !busy && !existing)
-                AgentChoice("Save scope", saveScope, listOf("user", "project"), !busy && !existing) { saveScope = it }
-                AgentTextField("Description", description, { description = it }, !busy && writable, multiline = true)
-                AgentTextField("Full system prompt", prompt, { prompt = it }, !busy && writable, multiline = true, minLines = 8)
-                Text(if (existing) "Definition updates preserve omitted fields. Blank model/thinking and inherit choices leave existing values unchanged. To restore default tools, enable Specify tools and leave the list empty." else "Blank fields and inherit choices use defaults. An empty tools list uses default tools.", color = OmpColors.TextMuted)
-                AgentToggle("Specify tools", customTools, !busy && writable) { customTools = it }
-                if (customTools) AgentTextField("Tools — one per line", tools, { tools = it }, !busy && writable, multiline = true)
-                AgentTextField("Model selectors — one per line; optional", model, { model = it }, !busy && writable, multiline = true)
-                AgentTextField("Thinking level — optional", thinking, { thinking = it }, !busy && writable)
-                AgentBooleanString("Prewalk", prewalk, { prewalk = it }, prewalkText, { prewalkText = it }, !busy && writable)
-                AgentBooleanString("Advisor", advisor, { advisor = it }, advisorText, { advisorText = it }, !busy && writable)
-                AgentChoice("Blocking", blocking, listOf("inherit", "enabled", "disabled"), !busy && writable) { blocking = it }
-                if (writable) Button(onClick = {
-                    val args = JSONObject().put("cwd", cwd).put("name", name.trim()).put("scope", saveScope)
-                        .put("description", description).put("systemPrompt", prompt)
-                    if (customTools) args.put("tools", JSONArray(tools.lines().map { it.trim() }.filter { it.isNotEmpty() }))
-                    if (model.isNotBlank()) args.put("model", agentModelValue(model))
-                    if (thinking.isNotBlank()) args.put("thinkingLevel", thinking.trim())
-                    agentSettingValue(prewalk, prewalkText)?.let { args.put("prewalk", it) }
-                    agentSettingValue(advisor, advisorText)?.let { args.put("advisor", it) }
-                    agentSettingValue(blocking, "")?.let { args.put("blocking", it) }
-                    mutate("agents.save", args, close = true)
-                }, enabled = !busy && name.isNotBlank() && description.isNotBlank() && (saveScope != "project" || cwd.isNotBlank())) { Text("Save definition") }
-                if (existing) {
-                    HorizontalDivider(color = OmpColors.Border)
-                    Text("Global per-name settings", color = OmpColors.Text)
-                    AgentToggle("Disabled", disabled, !busy) { disabled = it }
-                    OutlinedButton(onClick = { mutate("agents.setDisabled", JSONObject().put("name", name).put("disabled", disabled)) }, enabled = !busy) { Text("Save disabled state") }
-                    AgentOverrides(initial, !busy) { kind, value ->
-                        mutate("agents.setOverride", JSONObject().put("name", name).put("kind", kind).put("value", value ?: JSONObject.NULL))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = !runtimeSettings, onClick = { runtimeSettings = false }, label = { Text(stringResource(R.string.extension_agents_definition)) })
+                        FilterChip(selected = runtimeSettings, onClick = { runtimeSettings = true }, label = { Text(stringResource(R.string.extension_agents_overrides_actions)) })
                     }
-                    OutlinedButton(onClick = onCopy, enabled = !busy) { Text("Create editable copy") }
-                    if (writable) OutlinedButton(onClick = { deleting = true }, enabled = !busy) { Text("Delete agent", color = OmpColors.StatusError) }
+                    Text(stringResource(R.string.extension_agents_source, source), color = OmpColors.TextMuted)
+                    initial.optString("filePath").takeIf { it.isNotBlank() }?.let { Text(it, color = OmpColors.TextMuted) }
+                    if (!writable) Text(stringResource(R.string.extension_agents_readonly), color = OmpColors.TextMuted)
                 }
-                if (busy) Text("Saving…", color = OmpColors.TextMuted)
+                if (!runtimeSettings) {
+                AgentTextField(stringResource(R.string.extension_agents_name_label), name, { name = it }, !busy && !existing)
+                AgentChoice(stringResource(R.string.extension_agents_save_scope), saveScope, listOf("user", "project"), !busy && !existing) { saveScope = it }
+                AgentTextField(stringResource(R.string.extension_agents_description), description, { description = it }, !busy && writable, multiline = true, codeStyle = false)
+                HorizontalDivider(color = OmpColors.Border)
+                Text(stringResource(R.string.extension_agents_instructions), style = MaterialTheme.typography.titleSmall, color = OmpColors.Text)
+                AgentTextField(stringResource(R.string.extension_agents_system_prompt), prompt, { prompt = it }, !busy && writable, multiline = true, minLines = 8)
+                TextButton(onClick = { advanced = !advanced }, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (advanced) stringResource(R.string.extension_agents_hide_advanced) else stringResource(R.string.extension_agents_show_advanced)) }
+                if (advanced) {
+                Text(if (existing) stringResource(R.string.extension_agents_advanced_hint_existing) else stringResource(R.string.extension_agents_advanced_hint_new), color = OmpColors.TextMuted)
+                Text(stringResource(R.string.extension_agents_tools_model), style = MaterialTheme.typography.titleSmall, color = OmpColors.Text)
+                AgentToggle(stringResource(R.string.extension_agents_specify_tools), customTools, !busy && writable) { customTools = it }
+                if (customTools) AgentTextField(stringResource(R.string.extension_agents_tools_lines), tools, { tools = it }, !busy && writable, multiline = true)
+                AgentTextField(stringResource(R.string.extension_agents_model_selectors), model, { model = it }, !busy && writable, multiline = true)
+                AgentTextField(stringResource(R.string.extension_agents_thinking_optional), thinking, { thinking = it }, !busy && writable)
+                HorizontalDivider(color = OmpColors.Border)
+                Text(stringResource(R.string.extension_agents_execution), style = MaterialTheme.typography.titleSmall, color = OmpColors.Text)
+                AgentBooleanString(stringResource(R.string.extension_agents_prewalk), prewalk, { prewalk = it }, prewalkText, { prewalkText = it }, !busy && writable)
+                AgentBooleanString(stringResource(R.string.extension_agents_advisor), advisor, { advisor = it }, advisorText, { advisorText = it }, !busy && writable)
+                AgentChoice(stringResource(R.string.extension_agents_blocking), blocking, listOf("inherit", "enabled", "disabled"), !busy && writable) { blocking = it }
+                }
+                }
+                if (existing && runtimeSettings) {
+                    HorizontalDivider(color = OmpColors.Border)
+                    Text(stringResource(R.string.extension_agents_global_settings), color = OmpColors.Text)
+                    AgentToggle(stringResource(R.string.extension_agents_disabled), disabled, !busy) { disabled = it }
+                    OutlinedButton(onClick = { mutate("agents.setDisabled", JSONObject().put("name", name).put("disabled", disabled)) }, enabled = !busy, shape = MaterialTheme.shapes.small) { Text(stringResource(R.string.extension_agents_save_disabled)) }
+                    overrideState.SaveableStateProvider("overrides") {
+                        AgentOverrides(initial, !busy) { kind, value ->
+                            mutate("agents.setOverride", JSONObject().put("name", name).put("kind", kind).put("value", value ?: JSONObject.NULL))
+                        }
+                    }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = onCopy, enabled = !busy) { Text(stringResource(R.string.extension_agents_create_copy)) }
+                        if (writable) TextButton(onClick = { deleting = true }, enabled = !busy) { Text(stringResource(R.string.extension_agents_delete_agent), color = OmpColors.StatusError) }
+                    }
+                }
+                if (busy) Text(stringResource(R.string.extension_agents_saving), color = OmpColors.TextMuted)
                 notice?.let { Text(it, color = OmpColors.TextMuted) }
                 error?.let { Text(it, color = OmpColors.StatusError) }
             }
         },
-        confirmButton = { TextButton(onClick = onClose, enabled = !busy) { Text("Close") } },
+        confirmButton = {
+            if (writable && !runtimeSettings) Button(shape = MaterialTheme.shapes.small, onClick = {
+                val args = JSONObject().put("cwd", cwd).put("name", name.trim()).put("scope", saveScope)
+                    .put("description", description).put("systemPrompt", prompt)
+                if (customTools) args.put("tools", JSONArray(tools.lines().map { it.trim() }.filter { it.isNotEmpty() }))
+                if (model.isNotBlank()) args.put("model", agentModelValue(model))
+                if (thinking.isNotBlank()) args.put("thinkingLevel", thinking.trim())
+                agentSettingValue(prewalk, prewalkText)?.let { args.put("prewalk", it) }
+                agentSettingValue(advisor, advisorText)?.let { args.put("advisor", it) }
+                agentSettingValue(blocking, "")?.let { args.put("blocking", it) }
+                mutate("agents.save", args, close = true)
+            }, enabled = !busy && name.isNotBlank() && description.isNotBlank() && (saveScope != "project" || cwd.isNotBlank())) { Text(if (busy) stringResource(R.string.extension_agents_saving) else stringResource(R.string.extension_agents_save_definition)) }
+        },
+        dismissButton = { TextButton(onClick = onClose, enabled = !busy) { Text(stringResource(R.string.extension_close)) } },
     )
     if (deleting) AlertDialog(
         onDismissRequest = { if (!busy) deleting = false },
         containerColor = OmpColors.BgPanel,
-        title = { Text("Delete agent?", color = OmpColors.Text) },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Permanently delete $name from $source scope? This cannot be undone.", color = OmpColors.TextMuted)
+        title = { OmpDialogSystemBars(); Text(stringResource(R.string.extension_agents_delete_title), color = OmpColors.Text) },
+        text = { Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.extension_agents_delete_message, name, source), color = OmpColors.TextMuted)
             error?.let { Text(it, color = OmpColors.StatusError) }
         } },
         confirmButton = { TextButton(onClick = {
             mutate("agents.delete", JSONObject().put("cwd", cwd).put("name", name).put("scope", source), close = true)
-        }, enabled = !busy) { Text("Delete", color = OmpColors.StatusError) } },
-        dismissButton = { TextButton(onClick = { deleting = false }, enabled = !busy) { Text("Cancel") } },
+        }, enabled = !busy) { Text(stringResource(R.string.extension_delete), color = OmpColors.StatusError) } },
+        dismissButton = { TextButton(onClick = { deleting = false }, enabled = !busy) { Text(stringResource(R.string.extension_cancel)) } },
     )
 }
 
 @Composable
 private fun AgentOverrides(initial: JSONObject, enabled: Boolean, onSave: (String, Any?) -> Unit) {
-    var model by remember { mutableStateOf(agentListText(initial.opt("overrideModel"))) }
-    var prewalk by remember { mutableStateOf(agentSettingMode(initial.opt("prewalkOverride"))) }
-    var prewalkText by remember { mutableStateOf(initial.opt("prewalkOverride") as? String ?: "") }
-    var advisor by remember { mutableStateOf(agentSettingMode(initial.opt("advisorOverride"))) }
-    var advisorText by remember { mutableStateOf(initial.opt("advisorOverride") as? String ?: "") }
-    AgentTextField("Model override — one selector per line", model, { model = it }, enabled, multiline = true)
-    OutlinedButton(onClick = { onSave("model", if (model.isBlank()) null else agentModelValue(model)) }, enabled = enabled) { Text(if (model.isBlank()) "Clear model override" else "Save model override") }
-    AgentBooleanString("Prewalk override", prewalk, { prewalk = it }, prewalkText, { prewalkText = it }, enabled)
-    OutlinedButton(onClick = { onSave("prewalk", agentSettingValue(prewalk, prewalkText)) }, enabled = enabled) { Text(if (prewalk == "inherit") "Clear prewalk override" else "Save prewalk override") }
-    AgentBooleanString("Advisor override", advisor, { advisor = it }, advisorText, { advisorText = it }, enabled)
-    OutlinedButton(onClick = { onSave("advisor", agentSettingValue(advisor, advisorText)) }, enabled = enabled) { Text(if (advisor == "inherit") "Clear advisor override" else "Save advisor override") }
+    var model by rememberSaveable { mutableStateOf(agentListText(initial.opt("overrideModel"))) }
+    var prewalk by rememberSaveable { mutableStateOf(agentSettingMode(initial.opt("prewalkOverride"))) }
+    var prewalkText by rememberSaveable { mutableStateOf(initial.opt("prewalkOverride") as? String ?: "") }
+    var advisor by rememberSaveable { mutableStateOf(agentSettingMode(initial.opt("advisorOverride"))) }
+    var advisorText by rememberSaveable { mutableStateOf(initial.opt("advisorOverride") as? String ?: "") }
+    AgentTextField(stringResource(R.string.extension_agents_model_override), model, { model = it }, enabled, multiline = true)
+    OutlinedButton(onClick = { onSave("model", if (model.isBlank()) null else agentModelValue(model)) }, enabled = enabled, shape = MaterialTheme.shapes.small) { Text(if (model.isBlank()) stringResource(R.string.extension_agents_clear_model_override) else stringResource(R.string.extension_agents_save_model_override)) }
+    AgentBooleanString(stringResource(R.string.extension_agents_prewalk_override), prewalk, { prewalk = it }, prewalkText, { prewalkText = it }, enabled)
+    OutlinedButton(onClick = { onSave("prewalk", agentSettingValue(prewalk, prewalkText)) }, enabled = enabled, shape = MaterialTheme.shapes.small) { Text(if (prewalk == "inherit") stringResource(R.string.extension_agents_clear_prewalk_override) else stringResource(R.string.extension_agents_save_prewalk_override)) }
+    AgentBooleanString(stringResource(R.string.extension_agents_advisor_override), advisor, { advisor = it }, advisorText, { advisorText = it }, enabled)
+    OutlinedButton(onClick = { onSave("advisor", agentSettingValue(advisor, advisorText)) }, enabled = enabled, shape = MaterialTheme.shapes.small) { Text(if (advisor == "inherit") stringResource(R.string.extension_agents_clear_advisor_override) else stringResource(R.string.extension_agents_save_advisor_override)) }
 }
 
 @Composable
 private fun AgentUnpackDialog(requester: RelayRequester, cwd: String, onClose: () -> Unit, onSuccess: (String) -> Unit) {
+    val context = LocalContext.current
     var target by remember { mutableStateOf("user") }
     var force by remember { mutableStateOf(false) }
     var confirmingForce by remember { mutableStateOf(false) }
@@ -300,41 +345,42 @@ private fun AgentUnpackDialog(requester: RelayRequester, cwd: String, onClose: (
         scope.launch {
             try {
                 val result = requester.request("extensions", "agents.unpack", JSONObject().put("cwd", cwd).put("scope", target).put("force", force))
-                onSuccess("Unpacked ${result.getInt("count")} agents to ${result.getString("targetDir")}.")
+                onSuccess(context.getString(R.string.extension_agents_unpacked, result.getInt("count"), result.getString("targetDir")))
             } catch (e: CancellationException) { throw e
             } catch (e: Exception) {
-                error = "Unpack failed: ${if (e is RelayRequestException) "${e.code}: ${e.message}" else e.message ?: "Request failed"}. Settings are retained; retry after resolving the error."
+                error = context.getString(R.string.extension_agents_unpack_failed, relayErrorDetail(e, context.getString(R.string.extension_request_failed)))
             } finally { busy = false }
         }
     }
     AlertDialog(
         onDismissRequest = { if (!busy) onClose() }, containerColor = OmpColors.BgPanel,
-        title = { Text("Unpack bundled agents", color = OmpColors.Text) },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Create editable agent files in the selected scope.", color = OmpColors.TextMuted)
-            AgentChoice("Target scope", target, listOf("user", "project"), !busy) { target = it }
-            AgentToggle("Overwrite existing files (force)", force, !busy) { force = it }
+        title = { OmpDialogSystemBars(); Text(stringResource(R.string.extension_agents_unpack_bundled), color = OmpColors.Text) },
+        text = { Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.extension_agents_unpack_hint), color = OmpColors.TextMuted)
+            AgentChoice(stringResource(R.string.extension_agents_target_scope), target, listOf("user", "project"), !busy) { target = it }
+            AgentToggle(stringResource(R.string.extension_agents_force_overwrite), force, !busy) { force = it }
             error?.let { Text(it, color = OmpColors.StatusError) }
         } },
-        confirmButton = { TextButton(onClick = { if (force) confirmingForce = true else unpack() }, enabled = !busy && (target != "project" || cwd.isNotBlank())) { Text(if (busy) "Unpacking…" else "Unpack") } },
-        dismissButton = { TextButton(onClick = onClose, enabled = !busy) { Text("Cancel") } },
+        confirmButton = { TextButton(onClick = { if (force) confirmingForce = true else unpack() }, enabled = !busy && (target != "project" || cwd.isNotBlank())) { Text(if (busy) stringResource(R.string.extension_agents_unpacking) else stringResource(R.string.extension_agents_unpack)) } },
+        dismissButton = { TextButton(onClick = onClose, enabled = !busy) { Text(stringResource(R.string.extension_cancel)) } },
     )
     if (confirmingForce) AlertDialog(
         onDismissRequest = { if (!busy) confirmingForce = false }, containerColor = OmpColors.BgPanel,
-        title = { Text("Overwrite agent files?", color = OmpColors.Text) },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Force unpack into $target scope can replace existing agent definitions and prompts. This cannot be undone.", color = OmpColors.TextMuted)
+        title = { OmpDialogSystemBars(); Text(stringResource(R.string.extension_agents_overwrite_title), color = OmpColors.Text) },
+        text = { Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.extension_agents_overwrite_message, target), color = OmpColors.TextMuted)
             error?.let { Text(it, color = OmpColors.StatusError) }
         } },
-        confirmButton = { TextButton(onClick = { unpack() }, enabled = !busy) { Text("Overwrite and unpack", color = OmpColors.StatusError) } },
-        dismissButton = { TextButton(onClick = { confirmingForce = false }, enabled = !busy) { Text("Cancel") } },
+        confirmButton = { TextButton(onClick = { unpack() }, enabled = !busy) { Text(stringResource(R.string.extension_agents_overwrite_confirm), color = OmpColors.StatusError) } },
+        dismissButton = { TextButton(onClick = { confirmingForce = false }, enabled = !busy) { Text(stringResource(R.string.extension_cancel)) } },
     )
 }
 
 @Composable
-private fun AgentTextField(label: String, value: String, onChange: (String) -> Unit, enabled: Boolean = true, multiline: Boolean = false, minLines: Int = 1) {
+private fun AgentTextField(label: String, value: String, onChange: (String) -> Unit, enabled: Boolean = true, multiline: Boolean = false, minLines: Int = 1, codeStyle: Boolean = multiline) {
     OutlinedTextField(value = value, onValueChange = onChange, label = { Text(label) },
-        modifier = Modifier.fillMaxWidth(), readOnly = !enabled, singleLine = !multiline, minLines = minLines,
+        modifier = Modifier.fillMaxWidth(), readOnly = !enabled, singleLine = !multiline, minLines = minLines, maxLines = if (multiline) maxOf(minLines, 12) else 1,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = if (codeStyle) FontFamily.Monospace else FontFamily.Default),
         colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
             focusedTextColor = OmpColors.Text, unfocusedTextColor = OmpColors.Text,
             focusedBorderColor = OmpColors.Accent, unfocusedBorderColor = OmpColors.Border,
@@ -345,17 +391,23 @@ private fun AgentTextField(label: String, value: String, onChange: (String) -> U
 @Composable
 private fun AgentChoice(label: String, value: String, options: List<String>, enabled: Boolean, onChange: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
-    Column {
-        OutlinedButton(onClick = { expanded = true }, enabled = enabled, modifier = Modifier.fillMaxWidth()) { Text("$label: $value") }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { option -> DropdownMenuItem(text = { Text(option) }, onClick = { expanded = false; onChange(option) }) }
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, modifier = Modifier.weight(1f), color = OmpColors.TextMuted)
+        androidx.compose.foundation.layout.Box {
+            TextButton(onClick = { expanded = true }, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(value.replaceFirstChar { it.uppercase() }, color = OmpColors.Text)
+                androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Default.ExpandMore, stringResource(R.string.extension_choose_label, label), Modifier.size(20.dp))
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { option -> DropdownMenuItem(text = { Text(option.replaceFirstChar { it.uppercase() }) }, onClick = { expanded = false; onChange(option) }) }
+            }
         }
     }
 }
 
 @Composable
 private fun AgentToggle(label: String, value: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(label, Modifier.weight(1f), color = OmpColors.Text)
         Switch(checked = value, onCheckedChange = onChange, enabled = enabled)
     }
@@ -364,8 +416,11 @@ private fun AgentToggle(label: String, value: Boolean, enabled: Boolean, onChang
 @Composable
 private fun AgentBooleanString(label: String, mode: String, onMode: (String) -> Unit, text: String, onText: (String) -> Unit, enabled: Boolean) {
     AgentChoice(label, mode, listOf("inherit", "enabled", "disabled", "custom"), enabled, onMode)
-    if (mode == "custom") AgentTextField("$label custom value", text, onText, enabled, multiline = true)
+    if (mode == "custom") AgentTextField(stringResource(R.string.extension_agents_custom_value, label), text, onText, enabled, multiline = true)
 }
+
+private fun relayErrorDetail(e: Exception, requestFailed: String): String =
+    if (e is RelayRequestException) "${e.code}: ${e.message}" else e.message ?: requestFailed
 
 private fun agentListText(value: Any?): String = when (value) {
     is JSONArray -> List(value.length()) { value.getString(it) }.joinToString("\n")

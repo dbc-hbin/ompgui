@@ -1,34 +1,105 @@
 package com.dbchbin.ompgui.remote.ui
 
 import android.content.SharedPreferences
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
 import com.dbchbin.ompgui.remote.store.AppPreferences
 
 object OmpColors {
     internal var dark by mutableStateOf(true)
     internal var warm by mutableStateOf(true)
-    val Bg get() = if (dark) Color(0xFF1B1916) else Color(0xFFFAF8F4)
-    val BgPanel get() = if (dark) Color(0xFF231F1B) else Color(0xFFFFFDFA)
-    val BgHover get() = if (dark) Color(0xFF2B2721) else Color(0xFFF0EBE3)
-    val BgSelected get() = if (dark) Color(0xFF332E26) else Color(0xFFE6DDD1)
-    val Border get() = if (dark) Color(0xFF514A41) else Color(0xFFCCC2B5)
-    val Text get() = if (dark) Color(0xFFEBE6DC) else Color(0xFF29251F)
-    val TextMuted get() = if (dark) Color(0xFFBBB3A6) else Color(0xFF625A4F)
-    val TextDim get() = if (dark) Color(0xFFA69E92) else Color(0xFF6D6357)
-    val Accent get() = if (warm) { if (dark) Color(0xFFE07B54) else Color(0xFFA94323) } else { if (dark) Color(0xFF9BAAFF) else Color(0xFF4355B9) }
-    val AccentStrong get() = if (warm) Color(0xFFAA4524) else Color(0xFF4355B9)
-    val AccentHover get() = if (warm) { if (dark) Color(0xFFE89371) else Color(0xFF913719) } else { if (dark) Color(0xFFB6C0FF) else Color(0xFF354399) }
-    val UserBg get() = if (dark) Color(0xFF2C2721) else Color(0xFFF0E8DC)
-    val CodeBg get() = if (dark) Color(0xFF181715) else Color(0xFFF2EEE7)
-    val StatusSuccess get() = if (dark) Color(0xFF69D5A5) else Color(0xFF167448)
-    val StatusError get() = if (dark) Color(0xFFFF8A80) else Color(0xFFB3261E)
-    val StatusWarning get() = if (dark) Color(0xFFF0C36A) else Color(0xFF855600)
+    // Match globals.css: Warm paper/ember and OMP birch/graphite are full palettes.
+    val Bg get() = if (warm) { if (dark) Color(0xFF1B1916) else Color(0xFFFAF9F6) } else { if (dark) Color(0xFF18181E) else Color(0xFFF9F7F1) }
+    val BgPanel get() = if (warm) { if (dark) Color(0xFF231F1B) else Color(0xFFF2F0EA) } else { if (dark) Color(0xFF1E1E24) else Color(0xFFF1EEE6) }
+    val BgHover get() = if (warm) { if (dark) Color(0xFF2B2721) else Color(0xFFEAE7DF) } else { if (dark) Color(0xFF272A31) else Color(0xFFEBE7DC) }
+    val BgSelected get() = if (warm) { if (dark) Color(0xFF332E26) else Color(0xFFE5E0D4) } else { if (dark) Color(0xFF31363F) else Color(0xFFEDE9DF) }
+    val Border get() = if (warm) { if (dark) Color(0xFF38322B) else Color(0xFFE2DDD2) } else { if (dark) Color(0xFF3D424A) else Color(0xFFC8C4B8) }
+    val Text get() = if (warm) { if (dark) Color(0xFFEBE6DC) else Color(0xFF2B2823) } else { if (dark) Color(0xFFE7E8EA) else Color(0xFF3A3832) }
+    val TextMuted get() = if (warm) { if (dark) Color(0xFFA39B8E) else Color(0xFF69635A) } else { if (dark) Color(0xFFA0A4AC) else Color(0xFF68645C) }
+    val TextDim get() = if (warm) { if (dark) Color(0xFF938C81) else Color(0xFF6A6458) } else { if (dark) Color(0xFF858B96) else Color(0xFF746F65) }
+    val Accent get() = if (warm) { if (dark) Color(0xFFE07B54) else Color(0xFFB03E22) } else { if (dark) Color(0xFFFEBC38) else Color(0xFF608058) }
+    val AccentStrong get() = if (warm) { if (dark) Color(0xFFC2542E) else Color(0xFFB03E22) } else { if (dark) Color(0xFF956000) else Color(0xFF4A603F) }
+    val AccentHover get() = if (warm) { if (dark) Color(0xFFE89371) else Color(0xFF96331B) } else { if (dark) Color(0xFFFFD06A) else Color(0xFF526F4B) }
+    val UserBg get() = if (warm) { if (dark) Color(0xFF2C2721) else Color(0xFFF5EDE1) } else { if (dark) Color(0xFF221D1A) else Color(0xFFF2EFE7) }
+    val ToolBg get() = if (warm) { if (dark) Color(0xFF26221D) else Color(0xFFF6F3ED) } else { if (dark) Color(0xFF1D2129) else Color(0xFFEEF0ED) }
+    val CodeBg get() = lerp(Bg, BgPanel, 0.12f)
+    val StatusSuccess get() = if (warm) { if (dark) Color(0xFF69D5A5) else Color(0xFF18794E) } else { if (dark) Color(0xFF89D281) else Color(0xFF4A713F) }
+    val StatusError get() = if (warm) { if (dark) Color(0xFFFF8A80) else Color(0xFFB42318) } else { if (dark) Color(0xFFFF6B78) else Color(0xFFA8463E) }
+    val StatusWarning get() = if (warm) { if (dark) Color(0xFFF0C36A) else Color(0xFF8A5A00) } else { if (dark) Color(0xFFE4C00F) else Color(0xFF876A20) }
+}
+
+private val RemoteTypography = Typography(
+    headlineLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold),
+    headlineMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold),
+    headlineSmall = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold),
+    titleLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
+    titleMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
+    titleSmall = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold),
+    bodyLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 14.sp, lineHeight = 22.sp),
+    bodyMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 13.sp, lineHeight = 20.sp),
+    bodySmall = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 12.sp, lineHeight = 18.sp),
+    labelLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
+    labelMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 12.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
+    labelSmall = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium),
+)
+
+private val RemoteShapes = Shapes(
+    extraSmall = RoundedCornerShape(4.dp),
+    small = RoundedCornerShape(8.dp),
+    medium = RoundedCornerShape(12.dp),
+    large = RoundedCornerShape(16.dp),
+    extraLarge = RoundedCornerShape(16.dp),
+)
+
+@Composable
+internal fun OmpSheetDragHandle() {
+    Box(Modifier.fillMaxWidth().height(20.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(32.dp, 4.dp).background(OmpColors.Border, RoundedCornerShape(2.dp)))
+    }
+}
+
+/** Sheets and dialogs own separate windows; changing the activity window is insufficient. */
+@Composable
+internal fun OmpDialogSystemBars() {
+    val view = LocalView.current
+    val dark = OmpColors.dark
+    SideEffect {
+        var parent = view.parent
+        var window = (view as? DialogWindowProvider)?.window
+        while (window == null && parent != null) {
+            window = (parent as? DialogWindowProvider)?.window
+            parent = parent.parent
+        }
+        window?.let {
+            val controller = WindowCompat.getInsetsController(it, view)
+            controller.isAppearanceLightStatusBars = !dark
+            controller.isAppearanceLightNavigationBars = !dark
+        }
+    }
 }
 
 @Composable
@@ -60,12 +131,25 @@ fun RemoteTheme(
     val scheme = base.copy(
         primary = OmpColors.AccentStrong, onPrimary = Color.White,
         primaryContainer = OmpColors.BgSelected, onPrimaryContainer = OmpColors.Text,
-        secondary = OmpColors.Accent, onSecondary = Color.White,
+        secondary = OmpColors.AccentStrong, onSecondary = Color.White,
+        secondaryContainer = OmpColors.BgSelected, onSecondaryContainer = OmpColors.Text,
+        tertiary = OmpColors.AccentStrong, onTertiary = Color.White,
+        tertiaryContainer = OmpColors.BgSelected, onTertiaryContainer = OmpColors.Text,
         background = OmpColors.Bg, onBackground = OmpColors.Text,
         surface = OmpColors.BgPanel, onSurface = OmpColors.Text,
         surfaceVariant = OmpColors.BgHover, onSurfaceVariant = OmpColors.TextMuted,
-        outline = OmpColors.Border, error = OmpColors.StatusError,
+        surfaceTint = Color.Transparent,
+        outline = OmpColors.TextDim, outlineVariant = OmpColors.Border,
+        error = OmpColors.StatusError, onError = OmpColors.Bg,
+        errorContainer = lerp(OmpColors.Bg, OmpColors.StatusError, 0.12f), onErrorContainer = OmpColors.Text,
+        inverseSurface = OmpColors.Text, inverseOnSurface = OmpColors.Bg,
+        inversePrimary = OmpColors.Bg,
+        surfaceBright = OmpColors.BgHover, surfaceDim = OmpColors.Bg,
+        surfaceContainerLowest = OmpColors.Bg,
+        surfaceContainerLow = OmpColors.BgPanel,
         surfaceContainer = OmpColors.BgHover,
+        surfaceContainerHigh = OmpColors.BgHover,
+        surfaceContainerHighest = OmpColors.BgSelected,
     )
-    MaterialTheme(colorScheme = scheme, content = content)
+    MaterialTheme(colorScheme = scheme, typography = RemoteTypography, shapes = RemoteShapes, content = content)
 }

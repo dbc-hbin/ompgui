@@ -6,11 +6,21 @@ import { inspectUploadTargets, parseUploadConflictStrategy, validateUploadFileNa
 import type { UploadConflictStrategy } from "../file-upload";
 import type { RelayRequestHandler } from "./request-types";
 import { RelaySessionError } from "./session-runtime";
-import { assertAllowedPath, gitRelayDiff, gitRelayStatus, listRelayFiles, readRelayFile, readRelayFileChunk, relayContentHash, relayFileMeta, relayFileRevision, searchRelayFileIndex, writeRelayFile } from "./workspace";
+import { activeRelayUploadPaths, previewRelayFile, assertAllowedPath, gitRelayDiff, gitRelayStatus, listRelayFiles, readRelayFile, readRelayFileChunk, relayContentHash, relayFileMeta, relayFileRevision, searchRelayFileIndex, writeRelayFile } from "./workspace";
 
-export const FILES_REQUEST_ACTIONS = ["list", "search", "meta", "read", "readChunk", "write", "gitStatus", "gitDiff", "uploadBegin", "uploadChunk", "uploadComplete", "uploadAbort", "downloadBegin", "downloadChunk", "downloadClose"] as const;
+export const FILES_REQUEST_ACTIONS = ["list", "search", "meta", "preview", "read", "readChunk", "write", "gitStatus", "gitDiff", "uploadBegin", "uploadChunk", "uploadComplete", "uploadAbort", "downloadBegin", "downloadChunk", "downloadClose"] as const;
 const CHUNK_BYTES = 128 * 1024;
 const TTL_MS = 5 * 60 * 1000;
+const MAX_TRANSFERS = 128;
+const MAX_DEVICE_TRANSFERS = 16;
+
+function assertTransferCapacity(deviceId: string): void {
+  let deviceCount = 0;
+  for (const transfer of transfers.values()) if (transfer.deviceId === deviceId) deviceCount++;
+  if (transfers.size >= MAX_TRANSFERS || deviceCount >= MAX_DEVICE_TRANSFERS) {
+    throw new RelaySessionError("transfer_quota", "File transfer quota exceeded");
+  }
+}
 interface TransferBase {
   deviceId: string;
   expiresAt: number;
@@ -39,12 +49,14 @@ function disposeTransfer(id: string): void {
   transfers.delete(id);
   clearTimeout(transfer.timer);
   if (transfer.kind === "upload") {
+    activeRelayUploadPaths.delete(transfer.temp);
     try {
       if (transfer.fd >= 0) closeSync(transfer.fd);
-    } finally {
-      transfer.fd = -1;
-      try { unlinkSync(transfer.temp); } catch (error) {
-        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    } catch { /* Cleanup must continue after a failed close. */ }
+    transfer.fd = -1;
+    try { unlinkSync(transfer.temp); } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+        console.warn("Relay upload staging cleanup failed", error);
       }
     }
   }
@@ -103,6 +115,7 @@ export const handleFilesRequest: RelayRequestHandler = async (action, args, cont
     case "list": return { ...await listRelayFiles(stringArg(args, "path", true), integerArg(args, "offset", true), integerArg(args, "limit", true)) };
     case "search": return { ...await searchRelayFileIndex(stringArg(args, "cwd"), stringArg(args, "query"), integerArg(args, "offset", true), integerArg(args, "limit", true)) };
     case "meta": return { ...await relayFileMeta(stringArg(args, "path")) };
+    case "preview": return { ...await previewRelayFile(stringArg(args, "path"), stringArg(args, "revision", true)) };
     case "read": return { ...await readRelayFile(stringArg(args, "path")) };
     case "readChunk": return { ...await readRelayFileChunk(stringArg(args, "path"), stringArg(args, "revision"), integerArg(args, "offset")!, integerArg(args, "length", true, CHUNK_BYTES)) };
     case "write": {
@@ -124,9 +137,12 @@ export const handleFilesRequest: RelayRequestHandler = async (action, args, cont
         if (conflict === "skip") return { skipped: true, path: destination, name, bytes: size };
         throw Object.assign(new RelaySessionError("upload_conflict", "Upload destination already exists"), { details: { conflicts: [name] } });
       }
+      context.assertActive?.();
+      assertTransferCapacity(context.deviceId);
       const id = randomUUID();
       const temp = path.join(directory, `.relay-upload-${randomUUID()}.tmp`);
       const fd = openSync(temp, "wx", 0o600);
+      activeRelayUploadPaths.add(temp);
       const expiresAt = Date.now() + TTL_MS;
       const timer = setTimeout(() => { disposeTransfer(id); }, TTL_MS);
       timer.unref();
@@ -205,6 +221,8 @@ export const handleFilesRequest: RelayRequestHandler = async (action, args, cont
       const meta = await relayFileMeta(target);
       if (meta.kind !== "file") throw new RelaySessionError("invalid_target", "Download target must be a file");
       if (meta.size > 100 * 1024 * 1024) throw new RelaySessionError("file_too_large", "Download exceeds 100 MiB");
+      context.assertActive?.();
+      assertTransferCapacity(context.deviceId);
       const id = randomUUID();
       const expiresAt = Date.now() + TTL_MS;
       const timer = setTimeout(() => { disposeTransfer(id); }, TTL_MS);
@@ -215,6 +233,8 @@ export const handleFilesRequest: RelayRequestHandler = async (action, args, cont
     case "downloadChunk":
     case "downloadClose": {
       const id = stringArg(args, "transferId");
+      // Legacy clients explicitly close after consuming the final chunk.
+      if (action === "downloadClose" && !transfers.has(id)) return { closed: true };
       const transfer = ownedTransfer(id, context.deviceId, "download");
       if (transfer.kind !== "download") throw new RelaySessionError("transfer_not_found", "Download not found");
       try {
@@ -241,6 +261,7 @@ export const handleFilesRequest: RelayRequestHandler = async (action, args, cont
           if (current.dev !== target.dev || current.ino !== target.ino || current.size !== transfer.size || relayFileRevision(transfer.path) !== transfer.revision) throw new RelaySessionError("stale_revision", "Download file changed");
         } finally { closeSync(fd); }
         const nextOffset = offset + bytes.length;
+        if (nextOffset === transfer.size) disposeTransfer(id);
         return { transferId: id, path: transfer.path, revision: transfer.revision, offset, data: bytes.toString("base64"), nextOffset, complete: nextOffset === transfer.size };
       } catch (error) {
         disposeTransfer(id);

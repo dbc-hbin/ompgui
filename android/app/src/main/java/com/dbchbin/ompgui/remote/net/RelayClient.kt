@@ -9,9 +9,9 @@ import com.dbchbin.ompgui.remote.R
 import com.dbchbin.ompgui.remote.notify.AppForeground
 import com.dbchbin.ompgui.remote.notify.RelayForegroundService
 import com.dbchbin.ompgui.remote.notify.RelayNotifications
-import com.dbchbin.ompgui.remote.relay.AttachedImage
+import com.dbchbin.ompgui.remote.relay.AttachmentSource
+import com.dbchbin.ompgui.remote.relay.AttachmentTransfer
 import com.dbchbin.ompgui.remote.relay.ClientFrame
-import com.dbchbin.ompgui.remote.relay.DisplayMessage
 import com.dbchbin.ompgui.remote.relay.EventProjector
 import com.dbchbin.ompgui.remote.relay.PairingPolicy
 import com.dbchbin.ompgui.remote.relay.RelayModelOption
@@ -150,8 +150,6 @@ class RelayClient private constructor(
         val pending = pendingRequests.values.toList()
         pendingRequests.clear()
         pendingCmds.clear()
-        fileVersions.clear()
-        pendingSettings = 0
         for (request in pending) {
             if (request.continuation.isActive) {
                 request.continuation.resumeWithException(RelayRequestException(code, message))
@@ -166,13 +164,9 @@ class RelayClient private constructor(
             messages = emptyList(), running = false, draft = "", chatTitle = "",
             currentModel = null, pickerOpen = false, todos = emptyList(), subagents = emptyList(),
             contextFraction = null, sessionThinkingLevel = null, sessionCwd = null,
-            files = emptyList(), filesPath = "", fileContent = null, branches = emptyList(),
-            branchLeafId = null, gitStatusCwd = "", gitIsRepo = false, gitRoot = null,
-            gitFiles = emptyList(), gitDiff = null, exportResult = null,
-            worktrees = emptyList(), worktreesCwd = "", worktreesGit = false, currentWorktreePath = null,
-            fileMatches = emptyList(), fileMatchQuery = "", creatingSession = false,
-            skills = emptyList(), plugins = emptyList(), mcp = emptyList(), agents = emptyList(),
-            skillResults = emptyList(), skillSearchQuery = "",
+            filesPath = "", branches = emptyList(), branchLeafId = null,
+            worktrees = emptyList(), worktreesGit = false,
+            fileMatches = emptyList(), creatingSession = false,
             extensionDialogs = emptyList(), chatNotices = emptyList(),
             extensionStatus = emptyMap(), extensionWidgets = emptyMap(), queue = EventProjector.ChatQueue(),
         ) }
@@ -185,11 +179,9 @@ class RelayClient private constructor(
     private var pairingServerId: String? = null
     /** True while a pairing-secret hello is in flight (not a token reconnect). */
     private var pairingAttempt = false
-    /** In-flight settings.update count; remote snapshots must not clobber newer local patches. */
-    private var pendingSettings = 0
-    /** req -> cmd type for in-flight prompt/abort/get_state/set_model commands. */
+    /** req -> cmd type for in-flight session commands. */
     private val pendingCmds = mutableMapOf<Int, String>()
-    private val fileVersions = mutableMapOf<String, Pair<String, String>>()
+    private var fileMatchQuery = ""
 
     init {
         connection.setListener(object : RelayConnection.Listener {
@@ -243,7 +235,7 @@ class RelayClient private constructor(
     }
 
     fun setDraft(value: String) {
-        _ui.update { it.copy(draft = value.take(RelayProtocol.MAX_PROMPT_CHARS)) }
+        _ui.update { it.copy(draft = value) }
     }
 
     private fun dialogId(dialog: EventProjector.ChatExtensionRequest): String = when (dialog) {
@@ -269,8 +261,6 @@ class RelayClient private constructor(
             pair()
         }
     }
-
-    fun isPaired(): Boolean = _ui.value.paired
 
     fun getServerUrl(): String = pairingOfferUrl ?: store.load()?.relayUrl.orEmpty()
 
@@ -338,7 +328,6 @@ class RelayClient private constructor(
                 contextFraction = null,
                 sessionThinkingLevel = null,
                 sessionCwd = it.sessions.find { session -> session.id == id }?.cwd,
-                files = emptyList(),
             )
         }
         RelayNotifications.cancelAgentDone(app, id)
@@ -358,41 +347,72 @@ class RelayClient private constructor(
         connection.send(ClientFrame.SessionsList)
     }
 
+    private var promptSending = false
+
     fun sendPrompt() {
-        val text = _ui.value.draft.trim()
-        if (text.isEmpty()) return
-        sendPrompt(text)
+        val text = _ui.value.draft
+        requestScope.launch { sendPrompt(text) }
     }
 
-    fun sendPrompt(text: String, images: List<AttachedImage>? = null): Boolean {
-        val trimmed = text.trim()
-        if ((trimmed.isEmpty() && images.isNullOrEmpty()) || _ui.value.running) return false
-        val outgoing = when (val expansion = expandWebSlashCommand(trimmed)) {
-            is SlashExpansion.Expand -> expansion.prompt
-            is SlashExpansion.UsageError -> {
-                _ui.update { it.copy(error = "${expansion.command} needs arguments") }
-                return false
+    suspend fun sendPrompt(text: String, images: List<AttachmentSource> = emptyList()): Boolean =
+        withContext(Dispatchers.Main.immediate) {
+            val session = openedSessionId ?: return@withContext false
+            val generation = sessionGeneration
+            val originalDraft = _ui.value.draft
+            if (promptSending || _ui.value.running) return@withContext false
+            val trimmed = text.trim()
+            if (trimmed.isEmpty() && images.isEmpty()) return@withContext false
+            val staged = mutableListOf<String>()
+            var accepted = false
+            fun checkSession() {
+                check(sessionGeneration == generation && openedSessionId == session && connection.state == ConnectionState.Connected) {
+                    "Session or connection changed; prompt was not sent"
+                }
             }
-            SlashExpansion.NotWeb -> trimmed
+            promptSending = true
+            try {
+                checkSession()
+                require(images.size <= AttachmentTransfer.MAX_PER_KIND) { "At most 10 images are allowed" }
+                val outgoing = when (val expansion = expandWebSlashCommand(trimmed)) {
+                    is SlashExpansion.Expand -> expansion.prompt
+                    is SlashExpansion.UsageError -> throw IllegalArgumentException("${expansion.command} needs arguments")
+                    SlashExpansion.NotWeb -> trimmed
+                }
+                require(outgoing.length <= RelayProtocol.MAX_PROMPT_CHARS) { "Composed prompt exceeds 3 Mi characters" }
+                for (image in images) {
+                    AttachmentTransfer.stage(image, { action, args ->
+                        withContext(Dispatchers.Main.immediate) {
+                            checkSession()
+                            request("sessions", action, args).also { checkSession() }
+                        }
+                    }, ::checkSession, staged::add)
+                }
+                checkSession()
+                _ui.update { it.copy(error = null) }
+                request("sessions", "command", JSONObject().put("id", session).put("command",
+                    JSONObject().put("type", "prompt").put("message", outgoing).put("attachmentIds", org.json.JSONArray(staged))))
+                checkSession()
+                accepted = true
+                _ui.update { it.copy(draft = if (it.draft == originalDraft) "" else it.draft, error = null) }
+                true
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                if (sessionGeneration == generation) _ui.update { it.copy(error = failure.message ?: "Prompt was not accepted") }
+                false
+            } finally {
+                if (!accepted) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                        for (id in staged) {
+                            try {
+                                withTimeout(5_000L) { request("sessions", "attachments.abort", JSONObject().put("attachmentId", id)) }
+                            } catch (_: Exception) { /* Disconnect also disposes device staging. */ }
+                        }
+                    }
+                }
+                promptSending = false
+            }
         }
-        val req = nextReq++
-        pendingCmds[req] = "prompt"
-        val displayMsg = if (outgoing.isEmpty()) "[Attached Image]" else trimmed
-        if (!connection.send(ClientFrame.Cmd(req = req, type = "prompt", message = outgoing, images = images))) {
-            pendingCmds.remove(req)
-            _ui.update { it.copy(error = "Could not send prompt (connection or attachment limit)") }
-            return false
-        }
-        _ui.update {
-            it.copy(
-                draft = "",
-                running = true,
-                error = null,
-                messages = it.messages + DisplayMessage(role = "user", text = displayMsg),
-            )
-        }
-        return true
-    }
 
     fun fetchUsage() {
         connection.send(ClientFrame.Usage)
@@ -400,46 +420,6 @@ class RelayClient private constructor(
 
     fun fetchSettings() {
         connection.send(ClientFrame.SettingsGet)
-    }
-
-    fun updateSettings(patch: JSONObject) {
-        pendingSettings++
-        connection.send(ClientFrame.SettingsUpdate(patch))
-    }
-
-    fun updateSetting(key: String, value: Any?) {
-        val patch = JSONObject()
-        val parts = key.split(".")
-        if (parts.size == 1) {
-            patch.put(key, value ?: JSONObject.NULL)
-        } else {
-            var current = patch
-            for (i in 0 until parts.size - 1) {
-                val nested = JSONObject()
-                current.put(parts[i], nested)
-                current = nested
-            }
-            current.put(parts.last(), value ?: JSONObject.NULL)
-        }
-        val current = settingsData.value?.let { JSONObject(it.toString()) } ?: JSONObject()
-        deepMerge(current, patch)
-        settingsData.value = current
-        pendingSettings++
-        connection.send(ClientFrame.SettingsUpdate(patch))
-    }
-
-    private fun deepMerge(target: JSONObject, source: JSONObject) {
-        val keys = source.keys()
-        while (keys.hasNext()) {
-            val key = keys.next()
-            val value = source.get(key)
-            if (value is JSONObject) {
-                val existing = target.optJSONObject(key) ?: JSONObject().also { target.put(key, it) }
-                deepMerge(existing, value)
-            } else {
-                target.put(key, value)
-            }
-        }
     }
 
     fun abort() {
@@ -456,57 +436,6 @@ class RelayClient private constructor(
 
     fun fetchSlash() {
         connection.send(ClientFrame.SlashList)
-    }
-
-    fun fetchFiles(path: String? = null) {
-        val args = JSONObject().put("path", path ?: _ui.value.sessionCwd)
-        scopedRequest("files", "list", args) { result ->
-            val entries = result.optJSONArray("entries")
-            val files = buildList {
-                if (entries != null) for (index in 0 until entries.length()) {
-                    val entry = entries.optJSONObject(index) ?: continue
-                    add(com.dbchbin.ompgui.remote.relay.RelayFileEntry(
-                        entry.getString("name"), entry.getString("path"), entry.getBoolean("dir"),
-                    ))
-                }
-            }
-            _ui.update { it.copy(files = files, filesPath = result.getString("path")) }
-        }
-    }
-
-    fun readFile(path: String) {
-        val filePath = path.trim()
-        if (filePath.isEmpty()) return
-        scopedRequest("files", "read", JSONObject().put("path", filePath)) { result ->
-            fileVersions.remove(filePath)
-            if (result.getBoolean("complete") && result.has("contentHash")) {
-                fileVersions[filePath] = result.getString("revision") to result.getString("contentHash")
-            }
-            _ui.update { it.copy(fileContent = com.dbchbin.ompgui.remote.relay.RelayFileContent(
-                path = result.getString("path"), name = result.getString("name"),
-                language = result.optString("language").takeIf(String::isNotBlank),
-                text = result.getString("text"), truncated = !result.getBoolean("complete"),
-                bytes = result.getLong("size"),
-            ), error = null) }
-        }
-    }
-
-    fun clearFileContent() {
-        _ui.update { it.copy(fileContent = null) }
-    }
-
-    fun deleteSession(id: String) {
-        connection.send(ClientFrame.SessionDelete(id))
-    }
-
-    fun archiveSession(id: String) {
-        connection.send(ClientFrame.SessionArchive(id))
-    }
-
-    fun renameSession(id: String, name: String) {
-        val title = name.trim()
-        if (title.isEmpty()) return
-        connection.send(ClientFrame.SessionRename(id, title))
     }
 
     fun fetchArchives() {
@@ -531,9 +460,7 @@ class RelayClient private constructor(
                         entry.optString("branch").takeIf(String::isNotBlank), entry.optBoolean("isMain")))
                 }
             }
-            _ui.update { it.copy(worktrees = worktrees, worktreesCwd = result.getString("cwd"),
-                worktreesGit = result.getBoolean("isGit"),
-                currentWorktreePath = result.optString("currentWorktreePath").takeIf { path -> path.isNotBlank() && path != "null" }) }
+            _ui.update { it.copy(worktrees = worktrees, worktreesGit = result.getBoolean("isGit")) }
         }
     }
 
@@ -543,55 +470,6 @@ class RelayClient private constructor(
         if (directory.isEmpty() || branchName.isEmpty()) return
         scopedRequest("sessions", "worktrees.add", JSONObject().put("cwd", directory).put("branch", branchName)) {
             fetchWorktrees(directory)
-        }
-    }
-
-    fun writeFile(path: String, text: String) {
-        val filePath = path.trim()
-        if (filePath.isEmpty()) return
-        val version = fileVersions[filePath]
-        if (version == null) {
-            _ui.update { it.copy(error = "Read the complete file before saving changes") }
-            return
-        }
-        scopedRequest("files", "write", JSONObject().put("path", filePath).put("text", text)
-            .put("revision", version.first).put("baseContentHash", version.second)) {
-            fileVersions.remove(filePath)
-            readFile(filePath)
-        }
-    }
-
-    fun fetchGitStatus(cwd: String) {
-        val directory = cwd.trim()
-        if (directory.isEmpty()) return
-        scopedRequest("files", "gitStatus", JSONObject().put("cwd", directory)) { result ->
-            val entries = result.getJSONArray("files")
-            val files = buildList {
-                for (index in 0 until entries.length()) {
-                    val entry = entries.getJSONObject(index)
-                    add(com.dbchbin.ompgui.remote.relay.RelayGitFile(
-                        entry.getString("filePath"), entry.getString("status"), entry.getString("code"),
-                    ))
-                }
-            }
-            _ui.update { it.copy(gitStatusCwd = result.getString("cwd"),
-                gitIsRepo = result.getBoolean("isGitRepository"),
-                gitRoot = result.optString("repositoryRoot").takeIf { root -> root.isNotBlank() && root != "null" },
-                gitFiles = files, gitDiff = null, error = null) }
-        }
-    }
-
-    fun fetchGitDiff(cwd: String, path: String) {
-        val directory = cwd.trim()
-        val filePath = path.trim()
-        if (directory.isEmpty() || filePath.isEmpty()) return
-        scopedRequest("files", "gitDiff", JSONObject().put("cwd", directory).put("path", filePath)) { result ->
-            _ui.update { it.copy(gitDiff = com.dbchbin.ompgui.remote.relay.RelayGitDiff(
-                path = result.getString("path"), supported = result.getBoolean("supported"),
-                status = result.optString("status").takeIf(String::isNotBlank),
-                patch = result.optString("patch").takeIf(String::isNotBlank),
-                truncated = result.optBoolean("truncated"),
-            ), error = null) }
         }
     }
 
@@ -622,135 +500,13 @@ class RelayClient private constructor(
         }
     }
 
-    fun exportSession(id: String) {
-        val sessionId = id.trim()
-        if (sessionId.isEmpty()) return
-        connection.send(ClientFrame.SessionExport(sessionId))
-    }
-
-    fun fetchSkills(cwd: String) {
-        val directory = cwd.trim()
-        if (directory.isEmpty()) return
-        connection.send(ClientFrame.SkillsList(directory))
-    }
-
-    fun toggleSkill(cwd: String, filePath: String, disable: Boolean) {
-        val directory = cwd.trim()
-        val skillPath = filePath.trim()
-        if (directory.isEmpty() || skillPath.isEmpty()) return
-        connection.send(ClientFrame.SkillsToggle(directory, skillPath, disable))
-    }
-
-    fun fetchPlugins(cwd: String) {
-        val directory = cwd.trim()
-        if (directory.isEmpty()) return
-        connection.send(ClientFrame.PluginsList(directory))
-    }
-
-    fun pluginAction(cwd: String, action: String, source: String? = null, scope: String? = null) {
-        val directory = cwd.trim()
-        val pluginAction = action.trim()
-        if (directory.isEmpty() || pluginAction.isEmpty()) return
-        connection.send(ClientFrame.PluginsAction(directory, pluginAction, source?.trim(), scope?.trim()))
-    }
-
-    fun fetchMcp(cwd: String? = null) {
-        connection.send(ClientFrame.McpList(cwd?.trim()?.takeIf { it.isNotEmpty() }))
-    }
-
-    fun deleteMcp(cwd: String, name: String) {
-        val directory = cwd.trim()
-        val serverName = name.trim()
-        if (directory.isEmpty() || serverName.isEmpty()) return
-        connection.send(ClientFrame.McpDelete(directory, serverName))
-    }
-
-    fun upsertMcp(
-        cwd: String,
-        name: String,
-        type: String,
-        command: String? = null,
-        url: String? = null,
-        args: List<String>? = null,
-    ) {
-        val directory = cwd.trim()
-        val serverName = name.trim()
-        val serverType = type.trim()
-        if (directory.isEmpty() || serverName.isEmpty() || serverType.isEmpty()) return
-        connection.send(
-            ClientFrame.McpUpsert(
-                directory,
-                serverName,
-                serverType,
-                command?.trim(),
-                url?.trim(),
-                args,
-            ),
-        )
-    }
-
-    fun importSession(fileName: String, content: String) {
-        val name = fileName.trim()
-        if (name.isEmpty() || content.length > 180_000) return
-        connection.send(ClientFrame.SessionImport(name, content))
-    }
-
-    fun searchSkills(query: String, limit: Int = 10) {
-        val text = query.trim()
-        if (text.isEmpty()) return
-        _ui.update { it.copy(skillSearchQuery = text) }
-        connection.send(ClientFrame.SkillsSearch(text, limit.coerceIn(1, 20)))
-    }
-
-    fun installSkill(pkg: String, scope: String, cwd: String?) {
-        val packageName = pkg.trim()
-        val installScope = scope.trim()
-        if (packageName.isEmpty()) return
-        if (installScope != "global" && installScope != "project") return
-        connection.send(ClientFrame.SkillsInstall(packageName, installScope, cwd?.trim()?.takeIf { it.isNotEmpty() }))
-    }
-
-    fun fetchAgents(cwd: String?) {
-        connection.send(ClientFrame.AgentsList(cwd?.trim()?.takeIf { it.isNotEmpty() }))
-    }
-
-    fun saveAgent(name: String, description: String, systemPrompt: String, scope: String, cwd: String?) {
-        val agentName = name.trim()
-        val agentScope = scope.trim()
-        if (agentName.isEmpty()) return
-        if (agentScope != "user" && agentScope != "project") return
-        connection.send(
-            ClientFrame.AgentsSave(
-                agentName,
-                description.trim(),
-                systemPrompt,
-                agentScope,
-                cwd?.trim()?.takeIf { it.isNotEmpty() },
-            ),
-        )
-    }
-
-    fun deleteAgent(name: String, scope: String, cwd: String?) {
-        val agentName = name.trim()
-        val agentScope = scope.trim()
-        if (agentName.isEmpty()) return
-        if (agentScope != "user" && agentScope != "project") return
-        connection.send(
-            ClientFrame.AgentsDelete(agentName, agentScope, cwd?.trim()?.takeIf { it.isNotEmpty() }),
-        )
-    }
-
-    fun fetchAuthProviders() {
-        connection.send(ClientFrame.AuthProviders)
-    }
-
     fun searchFiles(cwd: String, query: String) {
         val directory = cwd.trim()
         val text = query.trim()
         if (directory.isEmpty() || text.isEmpty()) return
-        _ui.update { it.copy(fileMatchQuery = text) }
+        fileMatchQuery = text
         scopedRequest("files", "search", JSONObject().put("cwd", directory).put("query", text)) { result ->
-            if (_ui.value.fileMatchQuery != text) return@scopedRequest
+            if (fileMatchQuery != text) return@scopedRequest
             val entries = result.getJSONArray("matches")
             val matches = buildList {
                 for (index in 0 until entries.length()) {
@@ -768,44 +524,6 @@ class RelayClient private constructor(
         connection.send(ClientFrame.ProjectsAdd(directory))
     }
 
-    fun removeProject(cwd: String) {
-        val directory = cwd.trim()
-        if (directory.isEmpty()) return
-        connection.send(ClientFrame.ProjectsRemove(directory))
-    }
-
-    fun clearExport() {
-        _ui.update { it.copy(exportResult = null) }
-    }
-
-    fun clearGitDiff() {
-        _ui.update { it.copy(gitDiff = null) }
-    }
-
-    fun createSession(
-        cwd: String,
-        message: String? = null,
-        provider: String? = null,
-        modelId: String? = null,
-        thinkingLevel: String? = null,
-    ) {
-        val directory = cwd.trim()
-        if (directory.isEmpty()) return
-        _ui.update { it.copy(creatingSession = true, error = null) }
-        if (!connection.send(
-                ClientFrame.SessionCreate(
-                    cwd = directory,
-                    message = message,
-                    provider = provider,
-                    modelId = modelId,
-                    thinkingLevel = thinkingLevel,
-                ),
-            )
-        ) {
-            _ui.update { it.copy(creatingSession = false, error = "Could not create session") }
-        }
-    }
-
     fun setSessionThinkingLevel(level: String) {
         val trimmed = level.trim()
         if (trimmed.isEmpty() || _ui.value.running) return
@@ -816,15 +534,6 @@ class RelayClient private constructor(
             return
         }
         _ui.update { it.copy(sessionThinkingLevel = trimmed) }
-    }
-
-    fun compactSession() {
-        if (_ui.value.running) return
-        val req = nextReq++
-        pendingCmds[req] = "compact"
-        if (!connection.send(ClientFrame.Cmd(req = req, type = "compact"))) {
-            pendingCmds.remove(req)
-        }
     }
 
     private fun requestSessionState() {
@@ -851,7 +560,6 @@ class RelayClient private constructor(
         pairingOfferUrl = null
         pairingServerId = null
         pairingAttempt = false
-        pendingSettings = 0
         pendingCmds.clear()
         if (opened != null) RelayNotifications.cancelAgentDone(app, opened)
         if (pending != null && pending != opened) RelayNotifications.cancelAgentDone(app, pending)
@@ -982,21 +690,13 @@ class RelayClient private constructor(
                 awaitingSnapshot = false
                 requestSessionState()
                 fetchBranches(frame.id)
-                if (!frame.cwd.isNullOrBlank()) {
-                    fetchFiles(frame.cwd)
-                }
                 val snapshotModel = frame.agent.model
-                val promptInFlight = pendingCmds.containsValue("prompt")
                 _ui.update {
                     it.copy(
                         chatTitle = frame.title?.takeIf { title -> title.isNotBlank() }
                             ?: it.chatTitle,
-                        messages = EventProjector.mergeSnapshotMessages(
-                            current = it.messages,
-                            snapshot = frame.messages,
-                            promptInFlight = promptInFlight,
-                        ),
-                        running = if (promptInFlight) true else frame.agent.running,
+                        messages = frame.messages,
+                        running = frame.agent.running,
                         currentModel = snapshotModel ?: it.currentModel,
                         sessionCwd = frame.cwd ?: it.sessionCwd,
                         branchLeafId = frame.leafId,
@@ -1047,54 +747,11 @@ class RelayClient private constructor(
                 if (frame.id != openedSessionId) return
                 _ui.update { it.copy(branches = frame.branches, branchLeafId = frame.leafId) }
             }
-            is ServerFrame.SessionExported -> {
-                if (frame.export.id != openedSessionId) return
-                _ui.update { it.copy(exportResult = frame.export, error = null) }
-            }
-            is ServerFrame.Skills -> {
-                _ui.update { it.copy(skills = frame.skills, error = null) }
-            }
-            is ServerFrame.SkillUpdated -> {
-                _ui.update { state ->
-                    state.copy(
-                        skills = state.skills.map { skill ->
-                            if (skill.filePath == frame.filePath) {
-                                skill.copy(disableModelInvocation = frame.disableModelInvocation)
-                            } else {
-                                skill
-                            }
-                        },
-                        error = null,
-                    )
-                }
-            }
-            is ServerFrame.Plugins -> {
-                _ui.update { it.copy(plugins = frame.packages, error = null) }
-            }
-            is ServerFrame.Mcp -> {
-                _ui.update { it.copy(mcp = frame.inventory, error = null) }
-            }
-            is ServerFrame.McpDeleted, is ServerFrame.McpUpserted -> {
-                _ui.update { it.copy(error = null) }
-            }
-            is ServerFrame.SessionImported -> {
-                _ui.update { it.copy(error = null) }
-            }
-            is ServerFrame.SkillResults -> {
-                _ui.update { it.copy(skillResults = frame.results, skillSearchQuery = frame.query, error = null) }
-            }
-            is ServerFrame.SkillInstalled -> {
-                _ui.update { it.copy(error = null) }
-            }
-            is ServerFrame.Agents -> {
-                _ui.update { it.copy(agents = frame.agents, error = null) }
-            }
-            is ServerFrame.AgentSaved, is ServerFrame.AgentDeleted -> {
-                _ui.update { it.copy(error = null) }
-            }
-            is ServerFrame.AuthProvidersResult -> {
-                _ui.update { it.copy(authProviders = frame.providers, error = null) }
-            }
+            is ServerFrame.SessionExported, is ServerFrame.Skills, is ServerFrame.SkillUpdated,
+            is ServerFrame.Plugins, is ServerFrame.Mcp, is ServerFrame.McpDeleted, is ServerFrame.McpUpserted,
+            is ServerFrame.SessionImported, is ServerFrame.SkillResults, is ServerFrame.SkillInstalled,
+            is ServerFrame.Agents, is ServerFrame.AgentSaved, is ServerFrame.AgentDeleted,
+            is ServerFrame.AuthProvidersResult -> Unit // Panels own their correlated requests.
             is ServerFrame.FilesIndexResult -> Unit // Correlated searches also discard superseded queries.
             is ServerFrame.ProjectAdded, is ServerFrame.ProjectRemoved -> {
                 _ui.update { it.copy(error = null) }
@@ -1157,7 +814,7 @@ class RelayClient private constructor(
                         extensionDialogs = dialogs,
                         chatNotices = if (notice == null) state.chatNotices else state.chatNotices.filterNot { it.id == notice.id } + notice,
                         extensionStatus = statuses, extensionWidgets = widgets,
-                        draft = editorText?.take(RelayProtocol.MAX_PROMPT_CHARS) ?: state.draft,
+                        draft = editorText ?: state.draft,
                         chatTitle = title ?: state.chatTitle,
                         queue = if (deliveredUser) EventProjector.queueAfterDelivered(state.queue, messages.lastOrNull()?.text.orEmpty()) else state.queue,
                     )
@@ -1174,13 +831,8 @@ class RelayClient private constructor(
                 }
             }
             is ServerFrame.CmdErr -> {
-                val kind = pendingCmds.remove(frame.req) ?: return
-                _ui.update { current ->
-                    current.copy(
-                        error = frame.message,
-                        running = if (kind == "prompt") false else current.running,
-                    )
-                }
+                pendingCmds.remove(frame.req) ?: return
+                _ui.update { it.copy(error = frame.message) }
             }
             is ServerFrame.CmdOk -> {
                 when (pendingCmds.remove(frame.req)) {
@@ -1209,18 +861,10 @@ class RelayClient private constructor(
                 usageData.value = frame.data
             }
             is ServerFrame.Settings -> {
-                if (pendingSettings == 0) settingsData.value = frame.settings
+                settingsData.value = frame.settings
             }
-            is ServerFrame.SettingsUpdated -> {
-                pendingSettings = (pendingSettings - 1).coerceAtLeast(0)
-                if (frame.success && frame.settings != null && pendingSettings == 0) {
-                    settingsData.value = frame.settings
-                } else if (!frame.success) {
-                    connection.send(ClientFrame.SettingsGet)
-                    val message = frame.error?.takeIf { it.isNotBlank() } ?: "Settings update failed"
-                    _ui.update { it.copy(error = message) }
-                }
-            }
+            is ServerFrame.SettingsUpdated -> Unit // Settings panel owns its correlated update.
+
         }
     }
 
@@ -1261,7 +905,6 @@ class RelayClient private constructor(
                     messages = emptyList(),
                     running = false,
                     chatTitle = "",
-                    fileContent = null,
                     todos = emptyList(),
                     subagents = emptyList(),
                 )

@@ -6,9 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,6 +25,14 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
+import java.net.URI
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -70,13 +77,13 @@ internal sealed interface MdBlock {
 internal sealed interface InlineSeg {
     data class Rich(val text: String, val bold: Boolean, val italic: Boolean) : InlineSeg
     data class Code(val text: String) : InlineSeg
+    data class Link(val text: String, val target: String) : InlineSeg
 }
 
 private val BulletPattern = Regex("^[-*]\\s+(.*)$")
 private val OrderedPattern = Regex("^(\\d+)[.)]\\s+(.*)$")
 private val HeadingPattern = Regex("^(#{1,3})\\s+(.*)$")
 private val TableSeparatorPattern = Regex("^\\|?[\\s:|\\-]+\\|?$")
-private val InlineTokenPattern = Regex("(`[^`\\n]+`)|(\\*\\*.+?\\*\\*)|(\\*[^*\\n]+?\\*)")
 
 private fun bulletOf(trimmed: String): String? =
     BulletPattern.matchEntire(trimmed)?.groupValues?.get(1)
@@ -94,28 +101,76 @@ private fun isTableHeader(header: String?, separator: String?): Boolean {
     return sep.contains('-') && TableSeparatorPattern.matches(sep)
 }
 
+internal data class MarkdownNavigation(val cwd: String?, val openFile: (String) -> Unit)
+internal val LocalMarkdownNavigation = staticCompositionLocalOf<MarkdownNavigation?> { null }
+
+internal sealed interface MarkdownTarget {
+    data class Web(val url: String) : MarkdownTarget
+    data class File(val path: String) : MarkdownTarget
+}
+
+internal fun resolveMarkdownLink(target: String, cwd: String?): MarkdownTarget? {
+    val value = target.trim()
+    if (value.isEmpty() || value.any { it.code < 32 || it == '\\' } || value.startsWith("//") || value.startsWith("#")) return null
+    val uri = try { URI(value.replace(" ", "%20")) } catch (_: Exception) { return null }
+    if (uri.scheme != null) {
+        if (uri.scheme.lowercase() !in setOf("http", "https") || uri.host.isNullOrBlank() || uri.userInfo != null) return null
+        return MarkdownTarget.Web(uri.toASCIIString())
+    }
+    val path = uri.path ?: return null
+    if (path.any { it.code < 32 || it == '\\' } || path.startsWith("//") || Regex("^[a-zA-Z][a-zA-Z0-9+.-]*:").containsMatchIn(path)) return null
+    if (cwd.isNullOrBlank() || !cwd.startsWith("/")) return null
+    val absolute = if (path.startsWith("/")) path else "${cwd.trimEnd('/')}/$path"
+    val parts = mutableListOf<String>()
+    for (part in absolute.split('/')) when (part) {
+        "", "." -> Unit
+        ".." -> if (parts.isNotEmpty()) parts.removeAt(parts.lastIndex)
+        else -> parts.add(part)
+    }
+    // Server files authorization remains the authority for allowed roots and symlinks.
+    return MarkdownTarget.File("/" + parts.joinToString("/"))
+}
+
 internal fun parseInline(src: String): List<InlineSeg> {
-    if (src.isEmpty()) return emptyList()
     val out = mutableListOf<InlineSeg>()
-    var cursor = 0
-    for (m in InlineTokenPattern.findAll(src)) {
-        if (m.range.first > cursor) {
-            out.add(InlineSeg.Rich(src.substring(cursor, m.range.first), bold = false, italic = false))
+    val plain = StringBuilder()
+    fun flush() { if (plain.isNotEmpty()) { out.add(InlineSeg.Rich(plain.toString(), false, false)); plain.clear() } }
+    var i = 0
+    while (i < src.length) {
+        if (src[i] == '\\' && i + 1 < src.length && src[i + 1] in "[]()`*\\") { plain.append(src[i + 1]); i += 2; continue }
+        if (src[i] == '`') {
+            val count = src.substring(i).takeWhile { it == '`' }.length
+            val delimiter = "`".repeat(count)
+            val end = src.indexOf(delimiter, i + count)
+            if (end >= 0) { flush(); out.add(InlineSeg.Code(src.substring(i + count, end))); i = end + count; continue }
         }
-        val token = m.value
-        when {
-            token.startsWith("`") ->
-                out.add(InlineSeg.Code(token.drop(1).dropLast(1)))
-            token.startsWith("**") ->
-                out.add(InlineSeg.Rich(token.drop(2).dropLast(2), bold = true, italic = false))
-            else ->
-                out.add(InlineSeg.Rich(token.drop(1).dropLast(1), bold = false, italic = true))
+        if (src[i] == '[') {
+            val labelEnd = src.indexOf("](", i + 1)
+            if (labelEnd >= 0) {
+                var j = labelEnd + 2
+                var depth = 1
+                val destination = StringBuilder()
+                while (j < src.length && depth > 0) {
+                    val c = src[j]
+                    if (c == '\\' && j + 1 < src.length) { destination.append(src[j + 1]); j += 2; continue }
+                    if (c == '(') depth++
+                    if (c == ')') depth--
+                    if (depth > 0) destination.append(c)
+                    j++
+                }
+                if (depth == 0) {
+                    flush(); out.add(InlineSeg.Link(src.substring(i + 1, labelEnd), destination.toString().removeSurrounding("<", ">"))); i = j; continue
+                }
+            }
         }
-        cursor = m.range.last + 1
+        if (src[i] == '*') {
+            val delimiter = if (src.startsWith("**", i)) "**" else "*"
+            val end = src.indexOf(delimiter, i + delimiter.length)
+            if (end > i + delimiter.length) { flush(); out.add(InlineSeg.Rich(src.substring(i + delimiter.length, end), delimiter.length == 2, delimiter.length == 1)); i = end + delimiter.length; continue }
+        }
+        plain.append(src[i++])
     }
-    if (cursor < src.length) {
-        out.add(InlineSeg.Rich(src.substring(cursor), bold = false, italic = false))
-    }
+    flush()
     return out
 }
 
@@ -134,12 +189,13 @@ internal fun parseMarkdown(src: String): List<MdBlock> {
         val line = lines[i]
         val t = line.trim()
         when {
-            t.startsWith("```") -> {
+            Regex("^(`{3,}|~{3,})(.*)$").matches(t) -> {
                 flushPara()
-                val lang = t.drop(3).trim()
+                val fence = t.takeWhile { it == t.first() }
+                val lang = t.drop(fence.length).trim()
                 val buf = mutableListOf<String>()
                 i++
-                while (i < lines.size && !lines[i].trim().startsWith("```")) {
+                while (i < lines.size && !lines[i].trim().let { closing -> closing.length >= fence.length && closing.all { it == fence.first() } }) {
                     buf.add(lines[i])
                     i++
                 }
@@ -275,73 +331,47 @@ private fun InlineParagraph(
     forceBold: Boolean = false,
 ) {
     val segs = remember(text) { parseInline(text) }
-    if (segs.none { it is InlineSeg.Code }) {
-        Text(
-            text = buildAnnotatedString {
-                segs.forEach { seg ->
-                    if (seg is InlineSeg.Rich) {
-                        withStyle(
-                            androidx.compose.ui.text.SpanStyle(
-                                fontWeight = if (seg.bold || forceBold) FontWeight.Bold else null,
-                                fontStyle = if (seg.italic) FontStyle.Italic else null,
-                                color = if (seg.italic && !seg.bold) OmpColors.TextMuted else OmpColors.Text,
-                            ),
-                        ) {
-                            append(seg.text)
-                        }
-                    }
-                }
-            },
-            modifier = modifier,
-            fontSize = baseSize,
-            lineHeight = baseLineHeight,
-            color = OmpColors.Text,
-        )
-    } else {
-        @OptIn(ExperimentalLayoutApi::class)
-        FlowRow(modifier = modifier) {
+    val navigation = LocalMarkdownNavigation.current
+    val uriHandler = LocalUriHandler.current
+    Text(
+        text = buildAnnotatedString {
             segs.forEach { seg ->
                 when (seg) {
-                    is InlineSeg.Rich -> {
-                        Text(
-                            text = seg.text,
-                            fontSize = baseSize,
-                            lineHeight = baseLineHeight,
-                            color = if (seg.italic && !seg.bold) OmpColors.TextMuted else OmpColors.Text,
-                            fontWeight = if (seg.bold || forceBold) FontWeight.Bold else null,
-                            fontStyle = if (seg.italic) FontStyle.Italic else null,
-                        )
+                    is InlineSeg.Rich -> withStyle(SpanStyle(
+                        fontWeight = if (seg.bold || forceBold) FontWeight.Bold else null,
+                        fontStyle = if (seg.italic) FontStyle.Italic else null,
+                        color = if (seg.italic && !seg.bold) OmpColors.TextMuted else OmpColors.Text,
+                    )) { append(seg.text) }
+                    is InlineSeg.Code -> withStyle(SpanStyle(fontFamily = Mono, color = OmpColors.Text, background = OmpColors.ToolBg)) { append(seg.text) }
+                    is InlineSeg.Link -> {
+                        val target = resolveMarkdownLink(seg.target, navigation?.cwd)
+                        if (target == null) append(seg.text) else withLink(LinkAnnotation.Clickable(
+                            tag = seg.target,
+                            styles = TextLinkStyles(style = SpanStyle(color = OmpColors.Accent, textDecoration = TextDecoration.Underline)),
+                            linkInteractionListener = {
+                                when (target) {
+                                    is MarkdownTarget.File -> navigation?.openFile?.invoke(target.path)
+                                    is MarkdownTarget.Web -> try { uriHandler.openUri(target.url) } catch (_: IllegalArgumentException) { }
+                                }
+                            },
+                        )) { append(seg.text) }
                     }
-                    is InlineSeg.Code -> MdInlineCode(code = seg.text)
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun MdInlineCode(code: String) {
-    Box(
-        modifier = Modifier
-            .padding(horizontal = 2.dp)
-            .clip(RoundedCornerShape(4.dp))
-            .background(OmpColors.BgHover)
-            .border(1.dp, OmpColors.Border, RoundedCornerShape(4.dp))
-            .padding(horizontal = 5.dp, vertical = 2.dp),
-    ) {
-        Text(
-            text = code,
-            fontFamily = Mono,
-            fontSize = 13.sp,
-            color = OmpColors.Accent,
-        )
-    }
+        },
+        modifier = modifier,
+        fontSize = baseSize,
+        lineHeight = baseLineHeight,
+        color = OmpColors.Text,
+    )
 }
 
 @Composable
 private fun MdCodeBlock(lang: String, code: String) {
     val clipboard = LocalClipboardManager.current
     var copied by remember(code) { mutableStateOf(false) }
+    var showSource by remember(code, lang) { mutableStateOf(false) }
+    val hasPreview = lang.equals("mermaid", ignoreCase = true)
     LaunchedEffect(copied) {
         if (copied) {
             delay(1500)
@@ -366,13 +396,15 @@ private fun MdCodeBlock(lang: String, code: String) {
             Text(
                 text = lang.ifBlank { "code" },
                 modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 fontFamily = Mono,
                 fontSize = 12.sp,
                 color = OmpColors.TextMuted,
             )
             Row(
                 modifier = Modifier
-                    .heightIn(min = 40.dp)
+                    .heightIn(min = 48.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .clickable {
                         clipboard.setText(AnnotatedString(code))
@@ -396,45 +428,41 @@ private fun MdCodeBlock(lang: String, code: String) {
             }
         }
         HorizontalDivider(color = OmpColors.Border, thickness = 1.dp)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-        ) {
-            Text(
-                text = code.trimEnd(),
-                modifier = Modifier.padding(10.dp),
-                fontFamily = Mono,
-                fontSize = 12.5.sp,
-                lineHeight = 18.sp,
-                color = OmpColors.Text,
-            )
+        if (hasPreview) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf("Preview", "Source").forEach { label ->
+                    val selected = (label == "Source") == showSource
+                    androidx.compose.material3.TextButton(
+                        onClick = { showSource = label == "Source" },
+                        modifier = Modifier.weight(1f).background(if (selected) OmpColors.BgSelected else OmpColors.CodeBg, RoundedCornerShape(8.dp)),
+                    ) { Text(label, fontSize = 12.sp, color = if (selected) OmpColors.Text else OmpColors.TextMuted) }
+                }
+            }
         }
+        RichPreview(
+            content = code,
+            kind = if (hasPreview && !showSource) RichPreviewKind.Mermaid else RichPreviewKind.Code,
+            language = lang,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp, max = 420.dp),
+        )
     }
 }
 
 @Composable
 private fun MdTable(header: List<String>, rows: List<List<String>>) {
-    val shape = RoundedCornerShape(6.dp)
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .border(1.dp, OmpColors.Border, shape),
-    ) {
-        MdTableRow(cells = header, background = OmpColors.BgPanel, header = true)
-        rows.forEachIndexed { index, row ->
-            HorizontalDivider(color = OmpColors.Border, thickness = 1.dp)
-            val normalized = if (row.size > header.size) {
-                row.take(header.size)
-            } else {
-                row + List(maxOf(0, header.size - row.size)) { "" }
+    val shape = RoundedCornerShape(8.dp)
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val tableWidth = maxOf(maxWidth, 120.dp * header.size.coerceAtLeast(1))
+        Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            Column(Modifier.width(tableWidth).clip(shape).border(1.dp, OmpColors.Border, shape)) {
+                MdTableRow(cells = header, background = OmpColors.ToolBg, header = true)
+                rows.forEachIndexed { index, row ->
+                    HorizontalDivider(color = OmpColors.Border, thickness = 1.dp)
+                    val normalized = if (row.size > header.size) row.take(header.size)
+                        else row + List(maxOf(0, header.size - row.size)) { "" }
+                    MdTableRow(cells = normalized, background = if (index % 2 == 1) OmpColors.BgHover else OmpColors.Bg, header = false)
+                }
             }
-            MdTableRow(
-                cells = normalized,
-                background = if (index % 2 == 1) OmpColors.BgHover else OmpColors.Bg,
-                header = false,
-            )
         }
     }
 }
@@ -474,7 +502,7 @@ private fun MdBullets(items: List<String>) {
                         .padding(top = 8.dp)
                         .size(6.dp)
                         .clip(RoundedCornerShape(50))
-                        .background(OmpColors.Accent),
+                        .background(OmpColors.TextMuted),
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 InlineParagraph(
@@ -498,8 +526,8 @@ private fun MdOrdered(items: List<String>) {
                     modifier = Modifier.width(24.dp),
                     fontSize = 14.sp,
                     lineHeight = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = OmpColors.Accent,
+                    fontWeight = FontWeight.Normal,
+                    color = OmpColors.TextMuted,
                 )
                 InlineParagraph(
                     text = item,
@@ -525,7 +553,7 @@ private fun MdQuote(text: String, depth: Int = 0) {
             modifier = Modifier
                 .width(3.dp)
                 .fillMaxHeight()
-                .background(OmpColors.AccentStrong),
+                .background(OmpColors.Border),
         )
         if (depth >= MaxQuoteDepth) {
             // At max depth: render excess `>` markers as plain text instead of

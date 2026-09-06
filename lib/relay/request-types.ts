@@ -10,6 +10,8 @@
 export interface RelayRequestContext {
   deviceId: string;
   sessionId: string | null;
+  /** Recheck transport authorization and selection before deferred mutations. */
+  assertActive?: () => void;
 }
 
 /**

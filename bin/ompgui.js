@@ -40,10 +40,10 @@ let nextBin;
 try { nextBin = require.resolve("next/dist/bin/next", { paths:[pkgDir] }); } catch { try { nextBin = path.join(path.dirname(require.resolve("next/package.json", {paths:[pkgDir]})), "dist", "bin", "next"); } catch { nextBin = path.join(pkgDir,"node_modules/next/dist/bin/next"); } }
 const { port, hostname, password, openBrowser } = options;
 if (password) { process.env.OMPGUI_PASSWORD = password; process.env.OMP_WEB_PASSWORD = password; }
-const loopback = new Set(["127.0.0.1","localhost","::1","[::1]"]);
+const loopback = new Set(["127.0.0.1","localhost","::1"]);
 if (!loopback.has(hostname) && !(typeof password === "string" && password.length)) { console.error(`Refusing to listen on ${hostname} without OMPGUI_PASSWORD (or --password). Set a strong password or bind to 127.0.0.1.`); process.exit(1); }
 if (!fs.existsSync(nextDir)) { console.error("Build artifacts not found. Please report this issue."); process.exit(1); }
-const url = `http://${hostname}:${port}`;
+const url = options.baseUrl;
 function openBrowserWindow(target) { const cmd = process.platform === "win32" ? "cmd.exe" : process.platform === "darwin" ? "open" : process.platform === "linux" && (process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP) ? "wslview" : "xdg-open"; const args = process.platform === "win32" ? ["/c","start","",target] : [target]; try { const p=spawn(cmd,args,{stdio:"ignore",detached:true}); p.on("error",e=>console.warn(`Could not open browser automatically: ${e.message}`)); p.unref(); } catch(e) { console.warn(`Could not open browser automatically: ${e.message}`); } }
 async function main() {
   if (!await isPortAvailable(port, hostname)) { console.log(`ompgui is already running on ${hostname}:${port}.`); if (openBrowser) openBrowserWindow(url); return; }

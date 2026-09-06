@@ -3,6 +3,7 @@ import { authenticateRelayHello, type RelayAuthSuccess, type RelayAuthFailure } 
 import { encodeRelayFrames, RelayChunkAssembler } from "./chunks";
 import { handleFilesRequest, cleanupRelayFileTransfers } from "./files-requests";
 import { handleSessionsRequest } from "./sessions-requests";
+import { relayAttachments } from "./attachments";
 import { handleModelsRequest, getModelsCatalog, cancelModelLoginsForDevice } from "./models-requests";
 import { handleExtensionsRequest } from "./extensions-requests";
 import { handleSystemRequest } from "./system-requests";
@@ -69,7 +70,17 @@ import { mergeNativeSettings, readNativeSettings, writeNativeSettings, type Nati
 
 const deviceConnections = new Map<string, Set<() => void>>();
 export function revokeRelayDeviceConnections(deviceId: string): void {
-  for (const close of deviceConnections.get(deviceId) ?? []) close();
+  const connections = deviceConnections.get(deviceId);
+  deviceConnections.delete(deviceId);
+  for (const close of connections ?? []) close();
+  cleanupDeviceResources(deviceId);
+}
+
+function cleanupDeviceResources(deviceId: string): void {
+  relayAttachments.cleanupDevice(deviceId);
+  cleanupRelayFileTransfers(deviceId);
+  clearSessionExportTransfers(deviceId);
+  void cancelModelLoginsForDevice(deviceId).catch(() => {});
 }
 
 export interface RelaySocket {
@@ -247,10 +258,10 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
     if (deviceId) {
       const connections = deviceConnections.get(deviceId);
       connections?.delete(revoke);
-      if (connections?.size === 0) deviceConnections.delete(deviceId);
-      cleanupRelayFileTransfers(deviceId);
-      clearSessionExportTransfers(deviceId);
-      void cancelModelLoginsForDevice(deviceId).catch(() => {});
+      if (connections?.size === 0) {
+        deviceConnections.delete(deviceId);
+        cleanupDeviceResources(deviceId);
+      }
     }
     coalescer.reset();
     disposeSession?.();
@@ -310,7 +321,21 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
             if (frame.action === "delete" || frame.action === "archive") openedSessionId = null;
             else if (typeof frame.args.id === "string") openedSessionId = frame.args.id;
           }
-          const data = await handlers[frame.domain](frame.action, frame.args, { deviceId, sessionId: openedSessionId });
+          const requestEpoch = epoch;
+          const requestDeviceId = deviceId;
+          const data = await handlers[frame.domain](frame.action, frame.args, {
+            deviceId,
+            sessionId: openedSessionId,
+            assertActive: () => {
+              if (!authorized(requestDeviceId)) {
+                revoke();
+                throw Object.assign(new Error("Device authorization expired"), { code: "unauthorized" });
+              }
+              if (closed || epoch !== requestEpoch || deviceId !== requestDeviceId) {
+                throw Object.assign(new Error("Session changed during request"), { code: "request_cancelled" });
+              }
+            },
+          });
           const revoked = frame.domain === "system" && frame.action === "devices.revoke" && typeof data.deviceId === "string" ? data.deviceId : null;
           send({ op: "result", req: frame.req, success: true, data }, revoked === deviceId);
           if (revoked) revokeRelayDeviceConnections(revoked);

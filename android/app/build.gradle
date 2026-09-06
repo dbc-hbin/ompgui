@@ -10,15 +10,48 @@ if (releaseSigningPropertiesFile.exists()) {
     releaseSigningPropertiesFile.withInputStream { releaseSigningProperties.load(it) }
 }
 
+def parityPreviewAssets = layout.buildDirectory.dir('generated/parityPreviewAssets')
+def previewAssetScript = rootProject.file('scripts/prepare-preview-assets.mjs')
+def previewNodeModules = rootProject.file('../node_modules')
+def previewNodeExecutable = providers.gradleProperty('nodeExecutable')
+    .orElse(providers.environmentVariable('NODE_BINARY'))
+    .orElse('node')
+
+def prepareParityPreviewAssets = tasks.register('prepareParityPreviewAssets', Exec) {
+    group = 'build'
+    description = 'Bundle installed Mermaid and Prism assets for offline native previews'
+    workingDir rootProject.projectDir
+    executable previewNodeExecutable.get()
+    args previewAssetScript.absolutePath, parityPreviewAssets.get().asFile.absolutePath
+    inputs.property('nodeExecutable', previewNodeExecutable)
+    inputs.file(previewAssetScript)
+    inputs.files(fileTree(previewNodeModules) {
+        include 'mermaid/package.json', 'mermaid/LICENSE', 'mermaid/dist/mermaid.min.js'
+        include 'prismjs/package.json', 'prismjs/LICENSE', 'prismjs/components.json', 'prismjs/dependencies.js'
+        include 'prismjs/components/prism-*.min.js'
+    }).withPathSensitivity(PathSensitivity.RELATIVE)
+    outputs.files(
+        parityPreviewAssets.map { it.file('preview/mermaid.min.js') },
+        parityPreviewAssets.map { it.file('preview/prism.min.js') }
+    )
+}
+
+tasks.named('preBuild').configure {
+    dependsOn prepareParityPreviewAssets
+}
+
 android {
+    sourceSets {
+        main.assets.srcDir(parityPreviewAssets)
+    }
     namespace = "com.dbchbin.ompgui.remote"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
         applicationId "com.dbchbin.ompgui.remote"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 605
-        versionName "0.6.5"
+        versionCode 700
+        versionName "0.7.0"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -66,12 +99,6 @@ gradle.taskGraph.whenReady { graph ->
     }
 }
 
-repositories {
-    flatDir{
-        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
-    }
-}
-
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
@@ -100,8 +127,6 @@ dependencies {
     testImplementation "junit:junit:$junitVersion"
     testImplementation "org.json:json:20240303"
 }
-
-apply from: 'capacitor.build.gradle'
 
 try {
     def servicesJSON = file('google-services.json')

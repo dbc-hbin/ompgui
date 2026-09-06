@@ -5,7 +5,16 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.ui.semantics.selected
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -19,7 +28,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -28,18 +40,21 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.CancellationException
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -48,16 +63,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -73,14 +86,7 @@ import com.dbchbin.ompgui.remote.relay.shareFile
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
-import com.dbchbin.ompgui.remote.relay.RelayExport
-import com.dbchbin.ompgui.remote.relay.RelayAgent
-import com.dbchbin.ompgui.remote.relay.RelayAuthProvider
 import com.dbchbin.ompgui.remote.relay.RelayFileMatch
-import com.dbchbin.ompgui.remote.relay.RelaySkillResult
-import com.dbchbin.ompgui.remote.relay.RelayMcp
-import com.dbchbin.ompgui.remote.relay.RelayPlugin
-import com.dbchbin.ompgui.remote.relay.RelaySkill
 import com.dbchbin.ompgui.remote.relay.RelayModelOption
 import com.dbchbin.ompgui.remote.relay.RelayProject
 import com.dbchbin.ompgui.remote.relay.RelaySlashCommand
@@ -93,7 +99,6 @@ import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 private data class ProjectGroup(
     val key: String,
@@ -114,18 +119,13 @@ fun SessionListScreen(
     onRefresh: () -> Unit,
     onOpen: (String) -> Unit,
     onUnpair: () -> Unit,
-    onNewSession: () -> Unit = {},
     onPrepareNewSession: () -> Unit = {},
-    onCreateSession: (cwd: String, message: String?, provider: String?, modelId: String?, thinkingLevel: String?) -> Unit = { _, _, _, _, _ -> },
     projects: List<RelayProject> = emptyList(),
     creatingSession: Boolean = false,
     archives: List<RelayArchive> = emptyList(),
     slashCommands: List<RelaySlashCommand> = emptyList(),
     worktrees: List<RelayWorktree> = emptyList(),
     worktreesGit: Boolean = false,
-    onDeleteSession: (String) -> Unit = {},
-    onArchiveSession: (String) -> Unit = {},
-    onRenameSession: (String, String) -> Unit = { _, _ -> },
     onFetchArchives: () -> Unit = {},
     onRestoreArchive: (String) -> Unit = {},
     onFetchWorktrees: (String) -> Unit = {},
@@ -136,42 +136,21 @@ fun SessionListScreen(
     models: List<RelayModelOption> = emptyList(),
     usageData: JSONObject? = null,
     settings: JSONObject? = null,
-    onRefreshUsage: () -> Unit = {},
-    onOpenSettings: () -> Unit = {},
     onOpenUsage: () -> Unit = {},
-    onUpdateSetting: (String, Any?) -> Unit = { _, _ -> },
-    onExportSession: (String) -> Unit = {},
-    lastExport: RelayExport? = null,
-    onClearExport: () -> Unit = {},
-    skills: List<RelaySkill> = emptyList(),
-    plugins: List<RelayPlugin> = emptyList(),
-    mcp: List<RelayMcp> = emptyList(),
-    onFetchSkills: (String) -> Unit = {},
-    onToggleSkill: (String, String, Boolean) -> Unit = { _, _, _ -> },
-    onFetchPlugins: (String) -> Unit = {},
-    onPluginAction: (String, String, String?, String?) -> Unit = { _, _, _, _ -> },
-    onFetchMcp: (String?) -> Unit = {},
-    onDeleteMcp: (String, String) -> Unit = { _, _ -> },
-    onUpsertMcp: (String, String, String, String?, String?, List<String>?) -> Unit = { _, _, _, _, _, _ -> },
-    onImportSession: (String, String) -> Unit = { _, _ -> },
     fileMatches: List<RelayFileMatch> = emptyList(),
     onSearchFiles: (String, String) -> Unit = { _, _ -> },
-    onOpenFile: ((String) -> Unit)? = null,
     onSlashSelected: (String) -> Unit,
     initialDraft: String,
     onOpenSessionFilePreview: (String, String) -> Unit,
-    agents: List<RelayAgent> = emptyList(),
-    onSaveAgent: (String, String, String, String, String?) -> Unit = { _, _, _, _, _ -> },
-    onDeleteAgent: (String, String, String?) -> Unit = { _, _, _ -> },
-    skillResults: List<RelaySkillResult> = emptyList(),
-    skillSearchQuery: String = "",
-    onSearchSkills: (String, Int) -> Unit = { _, _ -> },
-    onInstallSkill: (String, String, String?) -> Unit = { _, _, _ -> },
-    authProviders: List<RelayAuthProvider> = emptyList(),
     onAddProject: (String) -> Unit = {},
-    onRemoveProject: (String) -> Unit = {},
+    onRemoveProject: suspend (String) -> Unit = {},
 ) {
     val context = LocalContext.current
+    var overflowOpen by remember { mutableStateOf(false) }
+    var projectsOpen by remember { mutableStateOf(false) }
+    var worktreesOpen by remember { mutableStateOf(false) }
+    var projectMenu by remember { mutableStateOf<String?>(null) }
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     var runningOnly by rememberSaveable { mutableStateOf(false) }
     var projectOrder by rememberSaveable { mutableStateOf(emptyList<String>()) }
@@ -194,8 +173,30 @@ fun SessionListScreen(
     var exportPending by remember { mutableStateOf<String?>(null) }
     var worktreeRemoveTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     var worktreeForceConfirm by remember { mutableStateOf(false) }
+    var projectRemoveTarget by remember { mutableStateOf<RelayProject?>(null) }
+    var projectRemovePending by remember { mutableStateOf(false) }
+    var projectRemoveError by remember { mutableStateOf<String?>(null) }
+    val orderedProjects = remember(projects, projectOrder) {
+        projects.sortedBy { projectOrder.indexOf(it.path).let { index -> if (index < 0) Int.MAX_VALUE else index } }
+    }
+    val orderedProjectKeys = remember(projects, sessions, projectOrder) {
+        val sessionsByProject = sessions.groupBy { it.projectRoot ?: it.cwd }
+        val recency = sessionsByProject.mapValues { (_, items) ->
+            items.mapNotNull { parseInstant(it.modified)?.toEpochMilli() }.maxOrNull() ?: Long.MIN_VALUE
+        }
+        (projects.map { it.path } + sessionsByProject.keys).distinct().sortedWith(
+            compareBy<String> { projectOrder.indexOf(it).let { index -> if (index < 0) Int.MAX_VALUE else index } }
+                .thenByDescending { recency[it] ?: Long.MIN_VALUE }
+                .thenBy { path -> (projects.firstOrNull { it.path == path }?.name ?: path.substringAfterLast('/')).lowercase() },
+        )
+    }
+    LaunchedEffect(projects) {
+        if (selectedProject != null && projects.none { it.path == selectedProject }) {
+            selectedProject = orderedProjects.firstOrNull()?.path
+            selectedProject?.let(onFetchWorktrees)
+        }
+    }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val korean = remember { Locale.getDefault().language == "ko" }
     val now = System.currentTimeMillis()
     var mutationPending by remember { mutableStateOf(false) }
     fun mutate(action: String, ids: Set<String>, name: String? = null) {
@@ -222,7 +223,7 @@ fun SessionListScreen(
     }
 
 
-    val groups = remember(sessions, runningIds, query, runningOnly, selectedProject, projectOrder) {
+    val groups = remember(sessions, projects, runningIds, query, runningOnly, selectedProject, projectOrder) {
         val q = query.trim()
         val visible = sessions.filter { session ->
             (q.isBlank() ||
@@ -232,12 +233,14 @@ fun SessionListScreen(
                 (!runningOnly || session.id in runningIds) &&
                 (selectedProject == null || (session.projectRoot ?: session.cwd) == selectedProject)
         }
-        visible.groupBy { session ->
-            session.projectRoot ?: session.cwd
-        }.map { (key, list) ->
+        val grouped = visible.groupBy { session -> session.projectRoot ?: session.cwd }.toMutableMap()
+        if (q.isBlank() && !runningOnly) projects.filter { selectedProject == null || it.path == selectedProject }.forEach { project ->
+            grouped.putIfAbsent(project.path, emptyList())
+        }
+        grouped.map { (key, list) ->
             ProjectGroup(
                 key = key,
-                title = key.substringAfterLast('/').ifBlank { key },
+                title = projects.firstOrNull { it.path == key }?.name ?: key.substringAfterLast('/').ifBlank { key },
                 branch = list.mapNotNull { it.worktreeBranch?.takeIf { b -> b.isNotBlank() } }
                     .firstOrNull(),
                 sessions = list.sortedWith(
@@ -263,79 +266,44 @@ fun SessionListScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp)
-                .padding(horizontal = 16.dp),
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "ompgui",
+                text = stringResource(R.string.app_name),
                 fontWeight = FontWeight.Bold,
-                fontSize = 20.sp,
+                fontSize = 18.sp,
                 letterSpacing = (-0.5).sp,
                 color = OmpColors.Text,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = "v0.6.5",
-                fontSize = 12.sp,
-                color = OmpColors.TextDim,
-            )
-            Spacer(modifier = Modifier.weight(1f))
-            Box(
-                modifier = Modifier
-                    .height(36.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(OmpColors.AccentStrong)
-                    .clickable(onClick = {
-                        onPrepareNewSession()
-                        onNewSession()
-                        newSessionOpen = true
-                    })
-                    .padding(horizontal = 12.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "+ " + stringResource(R.string.new_session),
-                    color = androidx.compose.ui.graphics.Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
+            IconButton(onClick = onRefresh) {
+                Icon(Icons.Filled.Refresh, stringResource(R.string.sessions_refresh), tint = OmpColors.TextMuted)
             }
-            Spacer(modifier = Modifier.width(4.dp))
-            IconButton(onClick = onRefresh, modifier = Modifier.size(44.dp)) {
-                Icon(
-                    imageVector = Icons.Filled.Refresh,
-                    contentDescription = stringResource(R.string.sessions_refresh),
-                    tint = OmpColors.TextMuted,
-                )
+            Box {
+                IconButton(onClick = { overflowOpen = true }) {
+                    Icon(Icons.Filled.MoreHoriz, stringResource(R.string.session_list_workspace_actions), tint = OmpColors.TextMuted)
+                }
+                DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.session_list_command_palette)) }, onClick = { overflowOpen = false; paletteOpen = true })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.session_list_archives)) }, onClick = { overflowOpen = false; onFetchArchives(); archivesOpen = true })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.session_list_import_session)) }, onClick = { overflowOpen = false; importOpen = true })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.session_list_manage_projects)) }, onClick = { overflowOpen = false; projectsOpen = true })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.sessions_unpair)) }, onClick = { overflowOpen = false; onUnpair() })
+                }
             }
-            IconButton(
-                onClick = { usageOpen = true; onOpenUsage() },
-                modifier = Modifier.size(44.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Speed,
-                    contentDescription = "Usage",
-                    tint = OmpColors.TextMuted,
-                )
-            }
-            IconButton(
-                onClick = { settingsOpen = true; onOpenSettings() },
-                modifier = Modifier.size(44.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Settings,
-                    contentDescription = "Settings",
-                    tint = OmpColors.TextMuted,
-                )
-            }
-            IconButton(onClick = onUnpair, modifier = Modifier.size(44.dp)) {
-                Icon(
-                    imageVector = Icons.Filled.LinkOff,
-                    contentDescription = stringResource(R.string.sessions_unpair),
-                    tint = OmpColors.TextMuted,
-                )
-            }
+        }
+        OutlinedButton(
+            onClick = { onPrepareNewSession(); newSessionOpen = true },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).heightIn(min = 48.dp),
+            shape = RoundedCornerShape(8.dp),
+        ) {
+            Icon(Icons.Filled.Add, null, tint = OmpColors.Accent, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.new_session), color = OmpColors.Text)
         }
         if (connection != ConnectionState.Connected) {
             Text(
@@ -357,96 +325,27 @@ fun SessionListScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
         }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .border(1.dp, OmpColors.Border, RoundedCornerShape(8.dp))
-                    .background(OmpColors.BgPanel, RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Filled.Search,
-                        contentDescription = null,
-                        tint = OmpColors.TextDim,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    BasicTextField(
-                        value = query,
-                        onValueChange = { query = it },
-                        singleLine = true,
-                        textStyle = TextStyle(
-                            color = OmpColors.Text,
-                            fontSize = 14.sp,
-                        ),
-                        cursorBrush = SolidColor(OmpColors.Text),
-                        modifier = Modifier.fillMaxWidth(),
-                        decorationBox = { inner ->
-                            Box {
-                                if (query.isEmpty()) {
-                                    Text(
-                                        text = stringResource(R.string.search_sessions_placeholder),
-                                        color = OmpColors.TextDim,
-                                        fontSize = 14.sp,
-                                    )
-                                }
-                                inner()
-                            }
-                        },
-                    )
-                }
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.session_list_workspaces_header), color = OmpColors.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            IconButton(onClick = { searchOpen = !searchOpen; if (!searchOpen) query = "" }) {
+                Icon(Icons.Filled.Search, stringResource(R.string.search_sessions_placeholder), tint = if (searchOpen) OmpColors.Accent else OmpColors.TextMuted)
             }
-            Row(
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(if (runningOnly) OmpColors.BgHover else androidx.compose.ui.graphics.Color.Transparent)
-                    .border(
-                        1.dp,
-                        if (runningOnly) OmpColors.Accent else OmpColors.Border,
-                        CircleShape,
-                    )
-                    .clickable { runningOnly = !runningOnly }
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (runningOnly) OmpColors.StatusSuccess else OmpColors.TextDim,
-                        ),
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = stringResource(R.string.filter_running_only),
-                    fontSize = 12.sp,
-                    color = if (runningOnly) OmpColors.Text else OmpColors.TextMuted,
-                )
+            Box {
+                IconButton(onClick = { projectsOpen = true }) {
+                    Icon(Icons.Filled.MoreHoriz, stringResource(R.string.session_list_filter_manage_projects), tint = if (runningOnly || selectedProject != null) OmpColors.Accent else OmpColors.TextMuted)
+                }
             }
         }
-        Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-            Text("All projects", color = OmpColors.Accent, modifier = Modifier.clickable { selectedProject = null }.padding(12.dp))
-            val orderedProjects = projects.sortedBy { projectOrder.indexOf(it.path).let { index -> if (index < 0) Int.MAX_VALUE else index } }
-            orderedProjects.forEachIndexed { index, project ->
-                Column {
-                    Text(project.name, color = if (selectedProject == project.path) OmpColors.Accent else OmpColors.Text,
-                        modifier = Modifier.clickable { selectedProject = project.path; onFetchWorktrees(project.path) }.padding(12.dp))
-                    if (index > 0) Text("Move left", color = OmpColors.TextMuted, modifier = Modifier.clickable {
-                        val paths = orderedProjects.map { it.path }.toMutableList()
-                        paths[index] = paths[index - 1]; paths[index - 1] = project.path
-                        projectOrder = paths
-                    }.padding(12.dp))
-                }
+        if (searchOpen) {
+            OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true,
+                placeholder = { Text(stringResource(R.string.search_sessions_placeholder)) },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp))
+        }
+        if (selectedProject != null || runningOnly) {
+            TextButton(onClick = { selectedProject = null; runningOnly = false }, modifier = Modifier.fillMaxWidth()) {
+                val runningPrefix = if (runningOnly) stringResource(R.string.session_list_running_prefix) else ""
+                val projectLabel = selectedProject?.substringAfterLast('/') ?: stringResource(R.string.session_list_all_projects)
+                Text(stringResource(R.string.session_list_filter_chip, runningPrefix, projectLabel), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         PullToRefreshBox(
@@ -467,20 +366,20 @@ fun SessionListScreen(
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     items(groups, key = { it.key }) { group ->
                         val expanded = group.key !in collapsed
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .border(1.dp, OmpColors.Border, RoundedCornerShape(12.dp))
-                                .background(OmpColors.BgPanel, RoundedCornerShape(12.dp))
-                                .clip(RoundedCornerShape(12.dp)),
+                                .clip(RoundedCornerShape(8.dp)),
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .background(if (selectedProject == group.key) OmpColors.BgHover else androidx.compose.ui.graphics.Color.Transparent)
+                                    .semantics { selected = selectedProject == group.key }
                                     .clickable {
                                         collapsed = if (expanded) {
                                             collapsed + group.key
@@ -488,7 +387,8 @@ fun SessionListScreen(
                                             collapsed - group.key
                                         }
                                     }
-                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    .heightIn(min = 48.dp)
+                                    .padding(horizontal = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Icon(
@@ -498,36 +398,11 @@ fun SessionListScreen(
                                     modifier = Modifier.size(18.dp),
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = group.title,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 15.sp,
-                                    color = OmpColors.Text,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                if (group.branch != null) {
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .border(
-                                                1.dp,
-                                                OmpColors.Border,
-                                                RoundedCornerShape(4.dp),
-                                            )
-                                            .background(
-                                                OmpColors.BgHover,
-                                                RoundedCornerShape(4.dp),
-                                            )
-                                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                                    ) {
-                                        Text(
-                                            text = group.branch,
-                                            fontSize = 11.sp,
-                                            color = OmpColors.TextMuted,
-                                            maxLines = 1,
-                                        )
+                                Column(Modifier.weight(1f)) {
+                                    Text(group.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp,
+                                        color = OmpColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    group.branch?.let { branch ->
+                                        Text(branch, fontSize = 12.sp, color = OmpColors.TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                 }
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -550,6 +425,30 @@ fun SessionListScreen(
                                         color = OmpColors.TextDim,
                                     )
                                 }
+                                Box {
+                                    IconButton(onClick = { projectMenu = group.key }) {
+                                        Icon(Icons.Filled.MoreHoriz, stringResource(R.string.session_list_actions_for, group.title), tint = OmpColors.TextMuted, modifier = Modifier.size(18.dp))
+                                    }
+                                    DropdownMenu(expanded = projectMenu == group.key && !projectsOpen, onDismissRequest = { projectMenu = null }) {
+                                        DropdownMenuItem(text = { Text(stringResource(R.string.session_list_filter_to_project)) }, onClick = { selectedProject = group.key; projectMenu = null })
+                                        DropdownMenuItem(text = { Text(stringResource(R.string.session_list_worktrees)) }, onClick = { selectedProject = group.key; onFetchWorktrees(group.key); projectMenu = null; worktreesOpen = true })
+                                        DropdownMenuItem(text = { Text(stringResource(R.string.session_list_move_up)) }, enabled = orderedProjectKeys.indexOf(group.key) > 0, onClick = {
+                                            val index = orderedProjectKeys.indexOf(group.key)
+                                            projectOrder = orderedProjectKeys.toMutableList().apply { add(index - 1, removeAt(index)) }
+                                            projectMenu = null
+                                        })
+                                        DropdownMenuItem(text = { Text(stringResource(R.string.session_list_move_down)) }, enabled = orderedProjectKeys.indexOf(group.key) < orderedProjectKeys.lastIndex, onClick = {
+                                            val index = orderedProjectKeys.indexOf(group.key)
+                                            projectOrder = orderedProjectKeys.toMutableList().apply { add(index + 1, removeAt(index)) }
+                                            projectMenu = null
+                                        })
+                                        DropdownMenuItem(text = { Text(stringResource(R.string.session_list_move_to_top)) }, onClick = { projectOrder = listOf(group.key) + orderedProjectKeys.filter { it != group.key }; projectMenu = null })
+                                        projects.firstOrNull { it.path == group.key }?.let { project ->
+                                            DropdownMenuItem(text = { Text(stringResource(R.string.session_list_remove_project), color = OmpColors.StatusError) }, enabled = !projectRemovePending,
+                                                onClick = { projectRemoveError = null; projectRemoveTarget = project; projectMenu = null })
+                                        }
+                                    }
+                                }
                                 Icon(
                                     imageVector = if (expanded) {
                                         Icons.Filled.ExpandLess
@@ -565,6 +464,10 @@ fun SessionListScreen(
                                     color = OmpColors.Border,
                                     thickness = 1.dp,
                                 )
+                                if (group.sessions.isEmpty()) {
+                                    Text(stringResource(R.string.session_list_no_sessions_yet), color = OmpColors.TextDim,
+                                        fontSize = 13.sp, modifier = Modifier.padding(start = 24.dp, top = 12.dp, bottom = 12.dp))
+                                }
                                 // Pinned sessions float first; the rest stays recency-ordered.
                                 val ordered = remember(group.sessions, pinnedIds) {
                                     group.sessions.sortedWith(
@@ -577,7 +480,6 @@ fun SessionListScreen(
                                         session = session,
                                         running = session.id in runningIds,
                                         now = now,
-                                        korean = korean,
                                         selected = session.id in selectedIds,
                                         pinned = session.id in pinnedIds,
                                         onClick = {
@@ -614,46 +516,66 @@ fun SessionListScreen(
                 }
             }
         }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(OmpColors.BgPanel)
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-        ) {
-            HorizontalDivider(color = OmpColors.Border, thickness = 1.dp)
-            if (worktreesGit && worktrees.isNotEmpty()) {
-                WorktreeManageRow(
-                    worktrees = worktrees,
-                    korean = korean,
-                    onFetch = { (selectedProject ?: projects.firstOrNull()?.path)?.let { onFetchWorktrees(it) } },
-                    onRemove = { path -> (selectedProject ?: projects.firstOrNull()?.path)?.let { worktreeForceConfirm = false; worktreeRemoveTarget = it to path } },
-                )
+        HorizontalDivider(color = OmpColors.Border)
+        Row(Modifier.fillMaxWidth().background(OmpColors.BgPanel).padding(horizontal = 12.dp)) {
+            Box(Modifier.weight(1f)) { FooterNavRow(Icons.Filled.Settings, stringResource(R.string.session_list_settings)) { settingsOpen = true } }
+            Box(Modifier.weight(1f)) { FooterNavRow(Icons.Filled.Speed, stringResource(R.string.session_list_usage)) { usageOpen = true; onOpenUsage() } }
+        }
+        if (projectsOpen) {
+            ModalBottomSheet(onDismissRequest = { projectsOpen = false }, containerColor = OmpColors.Bg, dragHandle = { OmpSheetDragHandle() }) {
+                OmpDialogSystemBars()
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 16.dp)) {
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.session_list_projects), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        IconButton(onClick = { projectsOpen = false }) { Icon(Icons.Filled.Close, stringResource(R.string.session_list_close_projects)) }
+                    }
+                    TextButton(onClick = { selectedProject = null; projectsOpen = false }) { Text(stringResource(R.string.session_list_all_projects)) }
+                    TextButton(onClick = { runningOnly = !runningOnly }) { Text(if (runningOnly) stringResource(R.string.session_list_show_all_sessions) else stringResource(R.string.session_list_show_running_only)) }
+                    orderedProjects.forEach { project ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = { selectedProject = project.path; onFetchWorktrees(project.path); projectsOpen = false }, modifier = Modifier.weight(1f)) {
+                                Text(project.name, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth())
+                            }
+                            Box {
+                                IconButton(onClick = { projectMenu = project.path }) { Icon(Icons.Filled.MoreHoriz, stringResource(R.string.session_list_actions_for, project.name)) }
+                                DropdownMenu(expanded = projectMenu == project.path, onDismissRequest = { projectMenu = null }) {
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.session_list_move_up)) }, enabled = orderedProjectKeys.indexOf(project.path) > 0, onClick = {
+                                        val index = orderedProjectKeys.indexOf(project.path)
+                                        projectOrder = orderedProjectKeys.toMutableList().apply { add(index - 1, removeAt(index)) }
+                                        projectMenu = null
+                                    })
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.session_list_move_down)) }, enabled = orderedProjectKeys.indexOf(project.path) < orderedProjectKeys.lastIndex, onClick = {
+                                        val index = orderedProjectKeys.indexOf(project.path)
+                                        projectOrder = orderedProjectKeys.toMutableList().apply { add(index + 1, removeAt(index)) }
+                                        projectMenu = null
+                                    })
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.session_list_move_to_top)) }, onClick = { projectOrder = listOf(project.path) + orderedProjectKeys.filter { it != project.path }; projectMenu = null })
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.session_list_worktrees)) }, onClick = { selectedProject = project.path; onFetchWorktrees(project.path); projectMenu = null; projectsOpen = false; worktreesOpen = true })
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.session_list_remove_project), color = OmpColors.StatusError) }, enabled = !projectRemovePending, onClick = { projectRemoveError = null; projectRemoveTarget = project; projectMenu = null; projectsOpen = false })
+                                }
+                            }
+                        }
+                    }
+                    TextButton(onClick = { projectsOpen = false; onPrepareNewSession(); newSessionOpen = true }) { Text(stringResource(R.string.session_list_add_project_new_session)) }
+                }
             }
-            FooterNavRow(
-                icon = Icons.Filled.Settings,
-                label = if (korean) "설정" else "Settings",
-                onClick = { settingsOpen = true; onOpenSettings() },
-            )
-            FooterNavRow(
-                icon = Icons.Filled.Speed,
-                label = if (korean) "사용량" else "Usage",
-                onClick = { usageOpen = true; onOpenUsage() },
-            )
-            FooterNavRow(
-                icon = Icons.Filled.Search,
-                label = if (korean) "명령" else "Command",
-                onClick = { paletteOpen = true },
-            )
-            FooterNavRow(
-                icon = Icons.Filled.Folder,
-                label = if (korean) "보관함" else "Archives",
-                onClick = { onFetchArchives(); archivesOpen = true },
-            )
-            FooterNavRow(
-                icon = Icons.Filled.Folder,
-                label = if (korean) "세션 가져오기" else "Import",
-                onClick = { importOpen = true },
-            )
+        }
+        if (worktreesOpen) {
+            ModalBottomSheet(onDismissRequest = { worktreesOpen = false }, containerColor = OmpColors.Bg, dragHandle = { OmpSheetDragHandle() }) {
+                OmpDialogSystemBars()
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 16.dp)) {
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.session_list_worktrees), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        IconButton(onClick = { worktreesOpen = false }) { Icon(Icons.Filled.Close, stringResource(R.string.session_list_close_worktrees)) }
+                    }
+                    Text(selectedProject.orEmpty(), color = OmpColors.TextMuted, fontSize = 12.sp)
+                    if (worktreesGit) WorktreeManageRow(worktrees,
+                        onFetch = { selectedProject?.let(onFetchWorktrees) },
+                        onRemove = { path -> selectedProject?.let { worktreeForceConfirm = false; worktreeRemoveTarget = it to path } })
+                    else Text(stringResource(R.string.session_list_no_git_worktrees), color = OmpColors.TextMuted, modifier = Modifier.padding(vertical = 12.dp))
+                    TextButton(onClick = { worktreesOpen = false; onPrepareNewSession(); newSessionOpen = true }) { Text(stringResource(R.string.session_list_new_session_add_worktree)) }
+                }
+            }
         }
         if (settingsOpen) {
             SettingsSheet(
@@ -682,6 +604,7 @@ fun SessionListScreen(
                 models = models,
                 creating = creatingSession,
                 initialMessage = initialDraft,
+                initialCwd = selectedProject,
                 worktrees = worktrees,
                 worktreesGit = worktreesGit,
                 onFetchWorktrees = onFetchWorktrees,
@@ -706,7 +629,7 @@ fun SessionListScreen(
                     onPrepareNewSession()
                     newSessionOpen = true
                 },
-                onOpenSettings = { settingsOpen = true; onOpenSettings() },
+                onOpenSettings = { settingsOpen = true },
                 onOpenUsage = { usageOpen = true; onOpenUsage() },
                 onOpenArchives = { onFetchArchives(); archivesOpen = true },
                 onRestoreArchive = onRestoreArchive,
@@ -714,7 +637,6 @@ fun SessionListScreen(
                 currentCwd = projects.firstOrNull()?.path,
                 fileMatches = fileMatches,
                 onSearchFiles = onSearchFiles,
-                onOpenFile = onOpenFile,
                 onSlashSelected = { draft ->
                     onSlashSelected(draft)
                     onPrepareNewSession()
@@ -738,12 +660,11 @@ fun SessionListScreen(
             ArchivesSheet(
                 archives = archives,
                 onRestore = { key ->
-                    scope.launch {
-                        try {
-                            val result = requester.request("sessions", "restore", JSONObject().put("key", key))
-                            archivesOpen = false; onRefresh(); onOpen(result.getString("id"))
-                        } catch (e: Exception) { listActionError = e.message }
-                    }
+                    val result = requester.request("sessions", "restore", JSONObject().put("key", key))
+                    val id = result.getString("id")
+                    archivesOpen = false
+                    onRefresh()
+                    onOpen(id)
                 },
                 onDismiss = { archivesOpen = false },
             )
@@ -751,7 +672,6 @@ fun SessionListScreen(
         if (selectedIds.isNotEmpty()) {
             BulkActionBar(
                 count = selectedIds.size,
-                korean = korean,
                 onClear = { selectedIds = emptySet() },
                 onArchiveAll = {
                     mutate("archive", selectedIds)
@@ -767,6 +687,65 @@ fun SessionListScreen(
                 color = OmpColors.StatusError,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
+        projectRemoveTarget?.let { project ->
+            AlertDialog(
+                onDismissRequest = { if (!projectRemovePending) projectRemoveTarget = null },
+                containerColor = OmpColors.Bg,
+                title = {
+                    OmpDialogSystemBars()
+                    Text(stringResource(R.string.session_list_remove_project_title, project.name), color = OmpColors.Text)
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(project.path, color = OmpColors.Text)
+                        Text(
+                            stringResource(R.string.session_list_remove_project_body),
+                            color = OmpColors.TextMuted,
+                        )
+                        projectRemoveError?.let { Text(it, color = OmpColors.StatusError) }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = !projectRemovePending,
+                        onClick = {
+                            if (!projectRemovePending) {
+                                projectRemovePending = true
+                                projectRemoveError = null
+                                scope.launch {
+                                    try {
+                                        onRemoveProject(project.path)
+                                        if (selectedProject == project.path) {
+                                            selectedProject = orderedProjects.firstOrNull { it.path != project.path }?.path
+                                            selectedProject?.let(onFetchWorktrees)
+                                        }
+                                        projectOrder = projectOrder - project.path
+                                        collapsed = collapsed - project.path
+                                        selectedIds = selectedIds - sessions.filter {
+                                            (it.projectRoot ?: it.cwd) == project.path
+                                        }.map { it.id }.toSet()
+                                        projectRemoveTarget = null
+                                    } catch (e: CancellationException) {
+                                        throw e
+                                    } catch (e: Exception) {
+                                        projectRemoveError = e.message?.takeIf { it.isNotBlank() } ?: context.getString(R.string.session_list_project_removal_failed)
+                                    } finally {
+                                        projectRemovePending = false
+                                    }
+                                }
+                            }
+                        },
+                    ) {
+                        Text(if (projectRemovePending) stringResource(R.string.session_list_removing) else stringResource(R.string.session_list_remove_project))
+                    }
+                },
+                dismissButton = {
+                    TextButton(enabled = !projectRemovePending, onClick = { projectRemoveTarget = null }) {
+                        Text(stringResource(R.string.session_list_cancel))
+                    }
+                },
             )
         }
         if (worktreeRemoveTarget != null) {
@@ -793,7 +772,7 @@ fun SessionListScreen(
                             if (!force && e is com.dbchbin.ompgui.remote.relay.RelayRequestException && e.code == "worktree_dirty" && e.details?.optBoolean("dirty") == true) {
                                 worktreeForceConfirm = true
                             } else {
-                                listActionError = message.ifBlank { "Worktree remove failed" }
+                                listActionError = message.ifBlank { context.getString(R.string.session_list_worktree_remove_failed) }
                                 worktreeForceConfirm = false
                             }
                         }
@@ -829,7 +808,7 @@ fun SessionListScreen(
                                 )
                                 listActionError = null
                             } catch (e: Exception) {
-                                listActionError = e.message ?: "Export failed"
+                                listActionError = e.message ?: context.getString(R.string.session_list_export_failed)
                             } finally {
                                 exportPending = null
                             }
@@ -850,7 +829,7 @@ fun SessionListScreen(
                                 onRefresh()
                                 listActionError = null
                             } catch (e: Exception) {
-                                listActionError = e.message ?: "Autoname failed"
+                                listActionError = e.message ?: context.getString(R.string.session_list_autoname_failed)
                             } finally {
                                 autonamePending = null
                             }
@@ -876,7 +855,8 @@ private fun FooterNavRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 12.dp),
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 4.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
@@ -907,7 +887,6 @@ private fun SessionItemRow(
     session: SessionListItem,
     running: Boolean,
     now: Long,
-    korean: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     selected: Boolean = false,
@@ -915,12 +894,16 @@ private fun SessionItemRow(
     onToggleSelect: (() -> Unit)? = null,
     onTogglePin: (() -> Unit)? = null,
 ) {
+    val context = LocalContext.current
+    var rowMenuOpen by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .semantics { this.selected = selected }
+            .heightIn(min = 48.dp)
             .background(if (selected) OmpColors.BgHover else androidx.compose.ui.graphics.Color.Transparent)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(start = 24.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (running) {
@@ -928,7 +911,7 @@ private fun SessionItemRow(
             Spacer(modifier = Modifier.width(8.dp))
         }
         if (pinned) {
-            Text("📌", fontSize = 12.sp, modifier = Modifier.padding(end = 4.dp))
+            Icon(Icons.Filled.PushPin, stringResource(R.string.session_list_pinned), tint = OmpColors.TextMuted, modifier = Modifier.size(14.dp))
         }
         Text(
             text = sessionTitle(session),
@@ -938,34 +921,27 @@ private fun SessionItemRow(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        if (onTogglePin != null) {
-            Text(
-                text = if (pinned) "Unpin" else "Pin",
-                color = OmpColors.TextMuted,
-                fontSize = 11.sp,
-                modifier = Modifier
-                    .clickable(onClick = onTogglePin)
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
-            )
-        }
-        if (onToggleSelect != null) {
-            Text(
-                text = if (selected) "✓" else "○",
-                color = if (selected) OmpColors.Accent else OmpColors.TextDim,
-                fontSize = 13.sp,
-                modifier = Modifier
-                    .clickable(onClick = onToggleSelect)
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
-            )
+        if (onToggleSelect != null && selected) {
+            IconButton(onClick = onToggleSelect) { Icon(Icons.Filled.CheckCircle, stringResource(R.string.session_list_deselect_session), tint = OmpColors.Accent, modifier = Modifier.size(18.dp)) }
         }
         Spacer(modifier = Modifier.width(8.dp))
-        relativeLabel(session.modified, now, korean)?.let { label ->
+        relativeLabel(context, session.modified, now)?.let { label ->
             Text(
                 text = label,
                 color = OmpColors.TextDim,
                 fontSize = 12.sp,
                 maxLines = 1,
             )
+        }
+        Box {
+            IconButton(onClick = { rowMenuOpen = true }) {
+                Icon(Icons.Filled.MoreHoriz, stringResource(R.string.session_list_actions_for, sessionTitle(session)), tint = OmpColors.TextDim, modifier = Modifier.size(18.dp))
+            }
+            DropdownMenu(expanded = rowMenuOpen, onDismissRequest = { rowMenuOpen = false }) {
+                DropdownMenuItem(text = { Text(stringResource(R.string.session_list_session_actions)) }, onClick = { rowMenuOpen = false; onLongClick() })
+                onTogglePin?.let { toggle -> DropdownMenuItem(text = { Text(if (pinned) stringResource(R.string.session_list_unpin) else stringResource(R.string.session_list_pin)) }, onClick = { rowMenuOpen = false; toggle() }) }
+                onToggleSelect?.let { toggle -> DropdownMenuItem(text = { Text(if (selected) stringResource(R.string.session_list_deselect) else stringResource(R.string.session_list_select)) }, onClick = { rowMenuOpen = false; toggle() }) }
+            }
         }
     }
 }
@@ -1012,35 +988,29 @@ private fun parseInstant(raw: String): Instant? {
     }
 }
 
-private fun relativeLabel(modified: String, now: Long, korean: Boolean): String? {
+private fun relativeLabel(context: android.content.Context, modified: String, now: Long): String? {
     val instant = parseInstant(modified) ?: return null
     val millis = instant.toEpochMilli()
     val minutes = maxOf(0L, (now - millis) / 60_000L)
-    if (minutes < 1) return if (korean) "현재 분" else "now"
-    if (minutes < 60) return if (korean) "${minutes}분 전" else "${minutes}m ago"
+    if (minutes < 1) return context.getString(R.string.session_list_relative_now)
+    if (minutes < 60) return context.getString(R.string.session_list_relative_minutes, minutes)
     val hours = minutes / 60
-    if (hours < 24) return if (korean) "${hours}시간 전" else "${hours}h ago"
+    if (hours < 24) return context.getString(R.string.session_list_relative_hours, hours)
     val days = hours / 24
-    if (days <= 1) return if (korean) "어제" else "yesterday"
+    if (days <= 1) return context.getString(R.string.session_list_relative_yesterday)
     val zoned = instant.atZone(ZoneId.systemDefault())
     val thisYear = LocalDateTime.now().year == zoned.year
-    return if (korean) {
-        if (thisYear) "${zoned.monthValue}월 ${zoned.dayOfMonth}일"
-        else "${zoned.year}년 ${zoned.monthValue}월 ${zoned.dayOfMonth}일"
-    } else {
-        val pattern = if (thisYear) "MMM d" else "MMM d, yyyy"
-        zoned.format(DateTimeFormatter.ofPattern(pattern, Locale.ENGLISH))
-    }
+    val pattern = if (thisYear) "MMM d" else "MMM d, yyyy"
+    return zoned.format(DateTimeFormatter.ofPattern(pattern))
 }
 
 @Composable
 private fun WorktreeManageRow(
     worktrees: List<RelayWorktree>,
-    korean: Boolean,
     onFetch: () -> Unit,
     onRemove: (String) -> Unit,
 ) {
-    var expanded by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var expanded by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(true) }
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -1049,7 +1019,8 @@ private fun WorktreeManageRow(
                     if (!expanded) onFetch()
                     expanded = !expanded
                 }
-                .padding(horizontal = 4.dp, vertical = 12.dp),
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 4.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -1060,7 +1031,7 @@ private fun WorktreeManageRow(
             )
             Spacer(modifier = Modifier.width(12.dp))
             Text(
-                text = if (korean) "Worktree (${worktrees.size})" else "Worktrees (${worktrees.size})",
+                text = stringResource(R.string.session_list_worktrees_count, worktrees.size),
                 fontSize = 14.sp,
                 color = OmpColors.Text,
                 modifier = Modifier.weight(1f),
@@ -1084,7 +1055,7 @@ private fun WorktreeManageRow(
                 ) {
                     Text(
                         text = (worktree.branch ?: worktree.path.substringAfterLast('/')) +
-                            if (worktree.isMain) " (main)" else "",
+                            if (worktree.isMain) stringResource(R.string.session_list_worktree_main_suffix) else "",
                         fontSize = 13.sp,
                         color = OmpColors.Text,
                         maxLines = 1,
@@ -1092,14 +1063,9 @@ private fun WorktreeManageRow(
                         modifier = Modifier.weight(1f),
                     )
                     if (!worktree.isMain) {
-                        Text(
-                            text = if (korean) "제거" else "Remove",
-                            fontSize = 12.sp,
-                            color = OmpColors.StatusError,
-                            modifier = Modifier
-                                .clickable { onRemove(worktree.path) }
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                        )
+                        TextButton(onClick = { onRemove(worktree.path) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text(stringResource(R.string.session_list_remove), fontSize = 12.sp, color = OmpColors.StatusError)
+                        }
                     }
                 }
                 Text(
@@ -1118,7 +1084,6 @@ private fun WorktreeManageRow(
 @Composable
 private fun BulkActionBar(
     count: Int,
-    korean: Boolean,
     onClear: () -> Unit,
     onArchiveAll: () -> Unit,
     onDeleteAll: () -> Unit,
@@ -1134,41 +1099,31 @@ private fun BulkActionBar(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = if (korean) "${count}개 선택됨" else "$count selected",
+                text = stringResource(R.string.session_list_selected_count, count),
                 fontSize = 13.sp,
                 color = OmpColors.Text,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
             Text(
-                text = if (korean) "해제" else "Clear",
+                text = stringResource(R.string.session_list_clear_selection),
                 color = OmpColors.TextMuted,
                 fontSize = 13.sp,
-                modifier = Modifier.clickable(onClick = onClear).padding(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier.clickable(onClick = onClear).heightIn(min = 48.dp).padding(horizontal = 8.dp, vertical = 12.dp),
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(
-                text = if (confirmBulkArchive) "Confirm archive all?" else if (korean) "모두 보관" else "Archive all",
-                color = OmpColors.Text,
-                fontSize = 13.sp,
-                modifier = Modifier.clickable { if (confirmBulkArchive) onArchiveAll() else confirmBulkArchive = true }.padding(vertical = 4.dp),
-            )
-            if (confirmBulkDelete) {
-                Text(
-                    text = if (korean) "정말 모두 삭제할까요? 다시 탭하여 확인" else "Confirm delete all?",
-                    color = OmpColors.StatusError,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clickable(onClick = onDeleteAll).padding(vertical = 4.dp),
-                )
-            } else {
-                Text(
-                    text = if (korean) "모두 삭제" else "Delete all",
-                    color = OmpColors.StatusError,
-                    fontSize = 13.sp,
-                    modifier = Modifier.clickable(onClick = { confirmBulkDelete = true }).padding(vertical = 4.dp),
-                )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(
+                onClick = { if (confirmBulkArchive) onArchiveAll() else confirmBulkArchive = true },
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+            ) {
+                Text(if (confirmBulkArchive) stringResource(R.string.session_list_confirm_archive_all) else stringResource(R.string.session_list_archive_all), color = OmpColors.Text)
+            }
+            TextButton(
+                onClick = { if (confirmBulkDelete) onDeleteAll() else confirmBulkDelete = true },
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+            ) {
+                Text(if (confirmBulkDelete) stringResource(R.string.session_list_confirm_delete_all) else stringResource(R.string.session_list_delete_all), color = OmpColors.StatusError)
             }
         }
     }
@@ -1184,56 +1139,63 @@ private fun WorktreeRemoveSheet(
     onConfirm: (force: Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val korean = remember { Locale.getDefault().language == "ko" }
     ModalBottomSheet(
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
         onDismissRequest = onDismiss,
-        containerColor = OmpColors.BgPanel,
+        containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
+        dragHandle = { OmpSheetDragHandle() },
     ) {
+        OmpDialogSystemBars()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
-                .padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .padding(bottom = 16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                if (korean) "Worktree 제거" else "Remove worktree",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = OmpColors.Text,
-            )
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(R.string.session_list_remove_worktree),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = OmpColors.Text,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, stringResource(R.string.session_list_close)) }
+            }
             Text(path, fontSize = 13.sp, color = OmpColors.TextMuted)
             error?.let { Text(it, fontSize = 13.sp, color = OmpColors.StatusError) }
             Text(
-                if (korean) "브랜치는 유지되며 체크아웃만 제거됩니다." else "The branch is kept; only the checkout is removed.",
+                stringResource(R.string.session_list_worktree_remove_hint),
                 fontSize = 13.sp,
                 color = OmpColors.TextMuted,
             )
             if (forceConfirm) {
                 Text(
-                    if (korean) "수정/추적되지 않은 파일이 있습니다. 강제 제거할까요?" else "Worktree is dirty. Force remove?",
+                    stringResource(R.string.session_list_worktree_dirty_force),
                     fontSize = 14.sp,
                     color = OmpColors.StatusWarning,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    if (korean) "강제 제거 확인" else "Confirm force remove",
+                    stringResource(R.string.session_list_confirm_force_remove),
                     color = OmpColors.StatusError,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clickable(onClick = { onConfirm(true) }).padding(vertical = 6.dp),
+                    modifier = Modifier.fillMaxWidth().clickable(onClick = { onConfirm(true) }).heightIn(min = 48.dp).padding(vertical = 12.dp),
                 )
             } else {
                 Text(
-                    if (korean) "제거" else "Remove",
+                    stringResource(R.string.session_list_remove),
                     color = OmpColors.StatusError,
-                    modifier = Modifier.clickable(onClick = { onConfirm(false) }).padding(vertical = 6.dp),
+                    modifier = Modifier.fillMaxWidth().clickable(onClick = { onConfirm(false) }).heightIn(min = 48.dp).padding(vertical = 12.dp),
                 )
             }
             Text(
-                if (korean) "취소" else "Cancel",
+                stringResource(R.string.session_list_cancel),
                 color = OmpColors.TextMuted,
-                modifier = Modifier.clickable(onClick = onDismiss).padding(vertical = 6.dp),
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onDismiss).heightIn(min = 48.dp).padding(vertical = 12.dp),
             )
         }
     }
@@ -1271,37 +1233,123 @@ internal suspend fun shareSessionExport(
     shareFile(context, uri, "text/html")
 }
 
+internal fun filterArchives(archives: List<RelayArchive>, query: String): List<RelayArchive> {
+    val search = query.trim()
+    if (search.isEmpty()) return archives
+    return archives.filter { archive ->
+        archive.name?.contains(search, ignoreCase = true) == true ||
+            archive.id?.contains(search, ignoreCase = true) == true ||
+            archive.key.contains(search, ignoreCase = true) ||
+            archive.cwd?.contains(search, ignoreCase = true) == true
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ArchivesSheet(
+internal fun ArchivesSheet(
     archives: List<RelayArchive>,
-    onRestore: (String) -> Unit,
+    onRestore: suspend (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
+    var query by rememberSaveable { mutableStateOf("") }
+    val matches = remember(archives, query) { filterArchives(archives, query) }
+    val listState = rememberLazyListState()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var restoringKey by remember { mutableStateOf<String?>(null) }
+    var restoreError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(query) { listState.scrollToItem(0) }
     ModalBottomSheet(
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
         onDismissRequest = onDismiss,
-        containerColor = OmpColors.BgPanel,
+        containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
+        dragHandle = { OmpSheetDragHandle() },
     ) {
+        OmpDialogSystemBars()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
-                .padding(bottom = 28.dp),
+                .padding(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(if (Locale.getDefault().language == "ko") "보관함" else "Archives", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = OmpColors.Text)
-            if (archives.isEmpty()) {
-                Text("보관된 세션이 없습니다", color = OmpColors.TextMuted, fontSize = 14.sp)
-            } else {
-                archives.forEach { archive ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onRestore(archive.key) }
-                            .padding(vertical = 10.dp),
-                    ) {
-                        Text(archive.name ?: archive.key, color = OmpColors.Text, fontSize = 14.sp)
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.session_list_archives), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = OmpColors.Text, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, stringResource(R.string.session_list_close_archives)) }
+            }
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text(stringResource(R.string.session_list_archives_search)) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        TextButton(onClick = { query = "" }) {
+                            Text(stringResource(R.string.session_list_archives_clear))
+                        }
+                    }
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = OmpColors.Text,
+                    unfocusedTextColor = OmpColors.Text,
+                    focusedLabelColor = OmpColors.Text,
+                    unfocusedLabelColor = OmpColors.TextMuted,
+                    cursorColor = OmpColors.Text,
+                ),
+            )
+            restoreError?.let { Text(it, color = OmpColors.StatusError, fontSize = 14.sp) }
+            when {
+                archives.isEmpty() -> Text(
+                    stringResource(R.string.session_list_archives_empty),
+                    color = OmpColors.TextMuted,
+                )
+                matches.isEmpty() -> Text(
+                    stringResource(R.string.session_list_archives_no_match),
+                    color = OmpColors.TextMuted,
+                )
+                else -> LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+                ) {
+                    items(matches, key = { it.key }) { archive ->
+                        val title = archive.name ?: archive.id ?: archive.key
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .clickable(
+                                    enabled = restoringKey == null,
+                                    onClickLabel = context.getString(R.string.session_list_restore_session),
+                                ) {
+                                    restoringKey = archive.key
+                                    restoreError = null
+                                    scope.launch {
+                                        try {
+                                            onRestore(archive.key)
+                                        } catch (cancelled: CancellationException) {
+                                            throw cancelled
+                                        } catch (error: Exception) {
+                                            restoreError = error.message ?: context.getString(R.string.session_list_restore_failed)
+                                        } finally {
+                                            restoringKey = null
+                                        }
+                                    }
+                                }
+                                .padding(vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(title, color = OmpColors.Text, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            if (archive.id != null && archive.id != title) {
+                                Text(archive.id, color = OmpColors.TextMuted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            archive.cwd?.let { Text(it, color = OmpColors.TextMuted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                            if (restoringKey == archive.key) {
+                                Text(stringResource(R.string.session_list_restoring), color = OmpColors.TextMuted, fontSize = 12.sp)
+                            }
+                        }
                     }
                 }
             }
@@ -1329,49 +1377,33 @@ private fun SessionActionSheet(
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
         onDismissRequest = onDismiss,
-        containerColor = OmpColors.BgPanel,
+        containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
+        dragHandle = { OmpSheetDragHandle() },
     ) {
+        OmpDialogSystemBars()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
-                .padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .padding(bottom = 16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(session.name?.ifBlank { null } ?: session.id, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = OmpColors.Text)
-            BasicTextField(
-                value = renameText,
-                onValueChange = onRenameText,
-                textStyle = TextStyle(fontSize = 14.sp, color = OmpColors.Text),
-                cursorBrush = SolidColor(OmpColors.Accent),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Text("이름 변경", color = OmpColors.Accent, modifier = Modifier.clickable(onClick = onRename).padding(vertical = 6.dp))
-            Text(
-                if (autonameBusy) "이름 자동 생성 중…" else "이름 자동 생성",
-                color = OmpColors.Text,
-                modifier = Modifier.clickable(enabled = !autonameBusy, onClick = onAutoname).padding(vertical = 6.dp),
-            )
-            Text(
-                if (exportBusy) "내보내는 중…" else if (Locale.getDefault().language == "ko") "내보내기" else "Export",
-                color = OmpColors.Text,
-                modifier = Modifier.clickable(enabled = !exportBusy, onClick = onExport).padding(vertical = 6.dp),
-            )
-            if (confirmArchive) {
-                Text("보관할까요?", color = OmpColors.StatusWarning)
-                Text("보관 확인", color = OmpColors.Accent, modifier = Modifier.clickable(onClick = onArchive).padding(vertical = 6.dp))
-            } else {
-                Text("보관", color = OmpColors.Text, modifier = Modifier.clickable(onClick = onConfirmArchive).padding(vertical = 6.dp))
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(sessionTitle(session), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, stringResource(R.string.session_list_close_session_actions)) }
             }
-            if (confirmDelete) {
-                Text("세션을 삭제할까요?", color = OmpColors.StatusError)
-                Text("삭제 확인", color = OmpColors.StatusError, modifier = Modifier.clickable(onClick = onDelete).padding(vertical = 6.dp))
-            } else {
-                Text("삭제", color = OmpColors.StatusError, modifier = Modifier.clickable(onClick = onConfirmDelete).padding(vertical = 6.dp))
-            }
-            Text("취소", color = OmpColors.TextMuted, modifier = Modifier.clickable(onClick = onDismiss).padding(vertical = 6.dp))
+            OutlinedTextField(value = renameText, onValueChange = onRenameText, label = { Text(stringResource(R.string.session_list_session_name)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            TextButton(onClick = onRename, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.session_list_rename)) }
+            TextButton(enabled = !autonameBusy, onClick = onAutoname, modifier = Modifier.fillMaxWidth()) { Text(if (autonameBusy) stringResource(R.string.session_list_generating_name) else stringResource(R.string.session_list_generate_name)) }
+            TextButton(enabled = !exportBusy, onClick = onExport, modifier = Modifier.fillMaxWidth()) { Text(if (exportBusy) stringResource(R.string.session_list_exporting) else stringResource(R.string.session_list_export)) }
+            HorizontalDivider(color = OmpColors.Border)
+            TextButton(onClick = if (confirmArchive) onArchive else onConfirmArchive, modifier = Modifier.fillMaxWidth()) { Text(if (confirmArchive) stringResource(R.string.session_list_confirm_archive) else stringResource(R.string.session_list_archive)) }
+            if (confirmDelete) Text(stringResource(R.string.session_list_delete_confirm_message), color = OmpColors.StatusError)
+            TextButton(onClick = if (confirmDelete) onDelete else onConfirmDelete, modifier = Modifier.fillMaxWidth()) { Text(if (confirmDelete) stringResource(R.string.session_list_confirm_delete) else stringResource(R.string.session_list_delete), color = OmpColors.StatusError) }
         }
     }
 }

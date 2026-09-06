@@ -1,5 +1,4 @@
 import { isRecord } from "./type-guards";
-import type { AgentMessage, AssistantMessage, CustomMessage, UserMessage } from "./types";
 
 /** Schema version for the bounded, display-only remote session replica. */
 export const REMOTE_REPLICA_VERSION = 1 as const;
@@ -63,7 +62,7 @@ export interface RemoteReplicaProjectInput {
   origin: string;
   session: RemoteReplicaSessionInput;
   leafId?: string | null;
-  messages: readonly AgentMessage[];
+  messages: readonly unknown[];
   updatedAt?: number;
 }
 
@@ -130,23 +129,23 @@ function textFromContent(content: unknown): string | undefined {
   return cleanDisplayText(textBlocks.join("\n"));
 }
 
-function projectMessage(message: AgentMessage): RemoteReplicaMessage | null {
+function projectMessage(message: unknown): RemoteReplicaMessage | null {
+  if (!isRecord(message)) return null;
   let text: string | undefined;
   switch (message.role) {
     case "user":
-      text = textFromContent((message as UserMessage).content);
+      text = textFromContent(message.content);
       break;
     case "assistant":
       // Only assistant text blocks survive. Thinking, images, and tool calls
       // are deliberately not represented by placeholders or metadata.
-      text = textFromContent((message as AssistantMessage).content);
+      text = textFromContent(message.content);
       break;
     case "custom": {
-      const custom = message as CustomMessage;
       // Hidden custom entries and session-reader's folded system/tool entries
       // are not safe to replay as cached text.
-      if (!custom.display || UNSAFE_CUSTOM_TYPE[custom.customType] === true) return null;
-      text = textFromContent(custom.content);
+      if (message.display !== true || typeof message.customType !== "string" || UNSAFE_CUSTOM_TYPE[message.customType] === true) return null;
+      text = textFromContent(message.content);
       break;
     }
     default:

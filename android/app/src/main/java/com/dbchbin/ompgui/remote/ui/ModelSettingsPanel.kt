@@ -1,5 +1,37 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.dbchbin.ompgui.remote.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Icon
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -11,8 +43,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Switch
@@ -29,7 +59,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,8 +81,14 @@ import org.json.JSONObject
  * Server-disabled operations (API-key store/remove, logout) surface the exact
  * 501 capability codes plus terminal guidance instead of fake success.
  */
+enum class ModelSettingsSection { All, Defaults, Providers }
+
 @Composable
-fun ModelSettingsPanel(requester: RelayRequester, cwd: String) {
+fun ModelSettingsPanel(
+    requester: RelayRequester,
+    cwd: String,
+    selectedSection: ModelSettingsSection = ModelSettingsSection.All,
+) {
     // The models registry is global, not per-cwd; cwd is accepted per the
     // shared UI contract and keys reloads so a project switch refreshes.
     val korean = remember { Locale.getDefault().language == "ko" }
@@ -83,18 +118,31 @@ fun ModelSettingsPanel(requester: RelayRequester, cwd: String) {
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        ModelCatalogSection(
-            korean = korean,
-            catalog = catalog,
-            loading = catalogLoading,
-            error = catalogError,
-            onRefresh = ::refreshCatalog,
-        )
-        ModelRolesSection(korean = korean, requester = requester, catalog = catalog)
-        ModelRegistrySection(korean = korean, requester = requester, catalog = catalog)
-        ModelProvidersSection(korean = korean, requester = requester, catalog = catalog)
-        ModelFallbackSection(korean = korean, requester = requester, catalog = catalog)
-        ModelAuthSection(korean = korean, requester = requester)
+        // Keep both domains composed: changing category must not drop provider
+        // drafts, write-only credentials, or a running OAuth coroutine.
+        val hidden = Modifier.clearAndSetSemantics { }.layout { _, _ -> layout(0, 0) { } }
+        Column(
+            modifier = if (selectedSection == ModelSettingsSection.Providers) hidden else Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ModelCatalogSection(
+                korean = korean,
+                catalog = catalog,
+                loading = catalogLoading,
+                error = catalogError,
+                onRefresh = ::refreshCatalog,
+            )
+            ModelRolesSection(korean = korean, requester = requester, catalog = catalog)
+            ModelRegistrySection(korean = korean, requester = requester, catalog = catalog)
+            ModelFallbackSection(korean = korean, requester = requester, catalog = catalog)
+        }
+        Column(
+            modifier = if (selectedSection == ModelSettingsSection.Defaults) hidden else Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ModelProvidersSection(korean = korean, requester = requester, catalog = catalog)
+            ModelAuthSection(korean = korean, requester = requester)
+        }
     }
 }
 
@@ -279,6 +327,27 @@ fun modelSelectorLabel(selector: String, catalog: List<CatalogModel>): String {
 // ---------------------------------------------------------------------------
 
 @Composable
+internal fun ModelSearchField(query: String, onQueryChange: (String) -> Unit, modifier: Modifier = Modifier) {
+    val korean = Locale.getDefault().language == "ko"
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        label = { Text(if (korean) "모델 검색" else "Search models") },
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+        singleLine = true,
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                androidx.compose.material3.IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = if (korean) "모델 검색 지우기" else "Clear model search")
+                }
+            }
+        },
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+    )
+}
+
+@Composable
 private fun ModelCatalogSection(
     korean: Boolean,
     catalog: ModelCatalogState,
@@ -287,6 +356,7 @@ private fun ModelCatalogSection(
     onRefresh: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
+    var expanded by remember { mutableStateOf(false) }
     ModelSectionHeader(title = if (korean) "모델 카탈로그" else "Model catalog")
     ModelCard {
         ModelRow(
@@ -305,11 +375,9 @@ private fun ModelCatalogSection(
             )
             HorizontalDivider(color = OmpColors.Border, thickness = 1.dp)
         }
-        ModelTextField(
-            value = query,
-            onValueChange = { query = it },
-            placeholder = if (korean) "모델 검색 (provider/id/name)" else "Search models (provider/id/name)",
-        )
+        ModelActionLink(label = if (expanded) "Hide catalog" else "Browse ${catalog.models.size} models", onClick = { expanded = !expanded; query = "" })
+        if (expanded) {
+        ModelSearchField(query, { query = it })
         var visibleCount by remember { mutableStateOf(60) }
         LaunchedEffect(query, catalog.models) { visibleCount = 60 }
         val matching = remember(query, catalog.models) {
@@ -328,7 +396,7 @@ private fun ModelCatalogSection(
         } else if (filtered.isEmpty()) {
             ModelStatusText(text = if (korean) "모델이 없습니다" else "No models")
         } else {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
                 filtered.forEachIndexed { index, model ->
                     if (index > 0) HorizontalDivider(color = OmpColors.Border, thickness = 1.dp)
                     ModelRow(label = model.selector, value = model.name)
@@ -351,6 +419,7 @@ private fun ModelCatalogSection(
                     )
                 }
             }
+        }
         }
         if (catalog.unavailable) {
             ModelStatusText(
@@ -385,8 +454,6 @@ private fun ModelRolesSection(
     var pending by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var savedNote by remember { mutableStateOf<String?>(null) }
-    var pickerFor by remember { mutableStateOf<String?>(null) }
-    var pickerQuery by remember { mutableStateOf("") }
 
     fun load() {
         scope.launch {
@@ -426,7 +493,9 @@ private fun ModelRolesSection(
     }
 
     ModelSectionHeader(title = if (korean) "모델 역할" else "Model roles")
-    ModelCard {
+    ModelCard(disclosure = if (korean) "역할별 모델 및 추론 설정" else "Models and reasoning by role") {
+        var pickerFor by remember { mutableStateOf<String?>(null) }
+        var pickerQuery by remember { mutableStateOf("") }
         Text(
             text = if (korean) {
                 "~/.omp/agent/config.yml의 modelRoles에 저장됩니다. provider/model ID 형식을 사용하세요."
@@ -446,33 +515,15 @@ private fun ModelRolesSection(
                 val looksQualified = modelPart.contains("/")
                 Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = role,
-                            fontSize = 13.sp,
-                            color = OmpColors.TextMuted,
-                            modifier = Modifier.width(76.dp),
-                            maxLines = 1,
-                        )
-                        ModelInlineField(
-                            value = raw,
-                            onValueChange = { next -> roles = roles + (role to next) },
-                            placeholder = "provider/model[:effort]",
-                            modifier = Modifier.weight(1f),
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (pickerFor == role) "▲" else "▼",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = OmpColors.Accent,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .clickable {
-                                    pickerFor = if (pickerFor == role) null else role
-                                    pickerQuery = ""
-                                }
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                        )
+                        Column(Modifier.weight(1f)) {
+                            Text(role, style = MaterialTheme.typography.labelLarge, color = OmpColors.Text)
+                            Text(raw.ifBlank { if (korean) "재정의 없음" else "No override" },
+                                style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted)
+                        }
+                        TextButton(onClick = {
+                            pickerFor = if (pickerFor == role) null else role
+                            pickerQuery = ""
+                        }) { Text(if (pickerFor == role) "Close" else "Edit") }
                     }
                     if (raw.isNotBlank() && !looksQualified) {
                         ModelErrorText(
@@ -487,30 +538,24 @@ private fun ModelRolesSection(
                             text = modelSelectorLabel(modelPart, catalog.models),
                             fontSize = 12.sp,
                             color = OmpColors.TextMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                     if (pickerFor == role) {
-                        ModelInlineField(
-                            value = pickerQuery,
-                            onValueChange = { pickerQuery = it },
-                            placeholder = if (korean) "모델 검색" else "Search models",
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        val q = pickerQuery.trim().lowercase()
+                        ModelTextField(raw, { roles = roles + (role to it) }, "provider/model[:effort]")
+                        ModelSearchField(pickerQuery, { pickerQuery = it })
+                        val q = pickerQuery.trim()
                         val options = catalog.models
-                            .filter { q.isEmpty() || it.selector.lowercase().contains(q) || it.name.lowercase().contains(q) }
-                            .take(8)
+                            .filter { q.isEmpty() || it.selector.contains(q, ignoreCase = true) || it.name.contains(q, ignoreCase = true) }
+                        if (options.isEmpty()) ModelStatusText(if (korean) "검색 결과가 없습니다" else "No matching models")
+                        Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
                         options.forEach { option ->
                             Text(
                                 text = "${option.name} (${option.selector})",
                                 fontSize = 13.sp,
                                 color = OmpColors.Text,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
                                     .clip(RoundedCornerShape(6.dp))
                                     .clickable {
                                         val effort = raw.substringAfterLast(":", missingDelimiterValue = "")
@@ -521,18 +566,15 @@ private fun ModelRolesSection(
                                     .padding(horizontal = 4.dp, vertical = 6.dp),
                             )
                         }
+                        }
                         if (raw.isNotBlank()) {
-                            Text(
-                                text = if (korean) "비우기 (override 없음)" else "Clear (no override)",
-                                fontSize = 12.sp,
-                                color = OmpColors.StatusError,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .clickable {
-                                        roles = roles + (role to "")
-                                        pickerFor = null
-                                    }
-                                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                            ModelActionLink(
+                                label = if (korean) "비우기 (override 없음)" else "Clear (no override)",
+                                danger = true,
+                                onClick = {
+                                    roles = roles + (role to "")
+                                    pickerFor = null
+                                },
                             )
                         }
                     }
@@ -541,7 +583,7 @@ private fun ModelRolesSection(
         }
         error?.let { ModelErrorText(text = it) }
         savedNote?.let { ModelStatusText(text = it) }
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ModelActionLink(
                 label = if (pending) {
                     if (korean) "처리 중…" else "Working…"
@@ -549,6 +591,8 @@ private fun ModelRolesSection(
                     if (korean) "역할 저장" else "Save roles"
                 },
                 onClick = { if (!pending) save() },
+                primary = true,
+                enabled = !pending,
             )
             ModelActionLink(
                 label = if (korean) "다시 불러오기" else "Reload",
@@ -574,7 +618,6 @@ private fun ModelRegistrySection(
     var providerOrder by remember { mutableStateOf<List<String>>(emptyList()) }
     var scopedEntries by remember { mutableStateOf(false) }
     var restrict by remember { mutableStateOf(false) }
-    var query by remember { mutableStateOf("") }
     var pending by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var savedNote by remember { mutableStateOf<String?>(null) }
@@ -643,7 +686,7 @@ private fun ModelRegistrySection(
     }
 
     ModelSectionHeader(title = if (korean) "네이티브 레지스트리" else "Native registry")
-    ModelCard {
+    ModelCard(disclosure = "Model availability and provider order") {
         Text(
             text = "config.yml · enabledModels / disabledProviders / modelProviderOrder",
             fontSize = 12.sp,
@@ -675,15 +718,14 @@ private fun ModelRegistrySection(
             },
         )
         if (restrict) {
-            ModelTextField(
-                value = query,
-                onValueChange = { query = it },
-                placeholder = if (korean) "모델 검색" else "Search models",
-            )
-            val q = query.trim().lowercase()
+            var query by remember { mutableStateOf("") }
+            ModelSearchField(query, { query = it })
+            val q = query.trim()
+            val names = remember(catalog.models) { catalog.models.associate { it.selector to it.name } }
             val visible = allSelectors
-                .filter { q.isEmpty() || it.lowercase().contains(q) }
-                .take(40)
+                .filter { q.isEmpty() || it.contains(q, ignoreCase = true) || names[it]?.contains(q, ignoreCase = true) == true }
+            if (visible.isEmpty()) ModelStatusText(if (korean) "검색 결과가 없습니다" else "No matching models")
+            Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
             visible.forEach { selector ->
                 ModelCheckRow(
                     label = selector,
@@ -697,6 +739,7 @@ private fun ModelRegistrySection(
                     },
                 )
             }
+        }
         }
         HorizontalDivider(color = OmpColors.Border, thickness = 1.dp)
         Text(
@@ -737,31 +780,35 @@ private fun ModelRegistrySection(
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (index > 0) {
-                    Text(
-                        text = "↑",
-                        color = OmpColors.Accent,
-                        modifier = Modifier.clickable {
+                    Icon(
+                        imageVector = Icons.Default.ArrowUpward,
+                        contentDescription = null,
+                        tint = OmpColors.TextMuted,
+                        modifier = Modifier.size(48.dp).semantics { contentDescription = "Move $provider up" }
+                            .clickable(enabled = !pending && !scopedEntries, role = Role.Button) {
                             val next = orderedProviders.toMutableList()
                             val tmp = next[index - 1]
                             next[index - 1] = next[index]
                             next[index] = tmp
                             providerOrder = next
                             save(JSONObject().put("modelProviderOrder", JSONArray(next)))
-                        }.padding(horizontal = 8.dp, vertical = 4.dp),
+                        }.padding(14.dp),
                     )
                 }
                 if (index < orderedProviders.lastIndex) {
-                    Text(
-                        text = "↓",
-                        color = OmpColors.Accent,
-                        modifier = Modifier.clickable {
+                    Icon(
+                        imageVector = Icons.Default.ArrowDownward,
+                        contentDescription = null,
+                        tint = OmpColors.TextMuted,
+                        modifier = Modifier.size(48.dp).semantics { contentDescription = "Move $provider down" }
+                            .clickable(enabled = !pending && !scopedEntries, role = Role.Button) {
                             val next = orderedProviders.toMutableList()
                             val tmp = next[index + 1]
                             next[index + 1] = next[index]
                             next[index] = tmp
                             providerOrder = next
                             save(JSONObject().put("modelProviderOrder", JSONArray(next)))
-                        }.padding(horizontal = 8.dp, vertical = 4.dp),
+                        }.padding(14.dp),
                     )
                 }
             }
@@ -775,111 +822,6 @@ private fun ModelRegistrySection(
 // Custom providers (models.yml redacted editor).
 // ---------------------------------------------------------------------------
 
-private data class HeaderRow(val name: String, val value: String)
-
-private data class ModelDraft(
-    val originalId: String?,
-    val id: String,
-    val name: String,
-    val api: String,
-    val baseUrl: String,
-    val reasoning: Boolean,
-    val contextWindow: String,
-    val maxTokens: String,
-)
-
-private data class ProviderDraft(
-    val originalName: String,
-    val name: String,
-    val baseUrl: String,
-    val api: String,
-    val auth: String,
-    val apiKeyInput: String,
-    val apiKeyTouched: Boolean,
-    val clearKey: Boolean,
-    val apiKeyConfigured: Boolean,
-    val headersConfigured: Boolean,
-    val headerRows: List<HeaderRow>,
-    val headersTouched: Boolean,
-    val clearHeaders: Boolean,
-    val models: List<ModelDraft>,
-)
-
-private fun providerDraftFromJson(name: String, obj: JSONObject): ProviderDraft {
-    val models = mutableListOf<ModelDraft>()
-    val rawModels = obj.optJSONArray("models")
-    if (rawModels != null) {
-        for (i in 0 until rawModels.length()) {
-            val m = rawModels.optJSONObject(i) ?: continue
-            models.add(
-                ModelDraft(
-                    originalId = m.optString("originalId").ifBlank { m.optString("id").ifBlank { null } },
-                    id = m.optString("id"),
-                    name = m.optString("name"),
-                    api = m.optString("api"),
-                    baseUrl = m.optString("baseUrl"),
-                    reasoning = m.optBoolean("reasoning", false),
-                    contextWindow = if (m.has("contextWindow")) m.optInt("contextWindow").toString() else "",
-                    maxTokens = if (m.has("maxTokens")) m.optInt("maxTokens").toString() else "",
-                ),
-            )
-        }
-    }
-    return ProviderDraft(
-        originalName = obj.optString("originalName").ifBlank { name },
-        name = name,
-        baseUrl = obj.optString("baseUrl"),
-        api = obj.optString("api", "openai-completions"),
-        auth = obj.optString("auth"),
-        apiKeyInput = "",
-        apiKeyTouched = false,
-        clearKey = false,
-        apiKeyConfigured = obj.optBoolean("apiKeyConfigured", false),
-        headersConfigured = obj.optBoolean("headersConfigured", false),
-        headerRows = emptyList(),
-        headersTouched = false,
-        clearHeaders = false,
-        models = models,
-    )
-}
-
-private fun ProviderDraft.toUpdateJson(): JSONObject {
-    val out = JSONObject()
-    out.put("originalName", originalName)
-    if (baseUrl.isNotBlank()) out.put("baseUrl", baseUrl.trim())
-    if (api.isNotBlank()) out.put("api", api)
-    if (auth.isNotBlank()) out.put("auth", auth)
-    if (clearKey) {
-        out.put("apiKey", JSONObject.NULL)
-    } else if (apiKeyTouched && apiKeyInput.isNotBlank()) {
-        out.put("apiKey", apiKeyInput)
-    }
-    if (clearHeaders) {
-        out.put("headers", JSONObject.NULL)
-    } else if (headersTouched) {
-        val headers = JSONObject()
-        for (row in headerRows) {
-            if (row.name.isNotBlank()) headers.put(row.name, row.value)
-        }
-        out.put("headers", headers)
-    }
-    val modelArray = JSONArray()
-    for (model in models) {
-        val m = JSONObject()
-        m.put("id", model.id)
-        if (model.originalId != null && model.originalId != model.id) m.put("originalId", model.originalId)
-        if (model.name.isNotBlank()) m.put("name", model.name)
-        if (model.api.isNotBlank()) m.put("api", model.api)
-        if (model.baseUrl.isNotBlank()) m.put("baseUrl", model.baseUrl)
-        if (model.reasoning) m.put("reasoning", true)
-        model.contextWindow.toIntOrNull()?.let { if (it > 0) m.put("contextWindow", it) }
-        model.maxTokens.toIntOrNull()?.let { if (it > 0) m.put("maxTokens", it) }
-        modelArray.put(m)
-    }
-    out.put("models", modelArray)
-    return out
-}
-
 @Composable
 private fun ModelProvidersSection(
     korean: Boolean,
@@ -888,6 +830,7 @@ private fun ModelProvidersSection(
 ) {
     val scope = rememberCoroutineScope()
     var providers by remember { mutableStateOf<Map<String, ProviderDraft>>(emptyMap()) }
+    var redactedConfig by remember { mutableStateOf(JSONObject()) }
     var parseError by remember { mutableStateOf<String?>(null) }
     var loaded by remember { mutableStateOf(false) }
     var pending by remember { mutableStateOf(false) }
@@ -916,6 +859,7 @@ private fun ModelProvidersSection(
                     val obj = rawProviders.optJSONObject(name) ?: continue
                     next[name] = providerDraftFromJson(name, obj)
                 }
+                redactedConfig = data
                 providers = next
                 loaded = true
                 if (selected != null && selected !in next) selected = null
@@ -935,12 +879,7 @@ private fun ModelProvidersSection(
             error = null
             note = null
             try {
-                val config = JSONObject().put(
-                    "providers",
-                    JSONObject().apply {
-                        for ((name, draft) in drafts) put(name, draft.toUpdateJson())
-                    },
-                )
+                val config = providerConfigUpdate(redactedConfig, drafts)
                 val args = JSONObject()
                     .put("config", config)
                     .put("mode", mode)
@@ -965,7 +904,7 @@ private fun ModelProvidersSection(
             try {
                 val config = JSONObject().put(
                     "providers",
-                    JSONObject().put(target.name.ifBlank { target.originalName }, target.toUpdateJson()),
+                    JSONObject().put(target.name.ifBlank { target.originalName.orEmpty() }, target.toUpdateJson()),
                 )
                 requester.request("models", "providers.validate", JSONObject().put("config", config))
                 note = if (korean) "유효합니다" else "Valid"
@@ -1018,13 +957,14 @@ private fun ModelProvidersSection(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .heightIn(min = 48.dp)
                             .clip(RoundedCornerShape(6.dp))
                             .clickable { selected = if (selected == name) null else name }
                             .padding(vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(text = name, fontSize = 14.sp, color = OmpColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(text = name, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = OmpColors.Text)
                             Text(
                                 text = listOfNotNull(
                                     draft.baseUrl.ifBlank { null },
@@ -1034,18 +974,18 @@ private fun ModelProvidersSection(
                                 ).joinToString(" · "),
                                 fontSize = 12.sp,
                                 color = OmpColors.TextMuted,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        Text(
-                            text = if (selected == name) "▲" else "▼",
-                            color = OmpColors.Accent,
-                            modifier = Modifier.padding(horizontal = 8.dp),
+                        Icon(
+                            imageVector = if (selected == name) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = if (selected == name) "Collapse $name" else "Edit $name",
+                            tint = OmpColors.TextMuted,
+                            modifier = Modifier.padding(horizontal = 8.dp).size(20.dp),
                         )
                     }
                     if (selected == name) {
                         ProviderEditor(
+                            requester = requester,
                             korean = korean,
                             draft = draft,
                             pending = pending,
@@ -1053,13 +993,15 @@ private fun ModelProvidersSection(
                             onChange = { next -> providers = providers + (name to next) },
                             onRename = { renamed ->
                                 val trimmed = renamed.trim()
-                                if (trimmed.isNotBlank() && trimmed != name) {
+                                if (trimmed in providers && trimmed != name) {
+                                    error = "Provider name already exists"
+                                } else if (trimmed.isNotBlank() && trimmed != name) {
                                     providers = providers - name + (trimmed to draft.copy(name = trimmed))
                                     selected = trimmed
                                 }
                             },
                             onValidate = ::validateCurrent,
-                            onSave = { saveDrafts(providers, "partial") },
+                            onSave = { saveDrafts(providers, "full") },
                             onDelete = { pendingDelete = name },
                             onTestModel = { model ->
                                 scope.launch {
@@ -1067,15 +1009,16 @@ private fun ModelProvidersSection(
                                     error = null
                                     note = null
                                     try {
-                                        val providerObj = draft.toUpdateJson()
-                                        providerObj.remove("originalName")
+                                        val providerObj = draft.toUpdateJson().apply {
+                                            remove("originalName")
+                                        }
                                         val modelObj = JSONObject()
                                             .put("id", model.id.ifBlank { model.originalId.orEmpty() })
                                             .apply {
                                                 if (model.api.isNotBlank()) put("api", model.api)
                                             }
                                         val args = JSONObject()
-                                            .put("providerName", draft.name.ifBlank { draft.originalName })
+                                            .put("providerName", draft.name.ifBlank { draft.originalName.orEmpty() })
                                             .put("provider", providerObj)
                                             .put("model", modelObj)
                                         val data = requester.request("models", "providers.test", args)
@@ -1109,7 +1052,7 @@ private fun ModelProvidersSection(
                         if (trimmed.isBlank() || trimmed in providers) return@ModelActionLink
                         providers = providers + (
                             trimmed to ProviderDraft(
-                                originalName = trimmed,
+                                originalName = null,
                                 name = trimmed,
                                 baseUrl = "",
                                 api = "openai-completions",
@@ -1145,6 +1088,7 @@ private fun ModelProvidersSection(
             onDismissRequest = { pendingDelete = null },
             containerColor = OmpColors.BgPanel,
             title = {
+                OmpDialogSystemBars()
                 Text(
                     if (korean) "제공자 삭제" else "Delete provider",
                     color = OmpColors.Text,
@@ -1164,28 +1108,15 @@ private fun ModelProvidersSection(
                 )
             },
             confirmButton = {
-                Text(
-                    if (korean) "삭제" else "Delete",
-                    color = OmpColors.StatusError,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .clickable {
-                            if (doomed != null) saveDrafts(providers - name, "full")
-                            pendingDelete = null
-                        }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                )
+                TextButton(onClick = {
+                    if (doomed != null) saveDrafts(providers - name, "full")
+                    pendingDelete = null
+                }) { Text(if (korean) "삭제" else "Delete", color = OmpColors.StatusError) }
             },
             dismissButton = {
-                Text(
-                    if (korean) "취소" else "Cancel",
-                    color = OmpColors.TextMuted,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .clickable { pendingDelete = null }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                )
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text(if (korean) "취소" else "Cancel", color = OmpColors.TextMuted)
+                }
             },
         )
     }
@@ -1193,6 +1124,7 @@ private fun ModelProvidersSection(
 
 @Composable
 private fun ProviderEditor(
+    requester: RelayRequester,
     korean: Boolean,
     draft: ProviderDraft,
     pending: Boolean,
@@ -1205,13 +1137,17 @@ private fun ProviderEditor(
     onTestModel: (ModelDraft) -> Unit,
 ) {
     var rename by remember(draft.name) { mutableStateOf(draft.name) }
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    var catalogOpen by remember { mutableStateOf(false) }
+    val draftError = remember(draft) { runCatching { draft.toUpdateJson() }.exceptionOrNull()?.message }
+    if (catalogOpen) ModelCatalogSheet(requester, draft, { onChange(it); catalogOpen = false }, { catalogOpen = false })
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ModelSectionHeader(if (korean) "연결 설정" else "Connection settings")
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             ModelInlineField(
                 value = rename,
                 onValueChange = { rename = it },
                 placeholder = if (korean) "제공자 이름" else "Provider name",
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.fillMaxWidth(),
             )
             if (rename.trim().isNotBlank() && rename.trim() != draft.name) {
                 Spacer(modifier = Modifier.width(8.dp))
@@ -1221,16 +1157,16 @@ private fun ProviderEditor(
         ModelTextField(
             value = draft.baseUrl,
             onValueChange = { onChange(draft.copy(baseUrl = it)) },
-            placeholder = "https://api.example.com/v1",
+            placeholder = "Base URL (https://api.example.com/v1)",
         )
-        ModelChips(
-            label = "api",
+        ModelSelect(
+            label = "API protocol",
             options = modelApiOptions,
             selected = draft.api.ifBlank { "openai-completions" },
             onSelect = { onChange(draft.copy(api = it)) },
         )
-        ModelChips(
-            label = "auth",
+        ModelSelect(
+            label = "Authentication",
             options = listOf("apiKey", "none", "oauth"),
             selected = draft.auth.ifBlank { "apiKey" },
             onSelect = { onChange(draft.copy(auth = if (it == "apiKey") "" else it)) },
@@ -1241,9 +1177,11 @@ private fun ProviderEditor(
             draft.apiKeyTouched && draft.apiKeyInput.isNotBlank() -> if (korean) "새 값 입력됨" else "New value entered"
             else -> if (korean) "미설정" else "Not set"
         }
-        Text(text = "apiKey · $keyState", fontSize = 13.sp, color = OmpColors.TextMuted)
+        ModelSectionHeader(if (korean) "인증 정보" else "Credentials")
+        Text(text = "API key · $keyState", fontSize = 12.sp, color = OmpColors.TextMuted)
         ModelTextField(
             value = draft.apiKeyInput,
+            secret = true,
             onValueChange = { onChange(draft.copy(apiKeyInput = it, apiKeyTouched = true, clearKey = false)) },
             placeholder = if (korean) "새 키 입력 (비워 두면 유지)" else "Enter new key (empty preserves)",
         )
@@ -1263,9 +1201,10 @@ private fun ProviderEditor(
             draft.headersConfigured -> if (korean) "설정됨 (값 표시 안 됨, 유지)" else "Set (values hidden, preserved)"
             else -> if (korean) "미설정" else "Not set"
         }
-        Text(text = "headers · $headersState", fontSize = 13.sp, color = OmpColors.TextMuted)
+        ModelSectionHeader(if (korean) "요청 헤더" else "Request headers")
+        Text(text = headersState, fontSize = 12.sp, color = OmpColors.TextMuted)
         draft.headerRows.forEachIndexed { index, row ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 ModelInlineField(
                     value = row.name,
                     onValueChange = { next ->
@@ -1273,30 +1212,27 @@ private fun ProviderEditor(
                         rows[index] = row.copy(name = next)
                         onChange(draft.copy(headerRows = rows, headersTouched = true, clearHeaders = false))
                     },
-                    placeholder = "X-Custom",
-                    modifier = Modifier.weight(1f),
+                    placeholder = "Header name (X-Custom)",
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 ModelInlineField(
                     value = row.value,
+                    secret = true,
                     onValueChange = { next ->
                         val rows = draft.headerRows.toMutableList()
                         rows[index] = row.copy(value = next)
                         onChange(draft.copy(headerRows = rows, headersTouched = true, clearHeaders = false))
                     },
-                    placeholder = "value",
-                    modifier = Modifier.weight(1f),
+                    placeholder = "Header value",
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                Text(
-                    text = "✕",
-                    color = OmpColors.StatusError,
-                    modifier = Modifier.clickable {
-                        onChange(draft.copy(headerRows = draft.headerRows.filterIndexed { i, _ -> i != index }, headersTouched = true, clearHeaders = false))
-                    }.padding(8.dp),
-                )
+                ModelActionLink(label = "Remove header", danger = true, onClick = {
+                    onChange(draft.copy(headerRows = draft.headerRows.filterIndexed { i, _ -> i != index }, headersTouched = true, clearHeaders = false))
+                })
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ModelActionLink(
                 label = if (korean) "헤더 추가" else "Add header",
                 onClick = { onChange(draft.copy(headerRows = draft.headerRows + HeaderRow("", ""), headersTouched = true, clearHeaders = false)) },
@@ -1313,6 +1249,8 @@ private fun ProviderEditor(
             }
         }
         HorizontalDivider(color = OmpColors.Border, thickness = 1.dp)
+        AdvancedDraftFields(draft.redacted, draft.advanced, true) { onChange(draft.copy(advanced = it)) }
+        ModelActionLink(label = "Add from models.dev", onClick = { catalogOpen = true })
         Text(text = if (korean) "모델 (${draft.models.size})" else "Models (${draft.models.size})", fontSize = 14.sp, color = OmpColors.Text)
         draft.models.forEachIndexed { index, model ->
             ModelDraftEditor(
@@ -1348,15 +1286,18 @@ private fun ProviderEditor(
                 )
             },
         )
+        if (draftError != null) Text(draftError, color = OmpColors.StatusError, fontSize = 12.sp)
         HorizontalDivider(color = OmpColors.Border, thickness = 1.dp)
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ModelActionLink(
                 label = if (pending) {
                     if (korean) "저장 중…" else "Saving…"
                 } else {
                     if (korean) "제공자 저장" else "Save providers"
                 },
-                onClick = { if (!pending) onSave() },
+                onClick = { if (!pending && draftError == null) onSave() },
+                primary = true,
+                enabled = !pending && draftError == null,
             )
             ModelActionLink(
                 label = if (validating) {
@@ -1364,7 +1305,7 @@ private fun ProviderEditor(
                 } else {
                     if (korean) "유효성 검사" else "Validate"
                 },
-                onClick = { if (!validating && !pending) onValidate() },
+                onClick = { if (!validating && !pending && draftError == null) onValidate() },
             )
             ModelActionLink(
                 label = if (korean) "제공자 삭제" else "Delete provider",
@@ -1376,6 +1317,50 @@ private fun ProviderEditor(
 }
 
 @Composable
+private fun AdvancedDraftFields(baseline: JSONObject, edits: Map<String, String>, provider: Boolean, onChange: (Map<String, String>) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    ModelActionLink(label = if (expanded) "Hide advanced" else "Advanced settings", onClick = { expanded = !expanded })
+    if (!expanded) return
+    val fields = if (provider) listOf("compat", "modelOverrides", "extensions") else listOf(
+        "input", "cost.input", "cost.output", "cost.cacheRead", "cost.cacheWrite",
+        "thinking.mode", "thinking.efforts", "thinking.defaultLevel", "thinking.effortMap", "compat", "extensions",
+    )
+    Text("Empty removes a field. JSON controls accept objects; extensions cannot replace standard fields.", fontSize = 12.sp, color = OmpColors.TextMuted)
+    for (field in fields) {
+        val group = when (field) {
+            "input" -> "Input"
+            "cost.input" -> "Cost · USD / million tokens"
+            "thinking.mode" -> "Thinking"
+            "compat" -> "Compatibility"
+            "modelOverrides" -> "Model overrides"
+            "extensions" -> "Additional fields"
+            else -> null
+        }
+        if (group != null) ModelSectionHeader(group)
+        val label = when (field) {
+            "input" -> "Input modalities (text, image)"
+            "thinking.mode" -> "Thinking mode (e.g. effort, budget)"
+            "thinking.efforts" -> "Thinking efforts (comma-separated)"
+            "thinking.defaultLevel" -> "Default thinking level"
+            "thinking.effortMap" -> "Effort map (JSON string values)"
+            "compat", "modelOverrides", "extensions" -> "$field (JSON object)"
+            else -> "$field (USD / million tokens)"
+        }
+        val value = advancedDraftValue(baseline, edits, field, provider)
+        OutlinedTextField(
+            value = value,
+            onValueChange = { onChange(edits + (field to it)) },
+            label = { Text(label, style = MaterialTheme.typography.bodySmall) },
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = OmpColors.Text),
+            minLines = 1, maxLines = 6,
+            shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth(),
+        )
+    }
+    val error = runCatching { applyAdvancedDraft(baseline, edits, provider) }.exceptionOrNull()?.message
+    if (error != null) Text(error, color = OmpColors.StatusError, fontSize = 12.sp)
+}
+
+@Composable
 private fun ModelDraftEditor(
     korean: Boolean,
     model: ModelDraft,
@@ -1383,61 +1368,41 @@ private fun ModelDraftEditor(
     onDelete: () -> Unit,
     onTest: () -> Unit,
 ) {
+    var expanded by remember(model.originalId) { mutableStateOf(model.id.isBlank()) }
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp)
-            .border(1.dp, OmpColors.Border, RoundedCornerShape(8.dp))
-            .padding(8.dp),
+        modifier = Modifier.fillMaxWidth()
+            .border(1.dp, OmpColors.Border, RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            ModelInlineField(
-                value = model.id,
-                onValueChange = { onChange(model.copy(id = it)) },
-                placeholder = "model-id",
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = if (korean) "삭제" else "Remove",
-                fontSize = 12.sp,
-                color = OmpColors.StatusError,
-                modifier = Modifier.clickable(onClick = onDelete).padding(6.dp),
-            )
+            Column(Modifier.weight(1f)) {
+                Text(model.name.ifBlank { model.id.ifBlank { "New model" } },
+                    style = MaterialTheme.typography.titleSmall, color = OmpColors.Text,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (model.name.isNotBlank()) Text(model.id, style = MaterialTheme.typography.bodySmall,
+                    color = OmpColors.TextMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Close" else "Edit") }
         }
-        ModelInlineField(
-            value = model.name,
-            onValueChange = { onChange(model.copy(name = it)) },
-            placeholder = if (korean) "표시 이름 (선택)" else "Display name (optional)",
-            modifier = Modifier.fillMaxWidth(),
-        )
-        ModelChips(
-            label = "api",
-            options = listOf("inherit") + modelApiOptions,
-            selected = model.api.ifBlank { "inherit" },
-            onSelect = { onChange(model.copy(api = if (it == "inherit") "" else it)) },
-        )
-        ModelToggleRow(
-            label = if (korean) "Reasoning" else "Reasoning",
-            checked = model.reasoning,
-            onCheckedChange = { onChange(model.copy(reasoning = it)) },
-        )
-        Row {
-            ModelInlineField(
-                value = model.contextWindow,
-                onValueChange = { next -> onChange(model.copy(contextWindow = next.filter { it.isDigit() })) },
-                placeholder = "ctx",
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            ModelInlineField(
-                value = model.maxTokens,
-                onValueChange = { next -> onChange(model.copy(maxTokens = next.filter { it.isDigit() })) },
-                placeholder = "max",
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            ModelActionLink(label = if (korean) "연결 테스트" else "Test", onClick = onTest)
+        if (expanded) {
+            ModelTextField(model.id, { onChange(model.copy(id = it)) }, "Model ID (required)")
+            ModelTextField(model.name, { onChange(model.copy(name = it)) }, if (korean) "표시 이름 (선택)" else "Display name (optional)")
+            ModelSelect("API", listOf("inherit") + modelApiOptions, model.api.ifBlank { "inherit" },
+                { onChange(model.copy(api = if (it == "inherit") "" else it)) })
+            ModelTextField(model.baseUrl, { onChange(model.copy(baseUrl = it)) }, "Model base URL (empty inherits)")
+            ModelToggleRow("Reasoning", model.reasoning, { onChange(model.copy(reasoning = it)) })
+            ModelSectionHeader(if (korean) "토큰 제한" else "Token limits")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ModelInlineField(model.contextWindow, { onChange(model.copy(contextWindow = it)) },
+                    "Context window (tokens)", Modifier.weight(1f))
+                ModelInlineField(model.maxTokens, { onChange(model.copy(maxTokens = it)) },
+                    "Maximum output (tokens)", Modifier.weight(1f))
+            }
+            AdvancedDraftFields(model.redacted, model.advanced, false) { onChange(model.copy(advanced = it)) }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ModelActionLink(if (korean) "연결 테스트" else "Test connection", onTest)
+                ModelActionLink(if (korean) "모델 삭제" else "Remove model", onDelete, danger = true)
+            }
         }
     }
 }
@@ -1460,7 +1425,6 @@ private fun ModelFallbackSection(
     var revertPolicy by remember { mutableStateOf<String?>(null) }
     var role by remember { mutableStateOf("default") }
     var candidate by remember { mutableStateOf("") }
-    var candidateQuery by remember { mutableStateOf("") }
     var pending by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var note by remember { mutableStateOf<String?>(null) }
@@ -1526,20 +1490,20 @@ private fun ModelFallbackSection(
     }
 
     val chain = chains[role].orEmpty()
-    val cq = candidateQuery.trim().lowercase()
-    val options = catalog.models
-        .filter { (cq.isEmpty() || it.selector.lowercase().contains(cq) || it.name.lowercase().contains(cq)) && it.selector !in chain }
-        .take(8)
-
     ModelSectionHeader(title = if (korean) "폴백 체인" else "Fallback chains")
-    ModelCard {
+    ModelCard(disclosure = "Retry behavior and fallback chains") {
+        var candidateQuery by remember(role) { mutableStateOf("") }
+        val cq = candidateQuery.trim()
+        val options = catalog.models.filter {
+            (cq.isEmpty() || it.selector.contains(cq, ignoreCase = true) || it.name.contains(cq, ignoreCase = true)) && it.selector !in chain
+        }
         Text(
             text = "retry · fallbackChains / maxRetries / modelFallback / revertPolicy",
             fontSize = 12.sp,
             color = OmpColors.TextMuted,
         )
         HorizontalDivider(color = OmpColors.Border, thickness = 1.dp)
-        ModelChips(
+        ModelSelect(
             label = if (korean) "역할" else "Role",
             options = (nativeModelRoles + chains.keys).distinct(),
             selected = role,
@@ -1561,55 +1525,52 @@ private fun ModelFallbackSection(
                         fontSize = 13.sp,
                         color = OmpColors.Text,
                         modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                     )
                     if (index > 0) {
-                        Text(
-                            text = "↑",
-                            color = OmpColors.Accent,
-                            modifier = Modifier.clickable {
+                        Icon(
+                            imageVector = Icons.Default.ArrowUpward,
+                            contentDescription = null,
+                            tint = OmpColors.TextMuted,
+                            modifier = Modifier.size(48.dp).semantics { contentDescription = "Move $selector up" }
+                                .clickable(enabled = !pending, role = Role.Button) {
                                 val next = chain.toMutableList()
                                 val tmp = next[index - 1]
                                 next[index - 1] = next[index]
                                 next[index] = tmp
                                 saveChains(chains + (role to next))
-                            }.padding(horizontal = 6.dp, vertical = 4.dp),
+                            }.padding(14.dp),
                         )
                     }
                     if (index < chain.lastIndex) {
-                        Text(
-                            text = "↓",
-                            color = OmpColors.Accent,
-                            modifier = Modifier.clickable {
+                        Icon(
+                            imageVector = Icons.Default.ArrowDownward,
+                            contentDescription = null,
+                            tint = OmpColors.TextMuted,
+                            modifier = Modifier.size(48.dp).semantics { contentDescription = "Move $selector down" }
+                                .clickable(enabled = !pending, role = Role.Button) {
                                 val next = chain.toMutableList()
                                 val tmp = next[index + 1]
                                 next[index + 1] = next[index]
                                 next[index] = tmp
                                 saveChains(chains + (role to next))
-                            }.padding(horizontal = 6.dp, vertical = 4.dp),
+                            }.padding(14.dp),
                         )
                     }
-                    Text(
-                        text = "✕",
-                        color = OmpColors.StatusError,
-                        modifier = Modifier.clickable {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = null,
+                        tint = OmpColors.StatusError,
+                        modifier = Modifier.size(48.dp).semantics { contentDescription = "Remove $selector from fallback chain" }
+                            .clickable(enabled = !pending, role = Role.Button) {
                             saveChains(chains + (role to chain.filterIndexed { i, _ -> i != index }))
-                        }.padding(horizontal = 6.dp, vertical = 4.dp),
+                        }.padding(14.dp),
                     )
                 }
             }
         }
-        ModelInlineField(
-            value = candidateQuery,
-            onValueChange = {
-                candidateQuery = it
-                candidate = ""
-            },
-            placeholder = if (korean) "추가할 모델 검색" else "Search model to add",
-            modifier = Modifier.fillMaxWidth(),
-        )
-        if (candidateQuery.trim().isNotEmpty() || candidate.isNotEmpty()) {
+        ModelSearchField(candidateQuery, { candidateQuery = it })
+        if (options.isEmpty()) ModelStatusText(if (korean) "검색 결과가 없습니다" else "No matching models")
+        Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
             options.forEach { option ->
                 Text(
                     text = "${option.name} (${option.selector})",
@@ -1619,6 +1580,7 @@ private fun ModelFallbackSection(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(6.dp))
                         .clickable {
                             candidate = option.selector
@@ -1639,7 +1601,7 @@ private fun ModelFallbackSection(
             )
             HorizontalDivider(color = OmpColors.Border, thickness = 1.dp)
         }
-        ModelChips(
+        ModelSelect(
             label = "retry.maxRetries (0–20)",
             options = (0..20).map { it.toString() },
             selected = (maxRetries ?: 10).toString(),
@@ -1654,7 +1616,7 @@ private fun ModelFallbackSection(
             )
             HorizontalDivider(color = OmpColors.Border, thickness = 1.dp)
         }
-        ModelChips(
+        ModelSelect(
             label = "retry.fallbackRevertPolicy",
             options = listOf("cooldown-expiry", "never"),
             selected = revertPolicy ?: "cooldown-expiry",
@@ -1869,6 +1831,7 @@ private fun ModelAuthSection(korean: Boolean, requester: RelayRequester) {
 
     ModelSectionHeader(title = if (korean) "인증" else "Auth")
     ModelCard {
+        if (pending && providers.isEmpty()) ModelStatusText(if (korean) "불러오는 중…" else "Loading providers…")
         if (!pending && providers.isEmpty() && error == null) {
             ModelStatusText(text = if (korean) "제공자가 없습니다" else "No providers")
         }
@@ -1878,6 +1841,7 @@ private fun ModelAuthSection(korean: Boolean, requester: RelayRequester) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(6.dp))
                         .clickable { expanded = if (expanded == provider.id) null else provider.id }
                         .padding(vertical = 4.dp),
@@ -1888,8 +1852,6 @@ private fun ModelAuthSection(korean: Boolean, requester: RelayRequester) {
                             text = if (provider.name == provider.id) provider.id else "${provider.name} (${provider.id})",
                             fontSize = 14.sp,
                             color = OmpColors.Text,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             text = if (provider.loggedIn) {
@@ -1901,17 +1863,18 @@ private fun ModelAuthSection(korean: Boolean, requester: RelayRequester) {
                             color = if (provider.loggedIn) OmpColors.StatusSuccess else OmpColors.TextMuted,
                         )
                     }
-                    Text(
-                        text = if (expanded == provider.id) "▲" else "▼",
-                        color = OmpColors.Accent,
-                        modifier = Modifier.padding(horizontal = 8.dp),
+                    Icon(
+                        imageVector = if (expanded == provider.id) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (expanded == provider.id) "Collapse ${provider.name}" else "Manage ${provider.name}",
+                        tint = OmpColors.TextMuted,
+                        modifier = Modifier.padding(horizontal = 8.dp).size(20.dp),
                     )
                 }
                 if (expanded == provider.id) {
                     val login = logins[provider.id]
                     val busy = provider.id in loginBusy
                     if (login == null) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             ModelActionLink(
                                 label = if (provider.loggedIn) {
                                     if (korean) "다시 로그인" else "Re-login"
@@ -1938,12 +1901,7 @@ private fun ModelAuthSection(korean: Boolean, requester: RelayRequester) {
                             )
                             else -> {
                                 if (login.url.isNotBlank()) {
-                                    Text(
-                                        text = login.url,
-                                        fontSize = 12.sp,
-                                        color = OmpColors.Accent,
-                                        modifier = Modifier.padding(vertical = 4.dp),
-                                    )
+                                    ModelAuthUrl(korean = korean, url = login.url, token = login.token)
                                 }
                                 (login.instructions ?: login.message)?.let {
                                     Text(text = it, fontSize = 13.sp, color = OmpColors.TextMuted)
@@ -1955,7 +1913,7 @@ private fun ModelAuthSection(korean: Boolean, requester: RelayRequester) {
                                         placeholder = login.placeholder
                                             ?: if (korean) "인증 코드 붙여넣기" else "Paste the authorization code",
                                     )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         ModelActionLink(
                                             label = if (korean) "코드 전송" else "Submit code",
                                             onClick = { confirmCode(provider.id) },
@@ -2007,7 +1965,7 @@ private fun ModelAuthSection(korean: Boolean, requester: RelayRequester) {
                             fontSize = 12.sp,
                             color = OmpColors.TextMuted,
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             ModelActionLink(
                                 label = if (korean) "키 저장(지원 안 됨 확인)" else "Store key (check unsupported)",
                                 onClick = { surfaceCapability(provider.id, "auth.apikey.set") },
@@ -2047,6 +2005,58 @@ private fun ModelAuthSection(korean: Boolean, requester: RelayRequester) {
     }
 }
 
+@Composable
+private fun ModelAuthUrl(korean: Boolean, url: String, token: String) {
+    val context = LocalContext.current
+    val safeUrl = remember(url) { safeModelAuthUrl(url) }
+    var actionError by remember(url, token) { mutableStateOf<String?>(null) }
+    var copied by remember(url, token) { mutableStateOf(false) }
+    SelectionContainer {
+        Text(
+            text = url,
+            fontSize = 12.sp,
+            color = OmpColors.Accent,
+            modifier = Modifier.padding(vertical = 4.dp),
+        )
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextButton(
+            enabled = safeUrl != null,
+            onClick = {
+                actionError = null
+                safeUrl?.let {
+                    try {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it)).apply {
+                            addCategory(Intent.CATEGORY_BROWSABLE)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        })
+                    } catch (_: Exception) {
+                        actionError = if (korean) "브라우저를 열 수 없습니다. URL을 복사해 직접 여세요." else "Could not open a browser. Copy the URL and open it manually."
+                    }
+                }
+            },
+        ) { Text(if (korean) "브라우저 열기" else "Open browser", color = OmpColors.Accent) }
+        TextButton(
+            enabled = safeUrl != null,
+            onClick = {
+                actionError = null
+                safeUrl?.let {
+                    try {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("OAuth URL", it))
+                        copied = true
+                    } catch (_: Exception) {
+                        actionError = if (korean) "URL을 복사할 수 없습니다." else "Could not copy the URL."
+                    }
+                }
+            },
+        ) { Text(if (korean) "URL 복사" else "Copy URL", color = OmpColors.Accent) }
+    }
+    if (safeUrl == null) ModelErrorText(if (korean) "유효한 HTTP(S) 로그인 URL이 아닙니다." else "This is not a valid HTTP(S) login URL.")
+    actionError?.let { ModelErrorText(it) }
+    if (copied) ModelStatusText(if (korean) "URL 복사됨" else "URL copied")
+}
+
 private data class AuthProviderRow(val id: String, val name: String, val loggedIn: Boolean)
 
 // ---------------------------------------------------------------------------
@@ -2057,49 +2067,40 @@ private data class AuthProviderRow(val id: String, val name: String, val loggedI
 private fun ModelSectionHeader(title: String) {
     Text(
         text = title,
-        fontSize = 12.sp,
-        color = OmpColors.TextDim,
-        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = OmpColors.Text,
+        modifier = Modifier.padding(top = 8.dp),
     )
 }
 
 @Composable
-private fun ModelCard(content: @Composable () -> Unit) {
-    val shape = RoundedCornerShape(12.dp)
+private fun ModelCard(disclosure: String? = null, content: @Composable () -> Unit) {
+    var expanded by remember { mutableStateOf(disclosure == null) }
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .border(1.dp, OmpColors.Border, shape)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        content()
+        if (disclosure != null) {
+            TextButton(onClick = { expanded = !expanded },
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                    .border(1.dp, OmpColors.Border, RoundedCornerShape(8.dp))) {
+                Text(disclosure, modifier = Modifier.weight(1f), color = OmpColors.Text)
+                Icon(if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    tint = OmpColors.TextMuted, modifier = Modifier.size(20.dp))
+            }
+        }
+        if (expanded) content()
     }
 }
 
 @Composable
 private fun ModelRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            fontSize = 13.sp,
-            color = OmpColors.TextMuted,
-            modifier = Modifier.weight(1f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Text(
-            text = value,
-            fontSize = 13.sp,
-            color = OmpColors.Text,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted)
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = OmpColors.Text)
     }
 }
 
@@ -2113,10 +2114,10 @@ private fun ModelToggleRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 44.dp)
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(8.dp))
-            .clickable(enabled = enabled, onClick = { onCheckedChange(!checked) })
-            .padding(horizontal = 4.dp, vertical = 8.dp),
+            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange)
+            .padding(horizontal = 4.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -2128,7 +2129,7 @@ private fun ModelToggleRow(
         Switch(
             checked = checked,
             enabled = enabled,
-            onCheckedChange = onCheckedChange,
+            onCheckedChange = null,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
                 checkedTrackColor = OmpColors.AccentStrong,
@@ -2148,62 +2149,47 @@ private fun ModelCheckRow(
     enabled: Boolean = true,
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(6.dp))
-            .clickable(enabled = enabled, onClick = { onCheckedChange(!checked) })
-            .padding(horizontal = 4.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+            .toggleable(value = checked, enabled = enabled, role = Role.Checkbox, onValueChange = onCheckedChange)
+            .padding(horizontal = 4.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = if (checked) "☑" else "☐",
-            fontSize = 15.sp,
-            color = if (checked) OmpColors.Accent else OmpColors.TextMuted,
-            modifier = Modifier.padding(end = 10.dp),
-        )
-        Text(
-            text = label,
-            fontSize = 13.sp,
-            color = OmpColors.Text,
-            modifier = Modifier.weight(1f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Checkbox(checked = checked, enabled = enabled, onCheckedChange = null)
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = OmpColors.Text,
+            modifier = Modifier.weight(1f))
     }
 }
 
 @Composable
-private fun ModelChips(
+private fun ModelSelect(
     label: String,
     options: List<String>,
     selected: String?,
     onSelect: (String) -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Text(text = label, fontSize = 13.sp, color = OmpColors.TextMuted)
-        Spacer(modifier = Modifier.height(6.dp))
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            items(options, key = { it }) { option ->
-                val isSelected = option == selected
-                Text(
-                    text = option,
-                    fontSize = 13.sp,
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (isSelected) OmpColors.Text else OmpColors.TextMuted,
-                    maxLines = 1,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .border(
-                            1.dp,
-                            if (isSelected) OmpColors.Accent else OmpColors.Border,
-                            RoundedCornerShape(8.dp),
-                        )
-                        .clickable(onClick = { onSelect(option) })
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                )
+    var expanded by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted)
+        androidx.compose.foundation.layout.Box(Modifier.weight(1.35f), contentAlignment = Alignment.CenterEnd) {
+            TextButton(
+                onClick = { expanded = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                Text(selected.orEmpty(), modifier = Modifier.weight(1f), color = OmpColors.Text,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Choose $label",
+                    tint = OmpColors.TextMuted, modifier = Modifier.size(20.dp))
+            }
+            androidx.compose.material3.DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false },
+                modifier = Modifier.widthIn(max = 320.dp).heightIn(max = 360.dp)) {
+                (listOfNotNull(selected) + options).distinct().forEach { option ->
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text(option, color = if (option == selected) OmpColors.Accent else OmpColors.Text) },
+                        onClick = { onSelect(option); expanded = false },
+                    )
+                }
             }
         }
     }
@@ -2214,27 +2200,9 @@ private fun ModelTextField(
     value: String,
     onValueChange: (String) -> Unit,
     placeholder: String,
+    secret: Boolean = false,
 ) {
-    androidx.compose.foundation.layout.Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .border(1.dp, OmpColors.Border, RoundedCornerShape(8.dp))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-    ) {
-        androidx.compose.foundation.text.BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            singleLine = true,
-            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, color = OmpColors.Text),
-            cursorBrush = SolidColor(OmpColors.Accent),
-            modifier = Modifier.fillMaxWidth(),
-            decorationBox = { inner ->
-                if (value.isEmpty()) Text(placeholder, color = OmpColors.TextDim, fontSize = 14.sp)
-                inner()
-            },
-        )
-    }
+    ModelInlineField(value, onValueChange, placeholder, Modifier.fillMaxWidth(), secret)
 }
 
 @Composable
@@ -2243,26 +2211,18 @@ private fun ModelInlineField(
     onValueChange: (String) -> Unit,
     placeholder: String,
     modifier: Modifier = Modifier,
+    secret: Boolean = false,
 ) {
-    androidx.compose.foundation.layout.Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .border(1.dp, OmpColors.Border, RoundedCornerShape(8.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-    ) {
-        androidx.compose.foundation.text.BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            singleLine = true,
-            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, color = OmpColors.Text),
-            cursorBrush = SolidColor(OmpColors.Accent),
-            modifier = Modifier.fillMaxWidth(),
-            decorationBox = { inner ->
-                if (value.isEmpty()) Text(placeholder, color = OmpColors.TextDim, fontSize = 13.sp)
-                inner()
-            },
-        )
-    }
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(placeholder, style = MaterialTheme.typography.bodySmall) },
+        singleLine = true,
+        visualTransformation = if (secret) androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = OmpColors.Text),
+        shape = RoundedCornerShape(8.dp),
+        modifier = modifier.heightIn(min = 48.dp),
+    )
 }
 
 @Composable
@@ -2270,17 +2230,24 @@ private fun ModelActionLink(
     label: String,
     onClick: () -> Unit,
     danger: Boolean = false,
+    primary: Boolean = false,
+    enabled: Boolean = true,
 ) {
-    Text(
-        text = label,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = if (danger) OmpColors.StatusError else OmpColors.Accent,
-        modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .clickable(onClick = onClick)
-            .padding(vertical = 8.dp),
-    )
+    if (primary) {
+        androidx.compose.material3.Button(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(label, style = MaterialTheme.typography.labelLarge)
+        }
+        return
+    }
+    TextButton(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.heightIn(min = 48.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = if (danger) OmpColors.StatusError else OmpColors.Accent,
+        )
+    }
 }
 
 @Composable

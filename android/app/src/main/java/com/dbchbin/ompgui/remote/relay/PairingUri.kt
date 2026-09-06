@@ -33,7 +33,7 @@ fun parsePairingUri(input: String): PairingOffer? {
     val relayUrl = params["url"]?.trim()?.takeIf { it.isNotEmpty() } ?: return null
     val serverId = params["sid"]?.trim()?.takeIf { it.isNotEmpty() } ?: return null
     val secret = params["secret"]?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-    if (!isSafeToken(serverId, 64) || !isSafeToken(secret, 128)) return null
+    if (!isSafeToken(serverId, 64) || !RelayProtocol.SECRET.matches(secret)) return null
     val normalized = normalizeRelayUrl(relayUrl) ?: return null
     return PairingOffer(url = normalized, serverId = serverId, secret = secret)
 }

@@ -18,6 +18,9 @@ import { startRpcSession } from "../rpc-manager";
 import { WEB_SLASH_COMMANDS } from "../web-slash-commands";
 import { RelaySessionError } from "./session-runtime";
 import { RELAY_MAX_PROMPT_CHARS } from "./protocol";
+import { FilePreviewError, previewDocxFile } from "../file-preview";
+
+export const activeRelayUploadPaths = new Set<string>();
 
 const IGNORED_NAMES = new Set([
   "node_modules", ".git", ".next", "dist", "build", "__pycache__",
@@ -102,10 +105,12 @@ export async function listRelayFiles(rawPath: string | undefined, offset = 0, li
   } catch {
     throw new RelaySessionError("access_denied", "Could not read directory");
   }
+  const canonicalTarget = realpathSync(target);
   const sorted = [...dirents].sort((a, b) => a.name.localeCompare(b.name));
   for (const dirent of sorted) {
-    if (IGNORED_NAMES.has(dirent.name) || dirent.name.startsWith(".")) continue;
+    if (IGNORED_NAMES.has(dirent.name) || dirent.name.endsWith(".pyc")) continue;
     const full = join(target, dirent.name);
+    if (activeRelayUploadPaths.has(full) || activeRelayUploadPaths.has(join(canonicalTarget, dirent.name))) continue;
     if (!isExistingFilePathAllowed(full, roots)) continue;
     const isDir = resolveDirentIsDirectory(dirent, full);
     if (isDir === null) continue;
@@ -198,6 +203,20 @@ export async function assertAllowedPath(rawPath: string): Promise<string> {
     throw new RelaySessionError("access_denied", "Path is outside allowed workspaces");
   }
   return target;
+}
+
+export async function previewRelayFile(rawPath: string, revision?: string) {
+  const roots = await getAllowedFileRoots();
+  const path = realpathSync(await assertAllowedPath(rawPath));
+  if (!isExistingFilePathAllowed(path, roots)) throw new RelaySessionError("access_denied", "Path is outside allowed workspaces");
+  try {
+    const preview = await previewDocxFile(path, revision, 8 * 1024 * 1024);
+    if (!isExistingFilePathAllowed(path, roots)) throw new RelaySessionError("access_denied", "Path is outside allowed workspaces");
+    return { path, ...preview, mime: "text/html" as const };
+  } catch (error) {
+    if (error instanceof FilePreviewError) throw new RelaySessionError(error.code, error.message);
+    throw error;
+  }
 }
 
 export function relayPage(offset = 0, limit = 100): { offset: number; limit: number } {

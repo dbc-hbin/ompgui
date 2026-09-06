@@ -102,9 +102,7 @@ export function useTheme() {
   const palette = useSyncExternalStore(subscribe, storedPalette, getPaletteServerSnapshot);
   // The OS preference is browser-only. Deferring it until after hydration keeps
   // the initial client tree identical to the server's system/light snapshot.
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => { setHydrated(true); }, []);
-  const prefersDark = hydrated && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const [prefersDark, setPrefersDark] = useState(false);
   const theme = resolveTheme(preference, prefersDark);
 
   useEffect(() => {
@@ -112,15 +110,17 @@ export function useTheme() {
   }, [palette]);
 
   useEffect(() => {
-    if (preference !== "system" || typeof window === "undefined") return;
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const onChange = () => {
-      document.documentElement.classList.toggle("dark", media.matches);
-      listeners.forEach((cb) => cb());
+      setPrefersDark(media.matches);
+      if (storedPreference() === "system") {
+        document.documentElement.classList.toggle("dark", media.matches);
+      }
     };
+    onChange();
     media.addEventListener("change", onChange);
     return () => media.removeEventListener("change", onChange);
-  }, [preference]);
+  }, []);
 
   const setTheme = useCallback((next: ThemePreference, origin?: ToggleOrigin) => {
     const apply = () => applyTheme(next);

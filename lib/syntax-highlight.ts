@@ -134,16 +134,6 @@ export function shouldHighlightLanguage(language: string): boolean {
   return isLanguageRegistered(language) && !isPlainTextLanguage(language);
 }
 
-/**
- * Kept for API compatibility with callers that awaited a grammar load before
- * rendering (SyntaxHighlightedCode, FileViewer). Every grammar is already
- * registered, so there is never anything to wait for.
- */
-export function ensureLanguageRegistered(language: string): Promise<void> | null {
-  void language;
-  return null;
-}
-
 const PRE_STYLE = 'pre[class*="language-"]';
 
 function withoutPreBackground(theme: Record<string, CSSProperties>) {

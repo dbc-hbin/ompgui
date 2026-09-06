@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -89,15 +91,17 @@ fun PairingScreen(
                 .safeDrawingPadding()
                 .imePadding()
                 .verticalScroll(rememberScrollState())
-                .padding(20.dp),
+                .padding(16.dp),
             verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Column(
                 modifier = Modifier
+                    .widthIn(max = 480.dp)
                     .fillMaxWidth()
                     .border(1.dp, OmpColors.Border, RoundedCornerShape(16.dp))
                     .background(OmpColors.BgPanel, RoundedCornerShape(16.dp))
-                    .padding(24.dp),
+                    .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -117,8 +121,8 @@ fun PairingScreen(
                 }
                 Text(
                     text = stringResource(R.string.pair_title),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 22.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 18.sp,
                     color = OmpColors.Text,
                 )
                 Text(
@@ -188,6 +192,9 @@ fun PairingScreen(
                     },
                     label = stringResource(R.string.pair_scan_qr),
                 )
+                if (connecting) {
+                    androidx.compose.material3.LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
                 OmpButton(
                     outlined = false,
                     enabled = uri.isNotBlank() && !connecting,
@@ -240,6 +247,7 @@ private fun OmpField(
                     RoundedCornerShape(8.dp),
                 )
                 .background(OmpColors.CodeBg, RoundedCornerShape(8.dp))
+                .heightIn(min = 48.dp)
                 .onFocusChanged { focused = it.isFocused }
                 .padding(horizontal = 12.dp, vertical = 10.dp),
         ) {
@@ -296,7 +304,7 @@ private fun OmpButton(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(48.dp)
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(bg)
             .then(
@@ -306,14 +314,8 @@ private fun OmpButton(
                     Modifier
                 },
             )
-            .let { base ->
-                if (enabled) {
-                    base.clickable(onClick = onClick)
-                } else {
-                    base
-                }
-            }
-            .padding(horizontal = 16.dp),
+            .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {

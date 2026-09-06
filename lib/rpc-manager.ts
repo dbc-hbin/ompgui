@@ -15,6 +15,26 @@ import type {
   WebSessionState,
 } from "./pi-types";
 import type { ExtensionWidgetItem } from "./types";
+import {
+  QUEUE_COMMAND_DELETE,
+  QUEUE_COMMAND_ENQUEUE,
+  QUEUE_COMMAND_GET,
+  QUEUE_COMMAND_PROMOTE,
+  QUEUE_COMMAND_RECALL,
+  QUEUE_DISCARDED_ON_SWITCH,
+  QUEUE_DISCARDED_ON_TEARDOWN,
+  QUEUE_ERROR_INVALID,
+  QUEUE_ERROR_STALE,
+  QUEUE_FORWARD_TIMEOUT_MS,
+  QUEUE_UNCERTAIN_HANDOFF,
+  SessionMessageQueue,
+  SessionQueueError,
+  isSessionQueueCommandType,
+  isSessionQueueKind,
+  toQueueMutationResult,
+  toQueueSnapshotEvent,
+} from "./session-queue";
+import type { MessageQueueItem, QueueMutationResult } from "./message-queue";
 
 // ============================================================================
 // Types
@@ -145,6 +165,16 @@ function toImageContents(value: unknown): Array<{ type: "image"; data: string; m
   return images?.length ? images : undefined;
 }
 
+function toolCallIdFromEvent(event: AgentEvent): string {
+  if (typeof event.toolCallId === "string" && event.toolCallId) return event.toolCallId;
+  if (typeof event.id === "string" && event.id) return event.id;
+  return "";
+}
+
+function ackIsLocalOnly(value: unknown): boolean {
+  return !!value && typeof value === "object" && (value as { agentInvoked?: unknown }).agentInvoked === false;
+}
+
 /**
  * Resolve a spawn cwd and report whether it differs from the session's recorded
  * directory. Callers that surface a UI (the SSE resume paths) use the result to
@@ -206,6 +236,24 @@ export class AgentSessionWrapper {
   private hostUriSchemes: Map<string, { writable?: boolean }> = new Map();
   /** host_uri_request ids awaiting a host_uri_result from the browser. */
   private pendingHostUris: Map<string, AgentEvent> = new Map();
+  private readonly messageQueue = new SessionMessageQueue();
+  /** Bumped on restart/destroy/session-switch so in-flight forwards cannot land. */
+  private queueEpoch = 0;
+  private queueDispatching = false;
+  private queueDispatchAgain = false;
+  /** After a user abort, do not auto-start follow-ups until enqueue/promote/prompt. */
+  private abortHoldsDispatch = false;
+  private readonly activeToolIds = new Set<string>();
+  /** Native OMP follow_up/prompt+followUp commands that have not started a run yet. */
+  private nativeFollowUpDepth = 0;
+  /** In-flight native prompt/steer/follow_up sendCommand calls. */
+  private nativeHandoffPending = 0;
+  /** Last observed OMP queuedMessageCount. Follow-ups wait while this is > 0. */
+  private nativeQueuedCount = 0;
+  /** True after terminal until get_state refreshes a previously positive native count. */
+  private nativeQueueStale = false;
+  /** Bumped on each native-count reconcile so late get_state replies cannot stall. */
+  private nativeReconcileGeneration = 0;
   /** Resolves once an in-flight destroyAndWait finishes; null when idle. Read
    * by startRpcSession so a replacement spawn awaits the old child's exit. */
   destroyPromise: Promise<void> | null = null;
@@ -308,6 +356,7 @@ export class AgentSessionWrapper {
     this.resetIdleTimer();
     const event = frame as AgentEvent;
     let refreshSessionList = false;
+    let maybeDispatchQueue = false;
 
     switch (event.type) {
       case "command_output": {
@@ -324,6 +373,9 @@ export class AgentSessionWrapper {
         break;
       }
       case "agent_start":
+        if (!this.streaming && this.nativeFollowUpDepth > 0) {
+          this.nativeFollowUpDepth -= 1;
+        }
         this.streaming = true;
         // The session file can appear just after the prompt acknowledgement.
         // Invalidate and signal the sidebar now rather than waiting for the
@@ -344,12 +396,19 @@ export class AgentSessionWrapper {
         if (event.isTerminal !== false) {
           this.streaming = false;
           this.promptRunning = false;
+          this.activeToolIds.clear();
           invalidateSessionListCache();
+          if (this.nativeQueuedCount > 0 || this.nativeQueueStale) {
+            this.beginNativeQueueReconcile();
+          } else {
+            maybeDispatchQueue = true;
+          }
         }
         break;
       case "prompt_result":
         // Local-only prompt (builtin/extension slash command) — no agent run.
         this.promptRunning = false;
+        maybeDispatchQueue = true;
         break;
       case "auto_compaction_start":
         this.compacting = true;
@@ -360,7 +419,19 @@ export class AgentSessionWrapper {
         // event.result.estimatedTokensAfter for the banner.
         patchEstimatedTokensAfter(event.result);
         invalidateSessionListCache();
+        maybeDispatchQueue = true;
         break;
+      case "tool_execution_start": {
+        const toolId = toolCallIdFromEvent(event);
+        if (toolId) this.activeToolIds.add(toolId);
+        break;
+      }
+      case "tool_execution_end": {
+        const toolId = toolCallIdFromEvent(event);
+        if (toolId) this.activeToolIds.delete(toolId);
+        maybeDispatchQueue = true;
+        break;
+      }
       case "session_info_update":
         if (typeof event.title === "string") this._sessionName = event.title;
         invalidateSessionListCache();
@@ -373,6 +444,7 @@ export class AgentSessionWrapper {
           this.promptRunning = false;
           this.emit({ type: "prompt_error", errorMessage: (event.error as string) ?? "Prompt failed" });
           notifyRunningChange();
+          this.scheduleQueueDispatch();
           return;
         }
         break;
@@ -447,6 +519,7 @@ export class AgentSessionWrapper {
 
     this.emit(event);
     notifyRunningChange({ refreshSessionList });
+    if (maybeDispatchQueue) this.scheduleQueueDispatch();
   }
 
   /** Forget a pending dialog and its expiry timer. */
@@ -630,6 +703,7 @@ export class AgentSessionWrapper {
       }
       listener(event);
     }
+    listener(toQueueSnapshotEvent(this.messageQueue.getSnapshot()));
     return () => {
       const i = this.listeners.indexOf(listener);
       if (i !== -1) this.listeners.splice(i, 1);
@@ -727,6 +801,8 @@ export class AgentSessionWrapper {
     this.streaming = state.isStreaming;
     this.compacting = state.isCompacting;
     this._sessionName = state.sessionName;
+    this.nativeQueuedCount = state.queuedMessageCount ?? 0;
+    this.nativeQueueStale = false;
     if (state.sessionId) {
       this._sessionId = state.sessionId;
       this._sessionFile = state.sessionFile ?? this._sessionFile;
@@ -755,6 +831,7 @@ export class AgentSessionWrapper {
         : undefined,
       messageCount: state.messageCount,
       queuedMessageCount: state.queuedMessageCount,
+      messageQueue: this.queueSnapshotForClient(),
       contextUsage: state.contextUsage ?? null,
       systemPrompt: state.systemPrompt?.join("\n\n") ?? "",
       thinkingLevel: state.thinkingLevel ?? "off",
@@ -777,6 +854,7 @@ export class AgentSessionWrapper {
     const state = await this.proc.sendCommand<RpcSessionState>({ type: "get_state" });
     this.applyIdentity(state);
     if (oldId && oldId !== this._sessionId) {
+      this.discardQueue(QUEUE_DISCARDED_ON_SWITCH);
       this.onIdentityChangeCallback?.(oldId, this._sessionId);
     }
     invalidateSessionListCache();
@@ -794,6 +872,16 @@ export class AgentSessionWrapper {
     // Stays true for the whole restart so send() rejects commands that would
     // otherwise hit the disposed or half-built child.
     this.restarting = true;
+    this.queueEpoch += 1;
+    this.abortHoldsDispatch = false;
+    this.activeToolIds.clear();
+    this.nativeFollowUpDepth = 0;
+    this.nativeHandoffPending = 0;
+    this.nativeQueuedCount = 0;
+    this.nativeQueueStale = false;
+    this.nativeReconcileGeneration += 1;
+    this.messageQueue.failSending(QUEUE_UNCERTAIN_HANDOFF);
+    this.emitQueueSnapshot();
     this.unsubscribeFrames?.();
     try {
       await old.dispose();
@@ -838,6 +926,7 @@ export class AgentSessionWrapper {
       this.restarting = false;
     }
     notifyRunningChange();
+    this.scheduleQueueDispatch();
   }
 
   async send(command: Record<string, unknown>): Promise<unknown> {
@@ -854,6 +943,10 @@ export class AgentSessionWrapper {
     const unsupported = UNSUPPORTED_COMMANDS[type];
     if (unsupported) throw new RpcCommandError(type, unsupported, "unsupported");
 
+    if (isSessionQueueCommandType(type)) {
+      return this.handleQueueCommand(command);
+    }
+
     switch (type) {
       case "prompt": {
         if (this.bashRunning) {
@@ -861,24 +954,31 @@ export class AgentSessionWrapper {
         }
         const streamingBehavior = command.streamingBehavior as "steer" | "followUp" | undefined;
         if (!streamingBehavior) {
+          this.abortHoldsDispatch = false;
           this.promptRunning = true;
           notifyRunningChange();
         }
         try {
           // omp acks immediately; agent output streams as events, completion is
           // agent_end (agent runs) or prompt_result (local-only slash commands).
-          const ack = await this.proc.sendCommand<{ agentInvoked?: boolean } | undefined>({
-            type: "prompt",
-            message: command.message as string,
-            ...(toImageContents(command.images) ? { images: toImageContents(command.images) } : {}),
-            ...(streamingBehavior ? { streamingBehavior } : {}),
-          });
+          const ack = await this.forwardNativeHandoff<{ agentInvoked?: boolean } | undefined>(
+            {
+              type: "prompt",
+              message: command.message as string,
+              ...(toImageContents(command.images) ? { images: toImageContents(command.images) } : {}),
+              ...(streamingBehavior ? { streamingBehavior } : {}),
+            },
+            streamingBehavior === "followUp",
+          );
           // Slash commands fully consumed by a builtin report agentInvoked:false
           // in the ack itself — no prompt_result frame follows.
-          if (ack?.agentInvoked === false && !streamingBehavior) {
-            this.promptRunning = false;
-            this.emit({ type: "prompt_result", agentInvoked: false });
-            notifyRunningChange();
+          if (ack?.agentInvoked === false) {
+            if (!streamingBehavior) {
+              this.promptRunning = false;
+              this.emit({ type: "prompt_result", agentInvoked: false });
+              notifyRunningChange();
+            }
+            this.scheduleQueueDispatch();
           }
         } catch (error) {
           this.promptRunning = false;
@@ -890,15 +990,16 @@ export class AgentSessionWrapper {
 
       case "steer":
       case "follow_up": {
-        await this.proc.sendCommand({
+        await this.forwardNativeHandoff({
           type,
           message: command.message as string,
           ...(toImageContents(command.images) ? { images: toImageContents(command.images) } : {}),
-        });
+        }, type === "follow_up");
         return null;
       }
 
       case "abort":
+        this.abortHoldsDispatch = true;
         await this.withFinalRunningNotification(async () => {
           await this.proc.sendCommand({ type: "abort" });
           // If the prompt was aborted before the agent loop started, no
@@ -935,6 +1036,9 @@ export class AgentSessionWrapper {
         if (this.bashRunning) {
           throw new Error("Cannot fork while a shell command is running");
         }
+        this.queueEpoch += 1;
+        this.messageQueue.failSending(QUEUE_UNCERTAIN_HANDOFF);
+        this.emitQueueSnapshot();
         const result = await this.proc.sendCommand<{ text: string; cancelled: boolean }>({
           type: "branch",
           entryId: command.entryId as string,
@@ -946,6 +1050,9 @@ export class AgentSessionWrapper {
 
       case "new_session":
       case "switch_session": {
+        this.queueEpoch += 1;
+        this.messageQueue.failSending(QUEUE_UNCERTAIN_HANDOFF);
+        this.emitQueueSnapshot();
         const result = await this.proc.sendCommand<{ cancelled: boolean }>(command as { type: string });
         if (!result.cancelled) {
           const newSessionId = await this.refreshIdentityAfterSessionChange();
@@ -972,12 +1079,14 @@ export class AgentSessionWrapper {
           });
         } finally {
           invalidateSessionListCache();
+          this.scheduleQueueDispatch();
         }
       }
 
       case "abort_compaction":
         // No dedicated RPC command; a plain abort cancels the in-flight turn
         // including compaction work.
+        this.abortHoldsDispatch = true;
         await this.withFinalRunningNotification(() => this.proc.sendCommand({ type: "abort" }));
         return null;
 
@@ -1038,6 +1147,7 @@ export class AgentSessionWrapper {
           this.bashRunning = false;
           invalidateSessionListCache();
           notifyRunningChange();
+          this.scheduleQueueDispatch();
         }
       }
 
@@ -1084,6 +1194,270 @@ export class AgentSessionWrapper {
     }
   }
 
+  private handleQueueCommand(command: Record<string, unknown>): Promise<unknown> {
+    try {
+      const type = command.type as string;
+      switch (type) {
+        case QUEUE_COMMAND_ENQUEUE: {
+          if (!isSessionQueueKind(command.lane)) {
+            throw new SessionQueueError("lane must be steer or followUp", QUEUE_ERROR_INVALID);
+          }
+          if (typeof command.message !== "string") {
+            throw new SessionQueueError("message is required", QUEUE_ERROR_INVALID);
+          }
+          this.abortHoldsDispatch = false;
+          this.messageQueue.enqueue({ lane: command.lane, text: command.message });
+          this.emitQueueSnapshot();
+          return this.finishQueueCommand();
+        }
+        case QUEUE_COMMAND_PROMOTE: {
+          if (typeof command.id !== "string") throw new SessionQueueError("id is required", QUEUE_ERROR_INVALID);
+          this.abortHoldsDispatch = false;
+          this.messageQueue.promote(command.id, this.requireExpectedRevision(command));
+          this.emitQueueSnapshot();
+          return this.finishQueueCommand();
+        }
+        case QUEUE_COMMAND_RECALL: {
+          if (typeof command.id !== "string") throw new SessionQueueError("id is required", QUEUE_ERROR_INVALID);
+          const { item } = this.messageQueue.recall(command.id, this.requireExpectedRevision(command));
+          this.emitQueueSnapshot();
+          return this.finishQueueCommand(item);
+        }
+        case QUEUE_COMMAND_DELETE: {
+          if (typeof command.id !== "string") throw new SessionQueueError("id is required", QUEUE_ERROR_INVALID);
+          this.messageQueue.delete(command.id, this.requireExpectedRevision(command));
+          this.emitQueueSnapshot();
+          return this.finishQueueCommand();
+        }
+        case QUEUE_COMMAND_GET:
+          return Promise.resolve(toQueueMutationResult(this.queueSnapshotForClient()));
+        default:
+          throw new Error(`Unsupported command: ${type}`);
+      }
+    } catch (error) {
+      if (error instanceof SessionQueueError) throw new WebRpcError(error.message, error.code);
+      throw error;
+    }
+  }
+
+  private requireExpectedRevision(command: Record<string, unknown>): number {
+    if (typeof command.expectedRevision !== "number") {
+      throw new SessionQueueError("Queue revision is stale; reload the queue and retry", QUEUE_ERROR_STALE);
+    }
+    return command.expectedRevision;
+  }
+
+  private async finishQueueCommand(recalled?: MessageQueueItem): Promise<QueueMutationResult> {
+    await this.drainQueueDispatch();
+    return toQueueMutationResult(this.queueSnapshotForClient(), recalled);
+  }
+
+  private queueSnapshotForClient() {
+    return { ...this.messageQueue.getSnapshot(), nativeQueuedCount: this.nativeQueuedCount };
+  }
+
+  private emitQueueSnapshot(): void {
+    this.emit(toQueueSnapshotEvent(this.queueSnapshotForClient()));
+  }
+
+  private beginNativeQueueReconcile(): void {
+    this.nativeQueueStale = true;
+    this.nativeReconcileGeneration += 1;
+    const generation = this.nativeReconcileGeneration;
+    const epoch = this.queueEpoch;
+    const proc = this.proc;
+    void this.refreshNativeQueuedCount(generation, epoch, proc);
+  }
+
+  private async refreshNativeQueuedCount(
+    generation: number,
+    epoch: number,
+    proc: RpcProcess,
+  ): Promise<void> {
+    try {
+      const state = await proc.sendCommand<RpcSessionState>({ type: "get_state" });
+      if (!this.nativeReconcileStillValid(generation, epoch, proc)) return;
+      this.nativeQueuedCount = state.queuedMessageCount ?? 0;
+      this.nativeQueueStale = false;
+    } catch {
+      if (!this.nativeReconcileStillValid(generation, epoch, proc)) return;
+      this.nativeQueuedCount = 0;
+      this.nativeQueueStale = false;
+    }
+    this.scheduleQueueDispatch();
+  }
+
+  private nativeReconcileStillValid(generation: number, epoch: number, proc: RpcProcess): boolean {
+    return this._alive
+      && this.queueEpoch === epoch
+      && this.proc === proc
+      && this.nativeReconcileGeneration === generation;
+  }
+
+  private discardQueue(message: string): void {
+    this.queueEpoch += 1;
+    const hadItems = this.messageQueue.getSnapshot().items.length > 0;
+    this.messageQueue.reset();
+    this.emitQueueSnapshot();
+    if (hadItems) this.emit({ type: "notice", level: "warning", message });
+  }
+
+  private scheduleQueueDispatch(): void {
+    void this.drainQueueDispatch();
+  }
+
+  private async drainQueueDispatch(): Promise<void> {
+    if (this.queueDispatching) {
+      this.queueDispatchAgain = true;
+      return;
+    }
+    this.queueDispatching = true;
+    try {
+      do {
+        this.queueDispatchAgain = false;
+        await this.dispatchNextQueueItem();
+      } while (this.queueDispatchAgain);
+    } catch {
+      // Dispatch failures are stored on the item. Never reject into handleFrame.
+    } finally {
+      this.queueDispatching = false;
+      if (this.queueDispatchAgain) this.scheduleQueueDispatch();
+    }
+  }
+
+  private canDispatchSteer(): boolean {
+    return this.isAlive()
+      && !this.restarting
+      && this.streaming
+      && !this.compacting
+      && !this.bashRunning
+      && this.activeToolIds.size === 0
+      && this.pendingHostTools.size === 0
+      && this.nativeHandoffPending === 0;
+  }
+
+  private canDispatchFollowUp(): boolean {
+    return this.isAlive()
+      && !this.restarting
+      && !this.abortHoldsDispatch
+      && !this.promptRunning
+      && !this.streaming
+      && !this.compacting
+      && !this.bashRunning
+      && this.activeToolIds.size === 0
+      && this.pendingHostTools.size === 0
+      && this.nativeFollowUpDepth === 0
+      && this.nativeHandoffPending === 0
+      && !this.nativeQueueStale
+      && this.nativeQueuedCount === 0;
+  }
+
+  private canDispatchIdlePrompt(): boolean {
+    return this.canDispatchFollowUp();
+  }
+
+  private async dispatchNextQueueItem(): Promise<void> {
+    while (this.isAlive() && !this.restarting) {
+      if (this.messageQueue.hasSending()) return;
+      const steer = this.messageQueue.selectDispatchCandidate("steer");
+      if (steer) {
+        if (this.canDispatchSteer()) {
+          await this.forwardQueueItem(steer, "steer");
+          continue;
+        }
+        if (this.canDispatchIdlePrompt()) {
+          await this.forwardQueueItem(steer);
+          continue;
+        }
+        return;
+      }
+      const followUp = this.messageQueue.selectDispatchCandidate("followUp");
+      if (followUp && this.canDispatchFollowUp()) {
+        await this.forwardQueueItem(followUp);
+        continue;
+      }
+      return;
+    }
+  }
+
+  private async forwardQueueItem(
+    item: { id: string; text: string },
+    streamingBehavior?: "steer",
+  ): Promise<void> {
+    const epoch = this.queueEpoch;
+    const proc = this.proc;
+    const sessionId = this._sessionId;
+    this.messageQueue.markSending(item.id);
+    this.emitQueueSnapshot();
+    if (!streamingBehavior) {
+      this.promptRunning = true;
+      notifyRunningChange();
+    }
+    try {
+      const ack = await proc.sendCommand<{ agentInvoked?: boolean } | undefined>(
+        {
+          type: "prompt",
+          message: item.text,
+          ...(streamingBehavior ? { streamingBehavior } : {}),
+        },
+        QUEUE_FORWARD_TIMEOUT_MS,
+      );
+      if (!this.queueForwardStillValid(epoch, proc, sessionId, item.id)) return;
+      this.messageQueue.remove(item.id);
+      this.emitQueueSnapshot();
+      if (ack?.agentInvoked === false && !streamingBehavior) {
+        this.promptRunning = false;
+        this.emit({ type: "prompt_result", agentInvoked: false });
+        notifyRunningChange();
+      }
+    } catch (error) {
+      if (!streamingBehavior) this.promptRunning = false;
+      if (!this.queueForwardStillValid(epoch, proc, sessionId, item.id)) return;
+      const timedOut = error instanceof Error && /timed out/i.test(error.message);
+      const message = timedOut
+        ? QUEUE_UNCERTAIN_HANDOFF
+        : `${QUEUE_UNCERTAIN_HANDOFF} ${error instanceof Error ? error.message : String(error)}`;
+      this.messageQueue.markFailed(item.id, message);
+      this.emitQueueSnapshot();
+      this.emit({ type: "notice", level: "warning", message });
+      notifyRunningChange();
+    }
+  }
+
+  private queueForwardStillValid(
+    epoch: number,
+    proc: RpcProcess,
+    sessionId: string,
+    itemId: string,
+  ): boolean {
+    if (!this._alive || this.queueEpoch !== epoch || this.proc !== proc) {
+      return false;
+    }
+    if (sessionId && this._sessionId !== sessionId) return false;
+    return this.messageQueue.getSnapshot().items.some((item) => item.id === itemId && item.status === "sending");
+  }
+
+  private async forwardNativeHandoff<T>(
+    command: { type: string; [key: string]: unknown },
+    isFollowUp: boolean,
+  ): Promise<T> {
+    this.nativeHandoffPending += 1;
+    if (isFollowUp) this.nativeFollowUpDepth += 1;
+    try {
+      const result = await this.proc.sendCommand<T>(command);
+      if (isFollowUp && ackIsLocalOnly(result)) {
+        this.nativeFollowUpDepth = Math.max(0, this.nativeFollowUpDepth - 1);
+      }
+      return result;
+    } catch (error) {
+      if (isFollowUp) this.nativeFollowUpDepth = Math.max(0, this.nativeFollowUpDepth - 1);
+      throw error;
+    } finally {
+      this.nativeHandoffPending = Math.max(0, this.nativeHandoffPending - 1);
+      this.scheduleQueueDispatch();
+    }
+  }
+
   destroy(): void {
     void this.destroyAndWait();
   }
@@ -1097,6 +1471,9 @@ export class AgentSessionWrapper {
     if (this.destroyPromise) return this.destroyPromise;
     if (!this._alive) return;
     this._alive = false;
+    this.queueEpoch += 1;
+    this.abortHoldsDispatch = true;
+    this.discardQueue(QUEUE_DISCARDED_ON_TEARDOWN);
     if (this.idleTimer) clearTimeout(this.idleTimer);
     if (this.sessionFileSignalTimer) {
       clearTimeout(this.sessionFileSignalTimer);
@@ -1109,7 +1486,13 @@ export class AgentSessionWrapper {
       this.mcpListWaiter.reject(new Error("Session was closed while loading MCP servers"));
       this.mcpListWaiter = null;
     }
-    const disposed = this.proc.dispose().catch(() => {});
+    const disposed = this.proc.dispose().catch(() => {}).then(() => {
+      // Keep the dead wrapper discoverable until shutdown finishes. SSE
+      // observers still close immediately, but a concurrent start must wait.
+      for (const [id, session] of getRegistry()) {
+        if (session === this) getRegistry().delete(id);
+      }
+    });
     this.destroyPromise = disposed;
     this.pendingHostTools.clear();
     this.hostToolNames.clear();
@@ -1236,12 +1619,14 @@ export async function startRpcSession(
   const registry = getRegistry();
   const locks = getLocks();
 
-  const existing = registry.get(sessionId);
+  let existing = registry.get(sessionId);
+  // Recheck after every wait: another caller may already have started (or
+  // destroyed) a replacement while this caller was suspended.
+  while (existing && !existing.isAlive() && existing.destroyPromise) {
+    await existing.destroyPromise;
+    existing = registry.get(sessionId);
+  }
   if (existing?.isAlive()) return { session: existing, realSessionId: sessionId };
-  // A wrapper whose omp child is still flushing/exiting must fully dispose
-  // before a replacement spawns — two children touching the same .jsonl would
-  // race on resume/delete/archive.
-  if (existing?.destroyPromise) await existing.destroyPromise;
 
   const inflight = locks.get(sessionId);
   if (inflight) return inflight;
@@ -1270,10 +1655,6 @@ export async function startRpcSession(
     }
 
     const realSessionId = created.sessionId;
-    created.onDestroy(() => {
-      if (registry.get(created.sessionId) === created) registry.delete(created.sessionId);
-      if (registry.get(realSessionId) === created) registry.delete(realSessionId);
-    });
     created.onIdentityChange((oldId, newId) => {
       if (registry.get(oldId) === created) registry.delete(oldId);
       registry.set(newId, created);

@@ -75,7 +75,7 @@ test("runtime restore does not arm a roster timer while the document is hidden",
   assert.match(hookSource, /scheduleInitialRosterRefresh\(sid\);/);
   assert.match(
     hookSource,
-    /\}, \[connectEvents, registerHostTools, registerHostUriSchemes, scheduleInitialRosterRefresh, waitForBashSettlement, waitForPromptSettlement\]\);/,
+    /\}, \[applyQueueFromAgentState, connectEvents, fetchMessageQueue, registerHostTools, registerHostUriSchemes, scheduleInitialRosterRefresh, waitForBashSettlement, waitForPromptSettlement\]\);/,
   );
   assert.doesNotMatch(
     hookSource,
@@ -113,16 +113,13 @@ test("model catalog applies only when this models load still owns the request", 
   assert.match(hookSource, /if \(!ownsModelsLoad\(\)\) return;\s+setModelNames\(d\.models\);/);
   assert.match(hookSource, /if \(isNew\) \{\s+const match = d\.defaultModel/);
   assert.match(hookSource, /if \(!ownsModelsLoad\(\)\) return;\s+setModelsLoading\(false\);/);
-  assert.match(hookSource, /\}, \[isNew, newSessionCwd, session\?\.cwd\]\);/);
-  assert.doesNotMatch(hookSource, /const sessionUnchanged = \(\) => sessionIdRef\.current === sid;/);
-  assert.doesNotMatch(
-    hookSource,
-    /loadModels = useCallback\(async \(signal\?: AbortSignal, force = false\) => \{[\s\S]*sessionIdRef\.current === sid/,
+  const loadModelsBody = hookSource.match(
+    /loadModels = useCallback\(async \(signal\?: AbortSignal, force = false\) => \{[\s\S]*?\}, \[isNew, newSessionCwd, session\?\.cwd\]\);/,
   );
-  assert.doesNotMatch(
-    hookSource,
-    /loadModels = useCallback\(async \(signal\?: AbortSignal, force = false\) => \{[\s\S]*matchesSessionLoadGeneration/,
-  );
+  assert.ok(loadModelsBody);
+  assert.doesNotMatch(loadModelsBody[0], /const sessionUnchanged = \(\) => sessionIdRef\.current === sid;/);
+  assert.doesNotMatch(loadModelsBody[0], /sessionIdRef\.current === sid/);
+  assert.doesNotMatch(loadModelsBody[0], /matchesSessionLoadGeneration/);
 });
 
 test("follow token includes widget line contents rather than only line counts", () => {
@@ -177,4 +174,33 @@ test("cycle_thinking_level stays usable mid-run like the reasoning picker", () =
     hookSource,
     /const handleCycleThinkingLevel = useCallback\(async \(\) => \{\s+const sid = sessionIdRef\.current;\s+if \(!sid \|\| !canMutateSession\(sid\)\) return;\s+try \{\s+await sendAgentCommand\(sid, \{ type: "cycle_thinking_level" \}\);/,
   );
+});
+
+test("queued messages come from the server snapshot instead of a local string mirror", () => {
+  assert.match(hookSource, /type: "enqueue_message"/);
+  assert.match(hookSource, /type: "get_message_queue"/);
+  assert.match(hookSource, /type: "recall_queued_message"/);
+  assert.match(hookSource, /type: "delete_queued_message"/);
+  assert.match(hookSource, /type: "promote_queued_message"/);
+  assert.match(hookSource, /case "message_queue_update"/);
+  assert.match(hookSource, /parseMessageQueueSnapshot\(event\.queue\)/);
+  assert.match(hookSource, /snapshotFromAgentState\(state\)/);
+  assert.match(hookSource, /parseRecallQueuedMessageResult/);
+  assert.match(hookSource, /unwrapQueueCommandResult/);
+  assert.match(hookSource, /result\.recalled\.text/);
+  assert.match(hookSource, /await ensureEventsConnected\(sid\);/);
+  assert.match(hookSource, /matchesQueueRevision\(/);
+  assert.match(hookSource, /expectedRevision/);
+  assert.match(hookSource, /queueRequestFenceRef/);
+  assert.match(hookSource, /beginQueueEpoch/);
+  assert.match(hookSource, /applyNativeQueuedCount/);
+  assert.doesNotMatch(hookSource, /QUEUE_STORAGE_PREFIX/);
+  assert.doesNotMatch(hookSource, /prev\.steering\.indexOf\(text\)/);
+  assert.doesNotMatch(hookSource, /queueMutatedAtRef/);
+  assert.doesNotMatch(hookSource, /5000\) setQueuedMessages/);
+  assert.doesNotMatch(hookSource, /export interface QueuedMessages/);
+  assert.doesNotMatch(hookSource, /type: "delete_queue_item"/);
+  assert.doesNotMatch(hookSource, /type: "promote_queue_item"/);
+  assert.doesNotMatch(hookSource, /function parseQueueCommandResult/);
+  assert.doesNotMatch(hookSource, /hasItems/);
 });

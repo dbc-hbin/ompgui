@@ -2,7 +2,7 @@ import coreWebVitals from "eslint-config-next/core-web-vitals";
 import typescript from "eslint-config-next/typescript";
 
 const eslintConfig = [
-  { ignores: ["android/**/build/**", "android/.gradle/**"] },
+  { ignores: [".tmp/**", "android/**/build/**", "android/.gradle/**"] },
   ...coreWebVitals,
   ...typescript,
   {

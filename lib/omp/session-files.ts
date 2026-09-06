@@ -186,7 +186,8 @@ export function parseJsonlLenient<T>(body: string): T[] {
     const line = rawLine.trim();
     if (!line) continue;
     try {
-      out.push(JSON.parse(line) as T);
+      const record: unknown = JSON.parse(line);
+      if (isRecord(record)) out.push(record as T);
     } catch {
       // Skip malformed line (torn write, prefix-window truncation).
     }
@@ -502,12 +503,13 @@ export function readSessionEntryByIdSync(filePath: string, entryId: string): Ses
       const line = rawLine.trim();
       if (!line) return;
 
-      let record: Record<string, unknown>;
+      let record: unknown;
       try {
-        record = JSON.parse(line) as Record<string, unknown>;
+        record = JSON.parse(line);
       } catch {
         return;
       }
+      if (!isRecord(record)) return;
 
       if (!sawHeader) {
         if (record.type !== "session" || typeof record.id !== "string") {
@@ -567,7 +569,8 @@ export function loadSessionFile(filePath: string, options: LoadSessionOptions = 
       const line = rawLine.trim();
       if (!line) return;
       try {
-        records.push(JSON.parse(line) as Record<string, unknown>);
+        const record: unknown = JSON.parse(line);
+        if (isRecord(record)) records.push(record);
       } catch {
         // Skip malformed line (torn write).
       }
@@ -632,7 +635,7 @@ function parseSessionHeaderText(head: string, maxHeaderBytes: number): SessionHe
   } catch {
     return null;
   }
-  if (header.type !== "session") return null;
+  if (!isRecord(header) || header.type !== "session") return null;
   if (slot?.title) {
     header.title = slot.title;
     if (slot.source) header.titleSource = slot.source;

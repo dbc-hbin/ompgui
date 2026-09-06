@@ -16,6 +16,12 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -111,26 +117,29 @@ fun ImportSessionSheet(
     }
 
     ModalBottomSheet(
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
         onDismissRequest = onDismiss,
-        containerColor = OmpColors.BgPanel,
+        containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
+        dragHandle = { OmpSheetDragHandle() },
     ) {
+        OmpDialogSystemBars()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
-                .padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = if (korean) "세션 가져오기" else "Import session",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = OmpColors.Text,
-            )
-            Text("Choose session file", color = OmpColors.Accent,
-                modifier = Modifier.clickable(enabled = !pending) { picker.launch(arrayOf("*/*")) }.padding(vertical = 12.dp))
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (korean) "세션 가져오기" else "Import session", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, "Close import") }
+            }
+            Text("Import a JSON or JSONL session file, or paste its contents. Maximum 10 MB.", color = OmpColors.TextMuted, fontSize = 13.sp)
+            OutlinedButton(enabled = !pending, onClick = { picker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(8.dp)) {
+                Text(if (korean) "세션 파일 선택" else "Choose session file")
+            }
             Text(
                 text = if (korean) "파일 이름" else "File name",
                 fontSize = 12.sp,
@@ -140,7 +149,9 @@ fun ImportSessionSheet(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 48.dp)
                     .clip(RoundedCornerShape(8.dp))
+                    .background(OmpColors.BgPanel, RoundedCornerShape(8.dp))
                     .border(1.dp, OmpColors.Border, RoundedCornerShape(8.dp))
                     .padding(horizontal = 12.dp, vertical = 10.dp),
             ) {
@@ -172,7 +183,7 @@ fun ImportSessionSheet(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 160.dp)
+                    .heightIn(min = 120.dp, max = 240.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .border(1.dp, OmpColors.Border, RoundedCornerShape(8.dp))
                     .padding(12.dp),
@@ -208,10 +219,10 @@ fun ImportSessionSheet(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(44.dp)
+                    .heightIn(min = 48.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(if (canConfirm) OmpColors.AccentStrong else OmpColors.BgHover)
-                    .clickable(enabled = canConfirm) {
+                    .clickable(enabled = canConfirm, role = androidx.compose.ui.semantics.Role.Button) {
                         val name = fileName.trim()
                         val body = content
                         scope.launch {
@@ -226,6 +237,7 @@ fun ImportSessionSheet(
                     } else if (korean) "가져오기" else "Import",
                     color = if (canConfirm) androidx.compose.ui.graphics.Color.White else OmpColors.TextDim,
                     fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                 )
             }
         }

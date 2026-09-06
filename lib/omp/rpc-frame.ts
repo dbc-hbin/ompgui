@@ -1,4 +1,4 @@
-/** Bounded protocol-v2 framing for OMP's NDJSON RPC transport. */
+/** Bounded protocol-v2 decoding for OMP's NDJSON RPC output. */
 import { isRecord } from "../type-guards";
 export const MAX_RPC_FRAME_BYTES = 1024 * 1024;
 export const MAX_RPC_REASSEMBLED_BYTES = 64 * 1024 * 1024;
@@ -18,10 +18,6 @@ interface PendingChunks {
 
 function isSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value);
-}
-
-function lineByteLength(value: string): number {
-  return Buffer.byteLength(value, "utf8") + 1;
 }
 
 function decodeBase64(value: unknown): Buffer {
@@ -78,23 +74,3 @@ export class RpcFrameDecoder {
   }
 }
 
-/** Physical JSONL records for a logical RPC frame at the selected protocol. */
-export function encodeRpcFrames(frame: RpcFrameRecord, protocolVersion: RpcProtocolVersion, chunkId: string): string[] {
-  const json = JSON.stringify(frame);
-  if (lineByteLength(json) <= MAX_RPC_FRAME_BYTES) return [`${json}\n`];
-  if (protocolVersion === 1) throw new Error("RPC frame exceeds the v1 transport limit");
-  const bytes = Buffer.from(json, "utf8");
-  if (bytes.byteLength > MAX_RPC_REASSEMBLED_BYTES) throw new Error("RPC frame exceeds the v2 reassembly limit");
-  const count = Math.ceil(bytes.byteLength / RPC_CHUNK_PAYLOAD_BYTES);
-  const lines: string[] = [];
-  for (let index = 0; index < count; index++) {
-    const chunk = {
-      type: "rpc_chunk", chunkId, index, count, byteLength: bytes.byteLength,
-      data: bytes.subarray(index * RPC_CHUNK_PAYLOAD_BYTES, (index + 1) * RPC_CHUNK_PAYLOAD_BYTES).toString("base64"),
-    };
-    const line = JSON.stringify(chunk);
-    if (lineByteLength(line) > MAX_RPC_FRAME_BYTES) throw new Error("RPC chunk exceeds the transport limit");
-    lines.push(`${line}\n`);
-  }
-  return lines;
-}

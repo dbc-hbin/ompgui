@@ -1,12 +1,13 @@
+import { MAX_ATTACHED_IMAGE_BYTES, validateAgentImages } from "../image-attachments";
 import { asNumber, asString, isRecord } from "../type-guards";
 
 export const RELAY_PROTOCOL_VERSION = 1 as const;
 export const RELAY_MAX_FRAME_BYTES = 256 * 1024;
-export const RELAY_MAX_PROMPT_CHARS = 32_000;
+export const RELAY_MAX_PROMPT_CHARS = 3 * 1024 * 1024;
 export const RELAY_MAX_LABEL_CHARS = 64;
 export const RELAY_HELLO_TIMEOUT_MS = 10_000;
 export const RELAY_MAX_MODEL_FIELD_CHARS = 128;
-export const RELAY_MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+export const RELAY_MAX_IMAGE_BYTES = MAX_ATTACHED_IMAGE_BYTES;
 export const RELAY_ALLOWED_COMMANDS = [
   "prompt",
   "abort",
@@ -253,6 +254,7 @@ export interface RelayArchiveItem {
   name?: string;
   id?: string;
   archivedAt?: string;
+  cwd?: string;
 }
 
 export interface RelayModelOption {
@@ -296,29 +298,6 @@ export interface RelayParseError {
 const DEVICE_ID_RE = /^d_[A-Za-z0-9_-]{16,64}$/;
 const SECRET_RE = /^[A-Za-z0-9_-]{32,128}$/;
 const SESSION_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
-
-function isRelayBase64DataChar(code: number): boolean {
-  return (
-    (code >= 0x41 && code <= 0x5a) ||
-    (code >= 0x61 && code <= 0x7a) ||
-    (code >= 0x30 && code <= 0x39) ||
-    code === 0x2b ||
-    code === 0x2f
-  );
-}
-
-function relayBase64DecodedByteLength(data: string): number | null {
-  if (!data || data.length % 4 !== 0) return null;
-  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
-  const dataEnd = data.length - padding;
-  for (let index = 0; index < dataEnd; index += 1) {
-    if (!isRelayBase64DataChar(data.charCodeAt(index))) return null;
-  }
-  for (let index = dataEnd; index < data.length; index += 1) {
-    if (data[index] !== "=") return null;
-  }
-  return (data.length / 4) * 3 - padding;
-}
 
 export function isRelayParseError(value: unknown): value is RelayParseError {
   return isRecord(value) && value.error === true && typeof value.code === "string";
@@ -868,18 +847,10 @@ function parseCmd(parsed: Record<string, unknown>): RelayCmdFrame | RelayParseEr
         if (!data || !mimeType) {
           return { error: true, code: "invalid_command", message: "Each image must have data and mimeType" };
         }
-        if (!mimeType.startsWith("image/")) {
-          return { error: true, code: "invalid_command", message: "Each image mimeType must be an image type" };
-        }
-        const bytes = relayBase64DecodedByteLength(data);
-        if (bytes === null || bytes === 0) {
-          return { error: true, code: "invalid_command", message: "Each image must be valid base64 data" };
-        }
-        if (bytes > RELAY_MAX_IMAGE_BYTES) {
-          return { error: true, code: "invalid_command", message: "Each image must be 4MB or smaller" };
-        }
         images.push({ data, mimeType });
       }
+      const complaint = validateAgentImages(images.map(image => ({ type: "image", ...image })));
+      if (complaint) return { error: true, code: "invalid_command", message: complaint };
       if (images.length > 0) cmd.images = images;
     }
     cmd.message = message;

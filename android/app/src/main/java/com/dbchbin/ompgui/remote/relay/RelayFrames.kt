@@ -17,7 +17,7 @@ object RelayProtocol {
     const val MAX_LOGICAL_BYTES = 16 * 1024 * 1024
     const val MAX_TRANSFERS = 4
     const val CHUNK_DEADLINE_MS = 30_000L
-    const val MAX_PROMPT_CHARS = 32_000
+    const val MAX_PROMPT_CHARS = 3 * 1024 * 1024
     const val MAX_LABEL_CHARS = 64
     const val MAX_SNAPSHOT_MESSAGES = 50
     val DEVICE_ID = Regex("^d_[A-Za-z0-9_-]{16,64}$")
@@ -69,6 +69,51 @@ data class SessionListItem(
 )
 
 data class AttachedImage(val data: String, val mimeType: String)
+
+/** Reopenable local source; transport IDs are never image data. */
+data class AttachmentSource(val mimeType: String, val size: Long, val open: () -> java.io.InputStream)
+
+object AttachmentTransfer {
+    const val MAX_IMAGE_BYTES = 10 * 1024 * 1024
+    const val MAX_TEXT_BYTES = 256 * 1024
+    const val MAX_PER_KIND = 10
+
+    suspend fun stage(
+        source: AttachmentSource,
+        request: suspend (String, JSONObject) -> JSONObject,
+        checkSession: () -> Unit,
+        registered: (String) -> Unit,
+    ): String {
+        require(source.mimeType.startsWith("image/") && source.size in 1..MAX_IMAGE_BYTES.toLong()) { "Images must be at most 10 MiB" }
+        checkSession()
+        val begun = request("attachments.begin", JSONObject().put("mimeType", source.mimeType).put("size", source.size))
+        val id = begun.getString("attachmentId")
+        registered(id)
+        checkSession()
+        val chunkSize = begun.getInt("maxChunkBytes")
+        require(chunkSize in 1..65536) { "Invalid attachment chunk size" }
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            source.open().use { input ->
+                val buffer = ByteArray(chunkSize)
+                var offset = 0L
+                while (offset < source.size) {
+                    val count = input.read(buffer, 0, minOf(buffer.size.toLong(), source.size - offset).toInt())
+                    require(count > 0) { "Attachment ended before its declared size" }
+                    val data = Base64.getEncoder().encodeToString(if (count == buffer.size) buffer else buffer.copyOf(count))
+                    val response = request("attachments.chunk", JSONObject().put("attachmentId", id).put("offset", offset).put("data", data))
+                    offset += count
+                    require(response.getLong("nextOffset") == offset) { "Attachment offset mismatch" }
+                }
+                require(input.read() == -1) { "Attachment changed size; select it again" }
+            }
+        }
+        checkSession()
+        val completed = request("attachments.complete", JSONObject().put("attachmentId", id))
+        require(completed.getString("attachmentId") == id) { "Attachment completion mismatch" }
+        checkSession()
+        return id
+    }
+}
 
 sealed class ClientFrame {
     data class Hello(
@@ -316,7 +361,7 @@ data class SubagentChip(
     val task: String,
 )
 
-data class RelayArchive(val key: String, val name: String? = null, val id: String? = null, val archivedAt: String? = null)
+data class RelayArchive(val key: String, val name: String? = null, val id: String? = null, val archivedAt: String? = null, val cwd: String? = null)
 
 data class RelayWorktree(val path: String, val branch: String? = null, val isMain: Boolean = false)
 
@@ -390,7 +435,10 @@ fun ClientFrame.encode(): String {
             require(directory.isNotEmpty()) { "cwd is required" }
             json.put("op", "session.create")
             json.put("cwd", directory.take(1024))
-            message?.trim()?.takeIf { it.isNotEmpty() }?.let { json.put("message", it.take(RelayProtocol.MAX_PROMPT_CHARS)) }
+            message?.trim()?.takeIf { it.isNotEmpty() }?.let {
+                require(it.length <= RelayProtocol.MAX_PROMPT_CHARS) { "prompt message is too long" }
+                json.put("message", it)
+            }
             provider?.trim()?.takeIf { it.isNotEmpty() }?.let { json.put("provider", it) }
             modelId?.trim()?.takeIf { it.isNotEmpty() }?.let { json.put("modelId", it) }
             thinkingLevel?.trim()?.takeIf { it.isNotEmpty() }?.let { json.put("thinkingLevel", it) }
@@ -664,8 +712,13 @@ fun ClientFrame.encode(): String {
                     require(text.length <= RelayProtocol.MAX_PROMPT_CHARS) { "prompt message is too long" }
                     json.put("message", text)
                     if (!images.isNullOrEmpty()) {
+                        require(images.size <= AttachmentTransfer.MAX_PER_KIND) { "At most 10 images are allowed" }
                         val array = JSONArray()
                         for (image in images) {
+                            require(image.mimeType.startsWith("image/")) { "Image MIME type is required" }
+                            val padding = if (image.data.endsWith("==")) 2 else if (image.data.endsWith("=")) 1 else 0
+                            val decodedSize = image.data.length.toLong() / 4 * 3 - padding
+                            require(image.data.length % 4 == 0 && decodedSize in 1..AttachmentTransfer.MAX_IMAGE_BYTES.toLong()) { "Images must be at most 10 MiB" }
                             array.put(JSONObject().put("data", image.data).put("mimeType", image.mimeType))
                         }
                         json.put("images", array)
@@ -1201,6 +1254,7 @@ private fun parseArchives(array: JSONArray?): List<RelayArchive> {
                 name = item.optString("name").trim().takeIf { it.isNotEmpty() },
                 id = item.optString("id").trim().takeIf { it.isNotEmpty() },
                 archivedAt = item.optString("archivedAt").trim().takeIf { it.isNotEmpty() },
+                cwd = item.optString("cwd").trim().takeIf { it.isNotEmpty() && it != "null" },
             ),
         )
     }

@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { readSessionHeader } from "@/lib/session-reader";
-import { apiErrorResponse, resolveSessionPathOr404 } from "@/lib/api-utils";
-import { startRpcSession, getRpcSession, resolveSpawnCwdResult, WebRpcError } from "@/lib/rpc-manager";
-import { RpcCommandError } from "@/lib/omp/rpc-process";
+import { apiErrorResponse, resolveSessionPathOr404, rpcApiErrorResponse } from "@/lib/api-utils";
+import { startRpcSession, getRpcSession, resolveSpawnCwdResult } from "@/lib/rpc-manager";
 import { parseJsonWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
 
 const MAX_AGENT_COMMAND_REQUEST_BYTES = 4 * 1024 * 1024;
@@ -16,13 +15,7 @@ function commandErrorResponse(error: unknown) {
   if (error instanceof SyntaxError) {
     return NextResponse.json({ error: "Invalid JSON request body", code: "invalid_json" }, { status: 400 });
   }
-  if (error instanceof WebRpcError) {
-    return NextResponse.json({ error: error.message, code: error.code }, { status: 400 });
-  }
-  if (error instanceof RpcCommandError) {
-    return NextResponse.json({ error: error.message, code: error.code ?? "rpc_command_failed" }, { status: 400 });
-  }
-  return apiErrorResponse(error);
+  return rpcApiErrorResponse(error) ?? apiErrorResponse(error);
 }
 
 // POST /api/agent/[id] - Send a command to an existing session

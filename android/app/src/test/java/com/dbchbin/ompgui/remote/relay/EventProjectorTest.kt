@@ -87,20 +87,15 @@ class EventProjectorTest {
     }
 
     @Test
-    fun mergeSnapshotKeepsOptimisticUserWhilePromptInFlight() {
-        val current = listOf(DisplayMessage(role = "user", text = "hello"))
-        val snapshot = listOf(DisplayMessage(role = "assistant", text = "old"))
-        val merged = EventProjector.mergeSnapshotMessages(current, snapshot, promptInFlight = true)
-        assertEquals(2, merged.size)
-        assertEquals("hello", merged.last().text)
-    }
-
-    @Test
-    fun mergeSnapshotReplacesWhenPromptNotInFlight() {
-        val current = listOf(DisplayMessage(role = "user", text = "hello"))
-        val snapshot = listOf(DisplayMessage(role = "user", text = "from server"))
-        val merged = EventProjector.mergeSnapshotMessages(current, snapshot, promptInFlight = false)
-        assertEquals(1, merged.size)
-        assertEquals("from server", merged[0].text)
+    fun userPromptAppearsOnlyOnDeliveryAndIdenticalSuccessivePromptsRemainDistinct() {
+        val message = JSONObject().put("role", "user").put("text", "again")
+        val start = JSONObject().put("type", "message_start").put("message", message)
+        val end = JSONObject().put("type", "message_end").put("message", message)
+        val started = EventProjector.applyMessages(emptyList(), start)
+        assertEquals(emptyList<DisplayMessage>(), started)
+        val delivered = EventProjector.applyMessages(started, end)
+        assertEquals(listOf("again"), delivered.map { it.text })
+        val second = EventProjector.applyMessages(EventProjector.applyMessages(delivered, start), end)
+        assertEquals(listOf("again", "again"), second.map { it.text })
     }
 }

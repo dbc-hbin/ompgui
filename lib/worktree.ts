@@ -121,7 +121,7 @@ export async function resolveProject(cwd: string): Promise<ProjectInfo> {
       isTopLevel,
     };
   } catch {
-    info = { projectRoot: cwd, branch: null, isWorktree: false, isTopLevel: false };
+    info = { projectRoot: realPathOrSelf(cwd), branch: null, isWorktree: false, isTopLevel: false };
   }
 
   cache.set(cwd, { info, expiresAt: Date.now() + PROJECT_CACHE_TTL_MS });

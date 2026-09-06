@@ -153,13 +153,18 @@ class RelayConnection(
         val connectingHello = frame is ClientFrame.Hello && state == ConnectionState.Connecting
         if (state != ConnectionState.Connected && !connectingHello) return false
         val current = transport ?: return false
-        return try {
-            val sent = sendRelayFrames(frame.encode(), current::send)
-            if (!sent) handleDrop("Could not send relay frame")
-            sent
+        val encoded = try {
+            frame.encode()
+        } catch (_: Exception) {
+            return false
+        }
+        val sent = try {
+            sendRelayFrames(encoded, current::send)
         } catch (_: Exception) {
             false
         }
+        if (!sent) handleDrop("Could not send relay frame")
+        return sent
     }
 
     @Synchronized
@@ -215,14 +220,17 @@ class RelayConnection(
         val encoded = try {
             hello.encode()
         } catch (error: Exception) {
-            emitState(ConnectionState.Failed)
-            listener?.onProtocolError(error.message ?: "Invalid hello")
+            reconnectUrl = null
+            reconnectHello = null
+            handleDrop(error.message ?: "Invalid hello")
             return
         }
-        if (transport?.send(encoded) != true) {
-            emitState(ConnectionState.Failed)
-            listener?.onProtocolError("Could not send hello")
+        val sent = try {
+            transport?.send(encoded) == true
+        } catch (_: Exception) {
+            false
         }
+        if (!sent) handleDrop("Could not send hello")
     }
 
     private fun handleText(text: String) {

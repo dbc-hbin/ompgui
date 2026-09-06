@@ -1,4 +1,4 @@
-import { realpathSync } from "fs";
+import { lstatSync, realpathSync } from "fs";
 import path from "path";
 import { isWindowsAbsolutePath } from "./paths";
 
@@ -15,6 +15,26 @@ export function isPathWithinRoots(target: string, roots: Set<string>): boolean {
     if (comparable === comparableRoot || comparable.startsWith(rootWithSep)) return true;
   }
   return false;
+}
+
+/** Resolve existing ancestors before appending missing components. Dangling
+ * symlinks fail closed rather than being mistaken for nonexistent directories. */
+export function resolvePathWithMissingLeaf(target: string): string {
+  let current = path.resolve(target);
+  const missing: string[] = [];
+  for (;;) {
+    try {
+      lstatSync(current);
+      break;
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+      const parent = path.dirname(current);
+      if (parent === current) throw error;
+      missing.unshift(path.basename(current));
+      current = parent;
+    }
+  }
+  return path.join(realpathSync(current), ...missing);
 }
 
 export function isExistingPathWithinRoots(target: string, roots: Set<string>): boolean {

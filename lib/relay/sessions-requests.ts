@@ -18,9 +18,10 @@ import {
 import { getLeafEntryId, materializeSessionEntries, scanSessionInfo, setSessionTitle } from "../omp/session-files";
 import { validateProjectPath, ProjectPathError } from "../project-registry";
 import { removeWorktree } from "../worktree";
-import { addRelayWorktree, listRelayWorktrees } from "./workspace";
+import { addRelayWorktree, assertAllowedPath, listRelayProjects, listRelayWorktrees, removeRelayProject } from "./workspace";
 import { asNumber, asString } from "../type-guards";
 import { RELAY_MAX_PROMPT_CHARS } from "./protocol";
+import { relayAttachments } from "./attachments";
 import type { RelayRequestContext } from "./request-types";
 import {
   archiveRelaySession,
@@ -128,6 +129,11 @@ export const SESSIONS_REQUEST_ACTIONS = [
   "exportChunk",
   "exportClose",
   "command",
+  "attachments.begin",
+  "attachments.chunk",
+  "attachments.complete",
+  "attachments.abort",
+  "projects.remove",
   "worktrees.list",
   "worktrees.add",
   "worktrees.remove",
@@ -485,14 +491,22 @@ async function handleAutoname(args: Record<string, unknown>): Promise<Record<str
   return { title: derived };
 }
 
-async function handleCommand(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function handleCommand(args: Record<string, unknown>, context: RelayRequestContext): Promise<Record<string, unknown>> {
   const id = needId(args.id);
   const command = needCommandObject(args.command);
   const type = asString(command.type)?.trim();
   if (!type) fail("command_type_required", "command type is required");
   if (UNSUPPORTED_COMMANDS[type]) fail("unsupported_command", UNSUPPORTED_COMMANDS[type]);
   if (!COMMAND_SET.has(type)) fail("unsupported_command", `Unsupported command: ${type}`);
-  if ((type === "prompt" || type === "steer" || type === "follow_up") && command.images !== undefined) {
+  const hasAttachments = command.attachmentIds !== undefined;
+  if (hasAttachments && (type !== "prompt" && type !== "abort_and_prompt")) fail("invalid_attachment", "This command does not accept attachmentIds");
+  if (hasAttachments && command.images !== undefined) fail("invalid_images", "Do not combine images and attachmentIds");
+  if (type === "prompt" || type === "abort_and_prompt" || type === "steer" || type === "follow_up") {
+    if (typeof command.message !== "string" || command.message.length > RELAY_MAX_PROMPT_CHARS) {
+      fail("invalid_command", "A prompt message of at most 3Mi characters is required");
+    }
+  }
+  if ((type === "prompt" || type === "abort_and_prompt" || type === "steer" || type === "follow_up") && command.images !== undefined) {
     const images = command.images;
     if (!Array.isArray(images)) fail("invalid_images", "images must be an array");
     const normalized = images.map((image) => {
@@ -532,14 +546,26 @@ async function handleCommand(args: Record<string, unknown>): Promise<Record<stri
     const responseId = asString(command.id)?.trim();
     if (!responseId) fail("invalid_command", "extension_ui_response requires id");
   }
+  if (hasAttachments) {
+    if (context.sessionId !== id) fail("invalid_session", "Open the target session before sending attachments");
+    if (!getRpcSession(id)?.isAlive() && !(await resolveSessionPath(id))) fail("session_not_found", "Session not found");
+  }
+  context.assertActive?.();
+  const claimed = hasAttachments ? relayAttachments.claim(context.deviceId, command.attachmentIds) : undefined;
+  delete command.attachmentIds;
   try {
-    const result = await sendRelayCommand(id, command);
+    const result = await sendRelayCommand(id, command, () => {
+      context.assertActive?.();
+      return claimed ? { ...command, images: claimed.materialize() } : command;
+    });
     if (result === null || result === undefined) return { result: null };
     if (typeof result === "object") return { result };
     return { result: { value: result } };
   } catch (error) {
     if (error instanceof RelaySessionError || error instanceof WebRpcError || error instanceof RpcCommandError) throw error;
     fail("rpc_command_failed", error instanceof Error ? error.message : String(error));
+  } finally {
+    claimed?.dispose();
   }
   fail("rpc_command_failed", "unreachable");
 }
@@ -585,6 +611,12 @@ export async function handleSessionsRequest(
   const safeArgs: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(args)) safeArgs[key] = entry;
   switch (action) {
+    case "projects.remove": {
+      const cwd = asString(safeArgs.cwd)?.trim();
+      if (!cwd) fail("invalid_args", "cwd is required");
+      const removed = await removeRelayProject(await assertAllowedPath(cwd));
+      return { ...removed, projects: await listRelayProjects() };
+    }
     case "list":
       return handleList(safeArgs);
     case "create":
@@ -660,8 +692,16 @@ export async function handleSessionsRequest(
       if (!transferId) fail("invalid_transfer", "transferId is required");
       return { ...closeRelayExportTransfer(transferId, context.deviceId) };
     }
+    case "attachments.begin":
+      return relayAttachments.begin(context.deviceId, safeArgs.mimeType, safeArgs.size);
+    case "attachments.chunk":
+      return relayAttachments.chunk(context.deviceId, safeArgs.attachmentId, safeArgs.offset, safeArgs.data);
+    case "attachments.complete":
+      return relayAttachments.complete(context.deviceId, safeArgs.attachmentId);
+    case "attachments.abort":
+      return relayAttachments.abort(context.deviceId, safeArgs.attachmentId);
     case "command":
-      return handleCommand(safeArgs);
+      return handleCommand(safeArgs, context);
     case "worktrees.list": {
       const cwd = asString(safeArgs.cwd)?.trim();
       if (!cwd) fail("cwd_required", "cwd is required");

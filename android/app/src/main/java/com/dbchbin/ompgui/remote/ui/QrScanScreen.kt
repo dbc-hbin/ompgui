@@ -9,10 +9,20 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -51,9 +61,43 @@ fun QrScanScreen(
     onScanned: (String) -> Unit,
     onClose: () -> Unit,
 ) {
+    BackHandler(onBack = onClose)
     val context = LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
+    val window = remember(view, context) {
+        // LocalContext can be the localized application context; the actual
+        // Compose view retains the hosting Activity context chain.
+        sequenceOf(view.context, context).mapNotNull { source ->
+            generateSequence(source) { current ->
+                (current as? android.content.ContextWrapper)?.baseContext?.takeIf { it !== current }
+            }.filterIsInstance<android.app.Activity>().firstOrNull()
+        }.firstOrNull()?.window
+    }
+    DisposableEffect(window, view) {
+        val controller = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, view) }
+        val lightStatusBars = controller?.isAppearanceLightStatusBars
+        val lightNavigationBars = controller?.isAppearanceLightNavigationBars
+        controller?.isAppearanceLightStatusBars = false
+        controller?.isAppearanceLightNavigationBars = false
+        onDispose {
+            if (controller != null) {
+                controller.isAppearanceLightStatusBars = lightStatusBars == true
+                controller.isAppearanceLightNavigationBars = lightNavigationBars == true
+            }
+        }
+    }
+    androidx.compose.runtime.SideEffect {
+        window?.let {
+            androidx.core.view.WindowCompat.getInsetsController(it, view).apply {
+                isAppearanceLightStatusBars = false
+                isAppearanceLightNavigationBars = false
+            }
+        }
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     var invalidVisible by remember { mutableStateOf(false) }
+    var cameraReady by remember { mutableStateOf(false) }
+    var cameraError by remember { mutableStateOf<String?>(null) }
     val appContext = remember(context) { context.applicationContext }
     val completed = remember { AtomicBoolean(false) }
     val disposed = remember { AtomicBoolean(false) }
@@ -77,7 +121,12 @@ fun QrScanScreen(
         val mainExecutor = ContextCompat.getMainExecutor(appContext)
         val listener = Runnable {
             if (disposed.get()) return@Runnable
-            val provider = runCatching { providerFuture.get() }.getOrNull() ?: return@Runnable
+            val provider = try {
+                providerFuture.get()
+            } catch (error: Exception) {
+                cameraError = error.message ?: "Unable to open camera"
+                return@Runnable
+            }
             cameraProviderRef.set(provider)
             val preview = Preview.Builder().build().also {
                 it.setSurfaceProvider(previewView.surfaceProvider)
@@ -128,6 +177,9 @@ fun QrScanScreen(
                     preview,
                     analysis,
                 )
+                cameraReady = true
+            }.onFailure { error ->
+                cameraError = error.message ?: "Unable to open camera"
             }
         }
         providerFuture.addListener(listener, mainExecutor)
@@ -149,22 +201,29 @@ fun QrScanScreen(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                    .safeDrawingPadding()
+                    .padding(16.dp)
+                    .background(OmpColors.BgPanel, RoundedCornerShape(12.dp))
+                    .border(1.dp, OmpColors.Border, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.pair_scan_qr), style = MaterialTheme.typography.titleMedium, color = OmpColors.Text, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onClose) { Icon(Icons.Filled.Close, stringResource(R.string.pair_scan_close), tint = OmpColors.Text) }
+                }
+                if (!cameraReady && cameraError == null) {
+                    androidx.compose.material3.LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                cameraError?.let { Text(it, color = OmpColors.StatusError, style = MaterialTheme.typography.bodyMedium) }
                 if (invalidVisible) {
                     Text(
                         stringResource(R.string.pair_scan_invalid),
-                        color = MaterialTheme.colorScheme.error,
+                        color = OmpColors.StatusError,
                     )
                 }
-                Button(
-                    onClick = onClose,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(stringResource(R.string.pair_scan_close))
-                }
+
             }
         }
     }

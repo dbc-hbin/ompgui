@@ -127,25 +127,6 @@ export function restoreScrollTopFromRectDelta(
   return Math.max(0, scrollTop + (nextTop - previousTop));
 }
 
-export function restoreScrollTopAfterAboveShift(
-  previousScrollTop: number,
-  aboveHeightDelta: number,
-): number {
-  return Math.max(0, previousScrollTop + aboveHeightDelta);
-}
-
-export function captureScrollDistance(scrollHeight: number, scrollTop: number): number {
-  return scrollHeight - scrollTop;
-}
-
-export function restoreScrollTop(scrollHeight: number, savedDistance: number): number {
-  return Math.max(0, scrollHeight - savedDistance);
-}
-
-export function getNextVisibleCount(currentVisibleCount: number, pageSize = VISIBLE_PAGE_SIZE): number {
-  return currentVisibleCount + pageSize;
-}
-
 export type HistoryLoadMode = "auto" | "click-above";
 
 /**

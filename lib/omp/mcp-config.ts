@@ -1,7 +1,9 @@
 import { execFileSync } from "child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, writeSync } from "fs";
 import { homedir } from "os";
-import { basename, dirname, join, relative, resolve, sep } from "path";
+import { basename, dirname, join, resolve } from "path";
+import { isPathWithinRoots, resolvePathWithMissingLeaf } from "../path-security";
+import { writeConfigFileAtomic } from "./config-file";
 import { stripAnsi } from "../ansi";
 import { getAgentDir } from "./paths";
 import { isRecord } from "../type-guards";
@@ -85,7 +87,9 @@ function discoverMcpConfigPaths(root: string): string[] {
   } catch {
     // An unavailable workspace simply has no discoverable provider configs.
   }
-  return [...paths].filter(existsSync);
+  return [...paths].filter((file) => {
+    try { return existsSync(file) && isPathWithinRoots(realpathSync(file), new Set([realpathSync(root)])); } catch { return false; }
+  });
 }
 
 function readTomlMcpServers(path: string, source: string, disabledNames: Set<string>): McpLiveServer[] {
@@ -108,10 +112,20 @@ function readTomlMcpServers(path: string, source: string, disabledNames: Set<str
 export function readDiscoveredMcpServers(cwd?: string, disabled = [] as string[]): McpLiveServer[] {
   const disabledNames = new Set(disabled);
   const paths = new Set(discoverMcpConfigPaths(homedir()));
-  if (cwd) for (const path of discoverMcpConfigPaths(cwd)) paths.add(path);
+  if (cwd) for (const path of discoverMcpConfigPaths(resolve(cwd))) paths.add(path);
+  // Native configs are already inventoried as User level / Project level.
+  // Rediscovering the same file under its directory name creates a phantom
+  // provider that cannot match OMP's authoritative runtime source label.
+  const nativePaths = new Set<string>();
+  const userPath = join(getAgentDir(), "mcp.json");
+  if (existsSync(userPath)) nativePaths.add(realpathSync(userPath));
+  if (cwd) nativePaths.add(resolveMcpConfig(cwd).path);
   const servers: McpLiveServer[] = [];
   const seen = new Set<string>();
   for (const path of paths) {
+    // Compare filesystem identities, not spellings (e.g. /var vs /private/var).
+    // Keep the discovery path itself for the provider's source label.
+    try { if (nativePaths.has(realpathSync(path))) continue; } catch { continue; }
     const source = sourceName(path);
     if (path.endsWith(".toml")) {
       for (const server of readTomlMcpServers(path, source, disabledNames)) {
@@ -131,6 +145,16 @@ export function readDiscoveredMcpServers(cwd?: string, disabled = [] as string[]
     }
   }
   return servers;
+}
+
+export function mergeMcpServers(primary: McpLiveServer[], secondary: McpLiveServer[]): McpLiveServer[] {
+  const result = [...primary];
+  const seen = new Set(primary.map((server) => `${server.source}:${server.name}`));
+  for (const server of secondary) {
+    const key = `${server.source}:${server.name}`;
+    if (!seen.has(key)) { seen.add(key); result.push(server); }
+  }
+  return result;
 }
 
 /** Parse the text emitted by OMP's local `/mcp list` command. */
@@ -183,16 +207,15 @@ function projectRoot(cwd: string): string {
   }
 }
 
-function assertCwdWithinRoot(cwd: string, root: string): void {
-  const path = relative(root, cwd);
-  if (path === ".." || path.startsWith(`..${sep}`)) throw new Error("Project root does not contain workspace");
-}
-
 export function resolveMcpConfig(cwd: string): { root: string; path: string } {
-  const root = projectRoot(cwd);
-  assertCwdWithinRoot(cwd, root);
-  const existing = MCP_FILENAMES.map((filename) => join(root, filename)).find(existsSync);
-  return { root, path: existing ?? join(root, MCP_FILENAMES[0]) };
+  const root = realpathSync(projectRoot(cwd));
+  const roots = new Set([root]);
+  if (!isPathWithinRoots(realpathSync(cwd), roots)) throw new Error("Project root does not contain workspace");
+  const candidates = MCP_FILENAMES.map((filename) => join(root, filename));
+  const intended = candidates.find(existsSync) ?? candidates[0];
+  const path = resolvePathWithMissingLeaf(intended);
+  if (!isPathWithinRoots(path, roots)) throw new Error("Access denied to MCP configuration outside project root");
+  return { root, path };
 }
 
 export function readMcpConfig(cwd: string): { root: string; path: string; config: McpFile; exists: boolean } {
@@ -283,11 +306,11 @@ function withMcpConfigLock<T>(configPath: string, fn: () => T): T {
       continue;
     }
     try {
-      writeSync(fd, String(process.pid));
-    } finally {
-      closeSync(fd);
-    }
-    try {
+      try {
+        writeSync(fd, String(process.pid));
+      } finally {
+        closeSync(fd);
+      }
       return fn();
     } finally {
       try {
@@ -318,9 +341,7 @@ export function writeMcpServer(cwd: string, name: string, server: McpServer, pre
     };
     const config: McpFile = { ...locked.config, mcpServers: servers };
     mkdirSync(dirname(locked.path), { recursive: true });
-    const temp = `${locked.path}.tmp-${process.pid}-${Date.now()}`;
-    writeFileSync(temp, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-    renameSync(temp, locked.path);
+    writeConfigFileAtomic(locked.path, `${JSON.stringify(config, null, 2)}\n`);
     return { path: locked.path };
   });
 }
@@ -334,9 +355,7 @@ export function deleteMcpServer(cwd: string, name: string): { path: string } {
     if (!(name in servers)) throw new Error("MCP server was not found");
     delete servers[name];
     const config: McpFile = { ...locked.config, mcpServers: servers };
-    const temp = `${locked.path}.tmp-${process.pid}-${Date.now()}`;
-    writeFileSync(temp, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-    renameSync(temp, locked.path);
+    writeConfigFileAtomic(locked.path, `${JSON.stringify(config, null, 2)}\n`);
     return { path: locked.path };
   });
 }

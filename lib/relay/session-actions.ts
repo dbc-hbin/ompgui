@@ -177,10 +177,11 @@ export async function renameRelaySession(id: string, name: string): Promise<{ id
 
 export async function listRelayArchives(): Promise<RelayArchiveItem[]> {
   const archives = await listArchivedSessionInfos();
-  return archives.slice(0, 80).map((archive) => ({
+  return archives.map((archive) => ({
     key: archive.key,
     ...(archive.name ? { name: archive.name } : {}),
     ...(archive.id ? { id: archive.id } : {}),
+    ...(archive.cwd ? { cwd: archive.cwd } : {}),
     archivedAt: archive.modified,
   }));
 }

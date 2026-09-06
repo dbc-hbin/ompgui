@@ -8,7 +8,7 @@
 // page reload without the live RPC registry (get_subagent_messages is
 // registry-gated and rejects unknown session files).
 
-import { closeSync, existsSync, openSync, readFileSync, readSync, realpathSync, statSync } from "fs";
+import { closeSync, existsSync, fstatSync, openSync, readSync, realpathSync, statSync } from "fs";
 import { basename, dirname, join } from "path";
 import { getSessionEntries, entryToUiMessage } from "./session-reader";
 import { parseJsonlLenient } from "./omp/session-files";
@@ -274,43 +274,54 @@ export function readSubagentTranscriptPage(sessionFilePath: string, fromByte = 0
     reset: false,
     messages: [],
   };
-  let size: number;
-  try {
-    size = statSync(sessionFilePath).size;
-  } catch {
-    return empty;
-  }
   let startByte = empty.fromByte;
   let reset = false;
-  if (startByte > size) {
-    startByte = 0;
-    reset = true;
-  }
-  if (size > MAX_SUBAGENT_TRANSCRIPT_BYTES) {
-    return { ...empty, fromByte: startByte, nextByte: startByte, reset, error: "Subagent transcript exceeds the readable size limit" };
-  }
-  const endByte = Math.min(size, startByte + SUBAGENT_TRANSCRIPT_PAGE_BYTES);
-  let body: string;
+  let fd: number | undefined;
   try {
-    // Slice the BYTE buffer, not the decoded string: `startByte` is a UTF-8
-    // offset, while string indices are UTF-16 code units — slicing the string
-    // misaligns every later page once non-ASCII text precedes the offset.
-    body = readFileSync(sessionFilePath).subarray(startByte, endByte).toString("utf8");
+    fd = openSync(sessionFilePath, "r");
+    const size = fstatSync(fd).size;
+    if (startByte > size) {
+      startByte = 0;
+      reset = true;
+    }
+    if (size > MAX_SUBAGENT_TRANSCRIPT_BYTES) {
+      return { ...empty, fromByte: startByte, nextByte: startByte, reset, error: "Subagent transcript exceeds the readable size limit" };
+    }
+    const chunks: Buffer[] = [];
+    let bytesRead = 0;
+    let completeBytes = 0;
+    while (startByte + bytesRead < size) {
+      const buffer = Buffer.allocUnsafe(Math.min(SUBAGENT_TRANSCRIPT_PAGE_BYTES, size - startByte - bytesRead));
+      const count = readSync(fd, buffer, 0, buffer.length, startByte + bytesRead);
+      if (count === 0) break;
+      const chunk = buffer.subarray(0, count);
+      // A normal page stops at its last complete record. If its first record
+      // exceeds the window, extend only until that record's newline appears.
+      const newline = bytesRead === 0 ? chunk.lastIndexOf(10) : chunk.indexOf(10);
+      if (newline >= 0) {
+        chunks.push(chunk.subarray(0, newline + 1));
+        completeBytes = bytesRead + newline + 1;
+        break;
+      }
+      chunks.push(chunk);
+      bytesRead += count;
+    }
+    const messages: AgentMessage[] = [];
+    if (completeBytes > 0) {
+      const body = (chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, completeBytes)).toString("utf8");
+      for (const entry of parseJsonlLenient<SessionEntry>(body)) {
+        if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
+        const message = entryToUiMessage(entry, {});
+        if (message !== null) messages.push(message);
+      }
+    }
+    // An unterminated tail stays pending: append can complete it on a later call.
+    return { sessionFile: sessionFilePath, fromByte: startByte, nextByte: startByte + completeBytes, reset, messages, totalBytes: size };
   } catch {
     return { ...empty, fromByte: startByte, nextByte: startByte, reset };
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
-  const lastNewline = body.lastIndexOf("\n");
-  const completeText = lastNewline >= 0 ? body.slice(0, lastNewline + 1) : "";
-  const entries = completeText.length > 0 ? parseJsonlLenient<SessionEntry>(completeText) : [];
-  const messages = entries
-    .map((entry) => entryToUiMessage(entry, {}))
-    .filter((message): message is AgentMessage => message !== null);
-  let nextByte = startByte + Buffer.byteLength(completeText, "utf8");
-  // Guarantee forward progress: when the window ends mid-line and more
-  // content remains, the partial line has no newline to complete it — skip
-  // it instead of returning the same offset forever.
-  if (nextByte === startByte && endByte < size) nextByte = endByte;
-  return { sessionFile: sessionFilePath, fromByte: startByte, nextByte, reset, messages, totalBytes: size };
 }
 
 /** Cap on completion bytes materialized for the dialog (final outputs are small). */

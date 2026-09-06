@@ -2,34 +2,30 @@ package com.dbchbin.ompgui.remote.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.dbchbin.ompgui.remote.net.ConnectionState
 import com.dbchbin.ompgui.remote.net.RelayClient
-import com.dbchbin.ompgui.remote.relay.AttachedImage
+import com.dbchbin.ompgui.remote.relay.AttachmentSource
 import com.dbchbin.ompgui.remote.relay.DisplayMessage
 import com.dbchbin.ompgui.remote.relay.EventProjector
 import com.dbchbin.ompgui.remote.relay.ModelRef
-import com.dbchbin.ompgui.remote.relay.RelayAgent
 import com.dbchbin.ompgui.remote.relay.RelayArchive
-import com.dbchbin.ompgui.remote.relay.RelayAuthProvider
 import com.dbchbin.ompgui.remote.relay.RelayBranch
-import com.dbchbin.ompgui.remote.relay.RelayExport
-import com.dbchbin.ompgui.remote.relay.RelayFileContent
-import com.dbchbin.ompgui.remote.relay.RelayFileEntry
 import com.dbchbin.ompgui.remote.relay.RelayFileMatch
-import com.dbchbin.ompgui.remote.relay.RelayGitFile
-import com.dbchbin.ompgui.remote.relay.RelayGitDiff
-import com.dbchbin.ompgui.remote.relay.RelayMcp
 import com.dbchbin.ompgui.remote.relay.RelayModelOption
-import com.dbchbin.ompgui.remote.relay.RelayPlugin
 import com.dbchbin.ompgui.remote.relay.RelayProject
-import com.dbchbin.ompgui.remote.relay.RelaySkill
-import com.dbchbin.ompgui.remote.relay.RelaySkillResult
 import com.dbchbin.ompgui.remote.relay.RelaySlashCommand
 import com.dbchbin.ompgui.remote.relay.RelayWorktree
 import com.dbchbin.ompgui.remote.relay.SessionListItem
 import com.dbchbin.ompgui.remote.relay.SubagentChip
 import com.dbchbin.ompgui.remote.relay.TodoPhase
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
 import org.json.JSONObject
 
 sealed class RemoteScreen {
@@ -55,7 +51,6 @@ data class RemoteUiState(
     val currentModel: ModelRef? = null,
     val pickerOpen: Boolean = false,
     val projects: List<RelayProject> = emptyList(),
-    val files: List<RelayFileEntry> = emptyList(),
     val filesPath: String = "",
     val slashCommands: List<RelaySlashCommand> = emptyList(),
     val todos: List<TodoPhase> = emptyList(),
@@ -64,29 +59,12 @@ data class RemoteUiState(
     val sessionThinkingLevel: String? = null,
     val sessionCwd: String? = null,
     val creatingSession: Boolean = false,
-    val fileContent: RelayFileContent? = null,
     val archives: List<RelayArchive> = emptyList(),
     val worktrees: List<RelayWorktree> = emptyList(),
-    val worktreesCwd: String = "",
     val worktreesGit: Boolean = false,
-    val currentWorktreePath: String? = null,
-    val gitStatusCwd: String = "",
-    val gitIsRepo: Boolean = false,
-    val gitRoot: String? = null,
-    val gitFiles: List<RelayGitFile> = emptyList(),
-    val gitDiff: RelayGitDiff? = null,
     val branches: List<RelayBranch> = emptyList(),
     val branchLeafId: String? = null,
-    val exportResult: RelayExport? = null,
-    val skills: List<RelaySkill> = emptyList(),
-    val plugins: List<RelayPlugin> = emptyList(),
-    val mcp: List<RelayMcp> = emptyList(),
-    val skillResults: List<RelaySkillResult> = emptyList(),
-    val skillSearchQuery: String = "",
-    val agents: List<RelayAgent> = emptyList(),
-    val authProviders: List<RelayAuthProvider> = emptyList(),
     val fileMatches: List<RelayFileMatch> = emptyList(),
-    val fileMatchQuery: String = "",
     val extensionDialogs: List<EventProjector.ChatExtensionRequest> = emptyList(),
     val chatNotices: List<EventProjector.ChatNotice> = emptyList(),
     val extensionStatus: Map<String, String> = emptyMap(),
@@ -108,7 +86,27 @@ class RemoteViewModel(
         client().request(domain, action, args)
     }
 
-    val uiState: StateFlow<RemoteUiState> get() = client().uiState
+    private val removedProjects = mutableSetOf<String>()
+    private val projectRemoval = Mutex()
+    private val _uiState = MutableStateFlow(client().uiState.value)
+    val uiState: StateFlow<RemoteUiState> = _uiState.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            var previousProjects = client().uiState.value.projects
+            client().uiState.collect { state ->
+                // Unrelated state updates must not replace the correlated project
+                // refresh with the client's older cached list.
+                if (!state.paired) removedProjects.clear()
+                val projects = if (state.paired && state.projects == previousProjects) _uiState.value.projects else state.projects
+                previousProjects = state.projects
+                _uiState.value = if (removedProjects.isEmpty() && projects == state.projects) state else state.copy(
+                    projects = projects.filterNot { it.path in removedProjects },
+                    sessions = state.sessions.filterNot { (it.projectRoot ?: it.cwd) in removedProjects },
+                )
+            }
+        }
+    }
 
     fun setPairingUri(value: String) = client().setPairingUri(value)
 
@@ -122,8 +120,6 @@ class RemoteViewModel(
 
     fun consumePairingUri(raw: String?, autoConnect: Boolean = false) =
         client().consumePairingUri(raw, autoConnect)
-
-    fun isPaired(): Boolean = client().isPaired()
 
     fun getServerUrl(): String = client().getServerUrl()
 
@@ -145,19 +141,13 @@ class RemoteViewModel(
 
     fun sendPrompt() = client().sendPrompt()
 
-    fun sendPrompt(text: String, images: List<AttachedImage>? = null): Boolean = client().sendPrompt(text, images)
+    suspend fun sendPrompt(text: String, images: List<AttachmentSource> = emptyList()): Boolean = client().sendPrompt(text, images)
 
     val usage: StateFlow<JSONObject?> get() = client().usage
 
     fun fetchUsage() = client().fetchUsage()
 
     val settings: StateFlow<JSONObject?> get() = client().settings
-
-    fun fetchSettings() = client().fetchSettings()
-
-    fun updateSettings(patch: JSONObject) = client().updateSettings(patch)
-
-    fun updateSetting(key: String, value: Any?) = client().updateSetting(key, value)
 
     fun abort() = client().abort()
 
@@ -167,29 +157,7 @@ class RemoteViewModel(
 
     fun fetchSlash() = client().fetchSlash()
 
-    fun fetchFiles(path: String? = null) = client().fetchFiles(path)
-
-    fun createSession(
-        cwd: String,
-        message: String? = null,
-        provider: String? = null,
-        modelId: String? = null,
-        thinkingLevel: String? = null,
-    ) = client().createSession(cwd, message, provider, modelId, thinkingLevel)
-
     fun setSessionThinkingLevel(level: String) = client().setSessionThinkingLevel(level)
-
-    fun compactSession() = client().compactSession()
-
-    fun readFile(path: String) = client().readFile(path)
-
-    fun clearFileContent() = client().clearFileContent()
-
-    fun deleteSession(id: String) = client().deleteSession(id)
-
-    fun archiveSession(id: String) = client().archiveSession(id)
-
-    fun renameSession(id: String, name: String) = client().renameSession(id, name)
 
     fun fetchArchives() = client().fetchArchives()
 
@@ -199,72 +167,49 @@ class RemoteViewModel(
 
     fun addWorktree(cwd: String, branch: String) = client().addWorktree(cwd, branch)
 
-    fun writeFile(path: String, text: String) = client().writeFile(path, text)
-
-    fun fetchGitStatus(cwd: String) = client().fetchGitStatus(cwd)
-
-    fun fetchGitDiff(cwd: String, path: String) = client().fetchGitDiff(cwd, path)
-
     fun fetchBranches(id: String) = client().fetchBranches(id)
 
     fun setLeaf(id: String, leafId: String) = client().setLeaf(id, leafId)
 
-    fun exportSession(id: String) = client().exportSession(id)
-
-    fun clearExport() = client().clearExport()
-
-    fun clearGitDiff() = client().clearGitDiff()
-
-    fun fetchSkills(cwd: String) = client().fetchSkills(cwd)
-
-    fun toggleSkill(cwd: String, filePath: String, disable: Boolean) =
-        client().toggleSkill(cwd, filePath, disable)
-
-    fun fetchPlugins(cwd: String) = client().fetchPlugins(cwd)
-
-    fun pluginAction(cwd: String, action: String, source: String? = null, scope: String? = null) =
-        client().pluginAction(cwd, action, source, scope)
-
-    fun fetchMcp(cwd: String? = null) = client().fetchMcp(cwd)
-
-    fun deleteMcp(cwd: String, name: String) = client().deleteMcp(cwd, name)
-
-    fun upsertMcp(
-        cwd: String,
-        name: String,
-        type: String,
-        command: String? = null,
-        url: String? = null,
-        args: List<String>? = null,
-    ) = client().upsertMcp(cwd, name, type, command, url, args)
-
-    fun importSession(fileName: String, content: String) = client().importSession(fileName, content)
-
-    fun searchSkills(query: String, limit: Int = 10) = client().searchSkills(query, limit)
-
-    fun installSkill(pkg: String, scope: String, cwd: String?) = client().installSkill(pkg, scope, cwd)
-
-    fun fetchAgents(cwd: String?) = client().fetchAgents(cwd)
-
-    fun saveAgent(
-        name: String,
-        description: String,
-        systemPrompt: String,
-        scope: String,
-        cwd: String?,
-    ) = client().saveAgent(name, description, systemPrompt, scope, cwd)
-
-    fun deleteAgent(name: String, scope: String, cwd: String?) = client().deleteAgent(name, scope, cwd)
-
-    fun fetchAuthProviders() = client().fetchAuthProviders()
-
     fun searchFiles(cwd: String, query: String) = client().searchFiles(cwd, query)
 
-    fun addProject(cwd: String) = client().addProject(cwd)
+    fun addProject(cwd: String) {
+        removedProjects.remove(cwd.trim())
+        client().addProject(cwd)
+    }
 
-    fun removeProject(cwd: String) = client().removeProject(cwd)
-
-    override fun onCleared() {
-        super.onCleared()
+    suspend fun removeProject(cwd: String) {
+        // Keep acknowledgement/state reconciliation alive if the list leaves composition.
+        viewModelScope.async {
+            val directory = cwd.trim()
+            require(directory.isNotEmpty()) { "Project path is required" }
+            check(projectRemoval.tryLock()) { "A project removal is already in progress" }
+            try {
+                if (directory !in removedProjects) {
+                    val result = requester.request("sessions", "projects.remove", JSONObject().put("cwd", directory))
+                    val entries = result.getJSONArray("projects")
+                    val projects = List(entries.length()) { index ->
+                        val entry = entries.getJSONObject(index)
+                        RelayProject(
+                            path = entry.getString("path"),
+                            name = entry.getString("name"),
+                            addedAt = entry.optString("addedAt").takeIf { it.isNotBlank() && it != "null" },
+                        )
+                    }
+                    removedProjects.add(directory)
+                    removedProjects.add(result.getString("path"))
+                    _uiState.update { state ->
+                        state.copy(
+                            projects = projects.filterNot { it.path in removedProjects },
+                            sessions = state.sessions.filterNot { (it.projectRoot ?: it.cwd) in removedProjects },
+                        )
+                    }
+                    client().fetchProjects()
+                    client().refreshSessions()
+                }
+            } finally {
+                projectRemoval.unlock()
+            }
+        }.await()
     }
 }

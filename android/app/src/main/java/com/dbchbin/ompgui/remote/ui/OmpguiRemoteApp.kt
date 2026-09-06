@@ -30,6 +30,17 @@ import com.dbchbin.ompgui.remote.net.ConnectionState
 @Composable
 fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
     val context = LocalContext.current
+    val activity = remember(context) {
+        var current = context
+        while (current is android.content.ContextWrapper && current !is android.app.Activity) {
+            current = current.baseContext
+        }
+        current as? android.app.Activity
+    }
+    // Capture Activity-backed owners before replacing the context for localization.
+    // A configuration context has no Activity in its ContextWrapper chain.
+    val activityResultOwner = requireNotNull(androidx.activity.compose.LocalActivityResultRegistryOwner.current)
+    val backDispatcherOwner = requireNotNull(androidx.activity.compose.LocalOnBackPressedDispatcherOwner.current)
     val preferences = remember(context) { AppPreferences.prefs(context) }
     var language by remember { mutableStateOf(AppPreferences.getLanguage(context, Locale.getDefault().language)) }
     DisposableEffect(preferences) {
@@ -53,7 +64,7 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
 
     val drafts = remember { mutableStateMapOf<String, String>() }
     var newSessionDraft by remember { mutableStateOf("") }
-    var filePreview by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var filePreview by remember((state.screen as? RemoteScreen.Chat)?.sessionId) { mutableStateOf<Pair<String, String>?>(null) }
     var chatPaletteOpen by remember { mutableStateOf(false) }
     var newSessionOpen by remember { mutableStateOf(false) }
     var archivesOpen by remember { mutableStateOf(false) }
@@ -69,9 +80,34 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
         viewModel.setDraft(drafts[id].orEmpty())
     }
 
-    CompositionLocalProvider(LocalContext provides localizedContext, LocalConfiguration provides localizedConfiguration) {
+    CompositionLocalProvider(
+        LocalContext provides localizedContext,
+        LocalConfiguration provides localizedConfiguration,
+        androidx.activity.compose.LocalActivityResultRegistryOwner provides activityResultOwner,
+        androidx.activity.compose.LocalOnBackPressedDispatcherOwner provides backDispatcherOwner,
+        LocalMarkdownNavigation provides MarkdownNavigation(state.sessionCwd) { path ->
+            state.sessionCwd?.let { cwd -> filePreview = cwd to path }
+        },
+    ) {
     key(language) {
     RemoteTheme {
+        val dark = OmpColors.dark
+        androidx.compose.runtime.SideEffect {
+            activity?.window?.let { window ->
+                androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
+                    isAppearanceLightStatusBars = !dark
+                    isAppearanceLightNavigationBars = !dark
+                }
+            }
+        }
+        androidx.activity.compose.BackHandler(
+            enabled = state.screen is RemoteScreen.Chat && !state.pickerOpen &&
+                !chatSettingsOpen && !chatUsageOpen && !chatPaletteOpen &&
+                !newSessionOpen && !archivesOpen && filePreview == null,
+        ) {
+            (state.screen as? RemoteScreen.Chat)?.let { drafts[it.sessionId] = state.draft }
+            viewModel.closeSession()
+        }
         Surface {
             when (val screen = state.screen) {
                 is RemoteScreen.Pairing -> PairingScreen(
@@ -100,70 +136,25 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
                         viewModel.fetchProjects()
                         viewModel.fetchSlash()
                     },
-                    onCreateSession = { cwd, message, provider, modelId, thinking ->
-                        viewModel.createSession(cwd, message, provider, modelId, thinking)
-                    },
                     projects = state.projects,
                     creatingSession = state.creatingSession,
                     archives = state.archives,
                     slashCommands = state.slashCommands,
                     worktrees = state.worktrees,
                     worktreesGit = state.worktreesGit,
-                    onDeleteSession = viewModel::deleteSession,
-                    onArchiveSession = viewModel::archiveSession,
-                    onRenameSession = viewModel::renameSession,
                     onFetchArchives = viewModel::fetchArchives,
                     onRestoreArchive = viewModel::restoreArchive,
                     onFetchWorktrees = viewModel::fetchWorktrees,
                     onAddWorktree = viewModel::addWorktree,
-                    onExportSession = viewModel::exportSession,
-                    lastExport = state.exportResult,
-                    onClearExport = viewModel::clearExport,
-                    skills = state.skills,
-                    plugins = state.plugins,
-                    mcp = state.mcp,
-                    onFetchSkills = viewModel::fetchSkills,
-                    onToggleSkill = viewModel::toggleSkill,
-                    onFetchPlugins = viewModel::fetchPlugins,
-                    onPluginAction = { cwd, action, source, scope -> viewModel.pluginAction(cwd, action, source, scope) },
-                    onFetchMcp = viewModel::fetchMcp,
-                    onDeleteMcp = viewModel::deleteMcp,
-                    onUpsertMcp = { cwd, name, type, command, url, args ->
-                        viewModel.upsertMcp(cwd, name, type, command, url, args)
-                    },
                     serverUrl = viewModel.getServerUrl(),
                     deviceId = viewModel.getDeviceId(),
                     currentModel = state.currentModel,
                     models = state.models,
                     usageData = usageData,
-                    onRefreshUsage = viewModel::fetchUsage,
                     settings = settings,
-                    onUpdateSetting = { key, value -> viewModel.updateSetting(key, value) },
-                    onOpenSettings = {
-                        val cwd = state.projects.firstOrNull()?.path.orEmpty()
-                        viewModel.fetchSettings()
-                        if (cwd.isNotBlank()) {
-                            viewModel.fetchSkills(cwd)
-                            viewModel.fetchPlugins(cwd)
-                            viewModel.fetchMcp(cwd)
-                            viewModel.fetchAgents(cwd)
-                        } else {
-                            viewModel.fetchAgents(null)
-                        }
-                        viewModel.fetchAuthProviders()
-                    },
                     onOpenUsage = viewModel::fetchUsage,
-                    onImportSession = viewModel::importSession,
                     fileMatches = state.fileMatches,
                     onSearchFiles = viewModel::searchFiles,
-                    agents = state.agents,
-                    onSaveAgent = viewModel::saveAgent,
-                    onDeleteAgent = viewModel::deleteAgent,
-                    skillResults = state.skillResults,
-                    skillSearchQuery = state.skillSearchQuery,
-                    onSearchSkills = viewModel::searchSkills,
-                    onInstallSkill = viewModel::installSkill,
-                    authProviders = state.authProviders,
                     onAddProject = viewModel::addProject,
                     onRemoveProject = viewModel::removeProject,
                 )
@@ -215,21 +206,7 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
                             viewModel.fetchUsage()
                             chatUsageOpen = true
                         },
-                        onOpenSettings = {
-                            val cwd = state.sessionCwd
-                                ?: state.projects.firstOrNull()?.path.orEmpty()
-                            viewModel.fetchSettings()
-                            if (cwd.isNotBlank()) {
-                                viewModel.fetchSkills(cwd)
-                                viewModel.fetchPlugins(cwd)
-                                viewModel.fetchMcp(cwd)
-                                viewModel.fetchAgents(cwd)
-                            } else {
-                                viewModel.fetchAgents(null)
-                            }
-                            viewModel.fetchAuthProviders()
-                            chatSettingsOpen = true
-                        },
+                        onOpenSettings = { chatSettingsOpen = true },
                         thinkingLevel = thinkingLevel,
                         onThinkingLevelChange = viewModel::setSessionThinkingLevel,
                         usageFraction = usageFraction,
@@ -283,16 +260,13 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
                     currentCwd = state.sessionCwd,
                     onOpenSession = ::openSession,
                     onNewSession = { viewModel.fetchProjects(); newSessionDraft = ""; newSessionOpen = true },
-                    onOpenSettings = { viewModel.fetchSettings(); chatSettingsOpen = true },
+                    onOpenSettings = { chatSettingsOpen = true },
                     onOpenUsage = { chatUsageOpen = true },
                     onOpenArchives = { viewModel.fetchArchives(); archivesOpen = true },
                     onRestoreArchive = viewModel::restoreArchive,
                     onDismiss = { chatPaletteOpen = false },
-                    onExportSession = viewModel::exportSession,
-                    onGitStatus = viewModel::fetchGitStatus,
                     fileMatches = state.fileMatches,
                     onSearchFiles = viewModel::searchFiles,
-                    onOpenFile = { path -> filePreview = state.sessionCwd.orEmpty() to path },
                     onSlashSelected = { value ->
                         (state.screen as? RemoteScreen.Chat)?.let { drafts[it.sessionId] = value }
                         viewModel.setDraft(value)
@@ -312,29 +286,26 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
                     onAddWorktree = viewModel::addWorktree,
                     onAddProject = viewModel::addProject,
                     initialMessage = newSessionDraft,
+                    initialCwd = state.sessionCwd,
                     onCreated = { id -> newSessionOpen = false; viewModel.refreshSessions(); openSession(id) },
                     onDismiss = { newSessionOpen = false },
                 )
             }
             if (archivesOpen) {
-                AlertDialog(
-                    onDismissRequest = { archivesOpen = false },
-                    title = { Text(if (language == "한국어") "보관함" else "Archives") },
-                    text = {
-                        Column(Modifier.verticalScroll(rememberScrollState())) {
-                            state.archives.forEach { archive ->
-                                TextButton(onClick = { viewModel.restoreArchive(archive.key); archivesOpen = false }) {
-                                    Text(archive.name ?: archive.id ?: archive.key)
-                                }
-                            }
-                            state.error?.let { Text(it) }
-                        }
+                ArchivesSheet(
+                    archives = state.archives,
+                    onRestore = { key ->
+                        val result = viewModel.requester.request("sessions", "restore", org.json.JSONObject().put("key", key))
+                        val id = result.getString("id")
+                        archivesOpen = false
+                        viewModel.refreshSessions()
+                        openSession(id)
                     },
-                    confirmButton = { TextButton(onClick = { archivesOpen = false }) { Text(if (language == "한국어") "닫기" else "Close") } },
+                    onDismiss = { archivesOpen = false },
                 )
             }
             filePreview?.let { (cwd, path) ->
-                key((state.screen as? RemoteScreen.Chat)?.sessionId, cwd, path) {
+                key((state.screen as? RemoteScreen.Chat)?.sessionId) {
                     FileBrowserSheet(requester = viewModel.requester, path = path, cwd = cwd, onDismiss = { filePreview = null })
                 }
             }

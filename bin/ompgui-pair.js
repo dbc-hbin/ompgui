@@ -54,7 +54,7 @@ async function runPair(options) {
   if (await isPortAvailable(port, hostname)) {
     throw new Error(`ompgui is not running on ${hostname}:${port}. Start it, then run ompgui pair.`);
   }
-  const base = `http://${hostname}:${port}`;
+  const base = options.baseUrl;
   const headers = { "content-type": "application/json" };
   await ensureLocalSession(base, password, headers);
   const body = {};
@@ -75,7 +75,7 @@ async function runDevices(options) {
   if (await isPortAvailable(port, hostname)) {
     throw new Error(`ompgui is not running on ${hostname}:${port}. Start it, then run ompgui devices.`);
   }
-  const base = `http://${hostname}:${port}`;
+  const base = options.baseUrl;
   const headers = { "content-type": "application/json" };
   await ensureLocalSession(base, password, headers);
 

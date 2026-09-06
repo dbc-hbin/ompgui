@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync } from "fs";
+import { writeConfigFileAtomic } from "./config-file";
 import { dirname } from "path";
 import { isMap, parseDocument, stringify } from "yaml";
 import { getSettingsPath } from "./paths";
@@ -27,15 +28,13 @@ export function writeModelRoles(roles: ModelRoles): void {
   const doc = parseDocument(source);
   if (doc.errors.length > 0) throw new Error(`${path} is not valid YAML: ${doc.errors[0].message}`);
   mkdirSync(dirname(path), { recursive: true });
-  const temp = `${path}.tmp-${process.pid}-${Date.now()}`;
   if (doc.contents === null) {
-    writeFileSync(temp, stringify({ modelRoles: roles }), "utf8");
+    writeConfigFileAtomic(path, stringify({ modelRoles: roles }));
   } else {
     if (!isMap(doc.contents)) throw new Error(`${path} must contain a YAML mapping`);
     doc.set("modelRoles", roles);
-    writeFileSync(temp, doc.toString(), "utf8");
+    writeConfigFileAtomic(path, doc.toString());
   }
-  renameSync(temp, path);
 }
 
 export function readDisabledProviders(): Set<string> {
@@ -62,7 +61,5 @@ export function enableProvider(provider: string): void {
   const next = disabled.filter((value) => value !== provider);
   if (next.length === disabled.length) return;
   doc.set("disabledProviders", next);
-  const temp = `${path}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(temp, doc.toString(), "utf8");
-  renameSync(temp, path);
+  writeConfigFileAtomic(path, doc.toString());
 }

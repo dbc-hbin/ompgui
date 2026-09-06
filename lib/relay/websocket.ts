@@ -61,34 +61,6 @@ export function encodeUnmaskedFrame(opcode: number, payload: Buffer): Buffer {
   return Buffer.concat([header, payload]);
 }
 
-export function encodeMaskedFrame(opcode: number, payload: Buffer, mask: Buffer): Buffer {
-  if (mask.length !== 4) throw new Error("WebSocket mask must be 4 bytes");
-  const len = payload.length;
-  let header: Buffer;
-  if (len < 126) {
-    header = Buffer.alloc(6);
-    header[0] = 0x80 | opcode;
-    header[1] = 0x80 | len;
-    mask.copy(header, 2);
-  } else if (len <= 0xffff) {
-    header = Buffer.alloc(8);
-    header[0] = 0x80 | opcode;
-    header[1] = 0x80 | 126;
-    header.writeUInt16BE(len, 2);
-    mask.copy(header, 4);
-  } else {
-    header = Buffer.alloc(14);
-    header[0] = 0x80 | opcode;
-    header[1] = 0x80 | 127;
-    header.writeUInt32BE(0, 2);
-    header.writeUInt32BE(len, 6);
-    mask.copy(header, 10);
-  }
-  const masked = Buffer.from(payload);
-  for (let i = 0; i < masked.length; i += 1) masked[i] ^= mask[i & 3];
-  return Buffer.concat([header, masked]);
-}
-
 export function tryConsumeClientFrame(buffer: Buffer, maxPayload = RELAY_MAX_FRAME_BYTES): ConsumeResult {
   if (buffer.length < 2) return { status: "need_more" };
   const byte0 = buffer[0];
@@ -146,7 +118,9 @@ export class RelayWebSocket {
   private buffer: Buffer = Buffer.alloc(0);
   private closed = false;
   private sentClose = false;
-  bufferedAmount = 0;
+  get bufferedAmount(): number {
+    return this.socket.writableLength;
+  }
 
   constructor(
     private readonly socket: Duplex,
@@ -194,10 +168,9 @@ export class RelayWebSocket {
 
   private writeFrame(frame: Buffer): boolean {
     try {
-      const writable = this.socket as Duplex & { writableLength?: number };
-      this.bufferedAmount = typeof writable.writableLength === "number" ? writable.writableLength : 0;
-      if (this.bufferedAmount > 1_000_000) return false;
-      return this.socket.write(frame);
+      if (this.bufferedAmount + frame.length > 1_000_000) return false;
+      this.socket.write(frame);
+      return true;
     } catch {
       this.handlePeerClose();
       return false;
@@ -207,13 +180,12 @@ export class RelayWebSocket {
   private onData(chunk: Buffer): void {
     if (this.closed) return;
     this.buffer = this.buffer.length === 0 ? Buffer.from(chunk) : Buffer.concat([this.buffer, chunk]);
-    if (this.buffer.length > this.maxPayload + 14) {
-      this.close(1009, "Frame is too large");
-      return;
-    }
     for (;;) {
       const result = tryConsumeClientFrame(this.buffer, this.maxPayload);
-      if (result.status === "need_more") return;
+      if (result.status === "need_more") {
+        if (this.buffer.length > this.maxPayload + 14) this.close(1009, "Frame is too large");
+        return;
+      }
       if (result.status === "error") {
         this.close(result.code, result.reason);
         return;
@@ -259,7 +231,6 @@ export class RelayWebSocket {
 export function completeRelayUpgrade(
   req: IncomingMessage,
   socket: Duplex,
-  head: Buffer,
   handlers: RelayWebSocketHandlers,
 ): RelayWebSocket | null {
   const key = readWebsocketUpgradeKey(req);
@@ -276,7 +247,5 @@ export function completeRelayUpgrade(
       `Sec-WebSocket-Accept: ${accept}\r\n` +
       "\r\n",
   );
-  const ws = new RelayWebSocket(socket, handlers);
-  if (head.length > 0) ws.feed(head);
-  return ws;
+  return new RelayWebSocket(socket, handlers);
 }

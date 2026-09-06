@@ -53,7 +53,7 @@ export function handleRelayUpgrade(req: IncomingMessage, socket: Duplex, head: B
   let counted = false;
   let ping: NodeJS.Timeout | undefined;
   let attached: { onText(text: string): void; onClose(): void } | null = null;
-  const ws = completeRelayUpgrade(req, socket, head, {
+  const ws = completeRelayUpgrade(req, socket, {
     onText: (text) => attached?.onText(text),
     onClose: () => {
       clearInterval(ping);
@@ -72,6 +72,7 @@ export function handleRelayUpgrade(req: IncomingMessage, socket: Duplex, head: B
   ping = setInterval(() => ws.ping(), PING_INTERVAL_MS);
   ping.unref?.();
   attached = attachRelayConnection(ws);
+  if (head.length > 0) ws.feed(head);
 }
 
 function patchServerEmit(ServerCtor: typeof HttpServer | typeof HttpsServer): void {

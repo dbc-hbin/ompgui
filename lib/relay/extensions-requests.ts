@@ -39,7 +39,7 @@
  * - agents.unpack {scope:user|project,cwd?,force?} -> {targetDir,count}
  * - agents.setDisabled {name,disabled} -> {name,disabled} (task.disabledAgents via merge/writeNativeSettings)
  * - agents.setOverride {name,kind:model|prewalk|advisor,value?} -> {name,kind} (undefined clears)
- * - mcp.list {cwd?,offset?=0,limit?=50} -> {inventory:[{name,source,status,type?,enabled?}],total,offset,limit,hasMore}
+ * - mcp.list {cwd?,offset?=0,limit?=50} -> {inventory:[{name,source,status,type?,enabled?}],total,offset,limit,hasMore,sessionId,liveServers?,liveError?} (authenticated context session only)
  * - mcp.get {cwd,name} -> {name,source:'project',config(redacted),envConfigured,headersConfigured,path}
  * - mcp.validate {name,server} -> {ok:true}
  * - mcp.save {cwd,name,server,previousName?} -> {name} (server: {type,command?,url?,args?,env?,headers?,cwd?,enabled?,timeout?,requestIdFormat?}; omitted env/headers preserve, null clears)
@@ -52,6 +52,8 @@ import {
   writeNativeSettings,
   type NativeSettings,
 } from "../omp/settings-config";
+import { mergeMcpServers, parseMcpListOutput, type McpLiveServer } from "../omp/mcp-config";
+import { getRpcSession } from "../rpc-manager";
 import { asString } from "../type-guards";
 import type { RelayRequestContext } from "./request-types";
 import { RelaySessionError } from "./session-runtime";
@@ -204,7 +206,6 @@ export async function handleExtensionsRequest(
   args: Record<string, unknown>,
   context: RelayRequestContext,
 ): Promise<Record<string, unknown>> {
-  void context;
   if (typeof args !== "object" || args === null || Array.isArray(args)) throw new RelaySessionError("invalid_args", "args must be an object");
   switch (requireAction(action)) {
     case "skills.list": {
@@ -432,7 +433,35 @@ export async function handleExtensionsRequest(
       const cwd = optionalCwd(args.cwd);
       const listed = await listRelayMcp(cwd);
       const { offset, limit } = pageOf(listed.inventory.length, args.offset, args.limit, 50);
+      const sessionId = context.sessionId ?? null;
+      let liveServers: McpLiveServer[] | undefined;
+      let liveError: string | undefined;
+      if (sessionId) {
+        const session = getRpcSession(sessionId);
+        if (!session?.isAlive()) {
+          liveError = "Selected session is inactive — live MCP status is unavailable.";
+        } else {
+          try {
+            const output = await session.getMcpList();
+            if (!session.isAlive() || getRpcSession(sessionId) !== session) {
+              liveError = "Selected session became inactive — refresh to query its current runtime.";
+            } else {
+              liveServers = mergeMcpServers(parseMcpListOutput(output), listed.inventory.map(({ name, source, status, type }) => ({
+                name, source, status: status === "disabled" ? "disabled" : "configured", ...(type ? { type } : {}),
+              }))).map(({ name, source, status, type }) => ({
+                name, source, status, ...(type ? { type } : {}),
+              }));
+            }
+          } catch {
+            // Runtime failures can contain process commands, environment or HTTP headers.
+            liveError = "Live MCP query failed. Connection status is unknown; refresh to retry.";
+          }
+        }
+      }
       return {
+        sessionId,
+        ...(liveServers ? { liveServers } : {}),
+        ...(liveError ? { liveError } : {}),
         inventory: listed.inventory.slice(offset, offset + limit),
         total: listed.inventory.length,
         offset,

@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { apiErrorResponse } from "@/lib/api-utils";
+import { apiErrorResponse, rpcApiErrorResponse } from "@/lib/api-utils";
 import { existsSync } from "fs";
 import { randomUUID } from "crypto";
 import { allowFileRoot } from "@/lib/file-access";
 import { invalidateSessionListCache } from "@/lib/session-reader";
-import { WebRpcError, startRpcSession } from "@/lib/rpc-manager";
-import { RpcCommandError } from "@/lib/omp/rpc-process";
+import { startRpcSession } from "@/lib/rpc-manager";
 import { parseJsonWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
 
 const MAX_NEW_AGENT_REQUEST_BYTES = 4 * 1024 * 1024;
@@ -17,13 +16,7 @@ function newSessionErrorResponse(error: unknown) {
   if (error instanceof SyntaxError) {
     return NextResponse.json({ error: "Invalid JSON request body", code: "invalid_json" }, { status: 400 });
   }
-  if (error instanceof WebRpcError || error instanceof RpcCommandError) {
-    return NextResponse.json(
-      { error: error.message, code: error instanceof WebRpcError ? error.code : (error.code ?? "rpc_command_failed") },
-      { status: 400 },
-    );
-  }
-  return apiErrorResponse(error);
+  return rpcApiErrorResponse(error) ?? apiErrorResponse(error);
 }
 // POST /api/agent/new  body: { cwd: string; type: string; message?: string; ... }
 // Spawns a brand-new omp session. Most calls immediately send the first command;

@@ -36,6 +36,7 @@
  *
  * Action table (domain `models`):
  * - catalog.get {} -> {models:[{provider,id,name,thinkingLevels,supportsFastMode,contextWindow?}],defaultModel:{provider,modelId}|null,connectedProviders:[{id,name,disabled}],unavailable?}
+ * - catalog.search {query,provider?,baseUrl?,limit?} -> {models,recommendation,source} (public models.dev, shared web cache)
  * - roles.get {} -> {path,roles:Record<string,string>}
  * - roles.set {roles:Record<string,string>} -> {roles} (non-empty entries kept, like the desktop PUT filter)
  * - registry.get {} -> {path,settings:{enabledModels?,disabledProviders?,modelProviderOrder?,registryHasScopedEntries?}}
@@ -68,6 +69,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { invalidateModelsCache } from "../models-cache";
+import { ModelCatalogError, searchPublicModelCatalog } from "../model-catalog-service";
 import { assertNoAmbiguousModelScopes } from "../model-scope";
 import {
   MODELS_CONFIG_INVALID_CODE,
@@ -106,6 +108,7 @@ import type { RelayRequestContext } from "./request-types";
 /** Finite action set for the `models` domain. */
 export const MODELS_REQUEST_ACTIONS = [
   "catalog.get",
+  "catalog.search",
   "roles.get",
   "roles.set",
   "registry.get",
@@ -1075,6 +1078,21 @@ export async function handleModelsRequest(
   switch (requireAction(action)) {
     case "catalog.get":
       return getModelsCatalog();
+    case "catalog.search": {
+      try {
+        return { ...await searchPublicModelCatalog({
+          query: args.query,
+          provider: args.provider,
+          baseUrl: args.baseUrl,
+          limit: args.limit,
+        }) };
+      } catch (error) {
+        if (error instanceof ModelCatalogError) {
+          throw new ModelsRequestError(error.code, error.message, undefined, error.status);
+        }
+        throw new ModelsRequestError("catalog_unavailable", "The public model catalog is unavailable. Try again later.", undefined, 502);
+      }
+    }
     case "roles.get": {
       try {
         const data = readModelRoles();

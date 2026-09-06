@@ -12,6 +12,9 @@ const { ChatInput, ModelErrorBanner, filterModelOptions, resolveMobileRunSubmitM
 const { CHAT_COLUMN_MAX_WIDTH } = await jiti.import("../lib/chat-layout.ts");
 
 const noop = () => {};
+if (typeof globalThis.requestAnimationFrame !== "function") {
+  globalThis.requestAnimationFrame = () => 0;
+}
 
 function resolveElementTree(node) {
   if (Array.isArray(node)) return node.flatMap(resolveElementTree);
@@ -89,13 +92,22 @@ function withInteractiveHooks(callback) {
     },
   };
 
+  const restore = () => {
+    internals.H = previousDispatcher;
+  };
   try {
-    return callback((props) => {
+    const result = callback((props) => {
       hookCursor = 0;
       return resolveElementTree(render(props, null));
     });
-  } finally {
-    internals.H = previousDispatcher;
+    if (result && typeof result.then === "function") {
+      return Promise.resolve(result).finally(restore);
+    }
+    restore();
+    return result;
+  } catch (error) {
+    restore();
+    throw error;
   }
 }
 
@@ -225,6 +237,118 @@ test("opens the context popup with the resolved percent and window summary", () 
     assert.equal(findHostElements(closedTree, (type, popupProps) => (
       type === "div" && String(popupProps.className ?? "").includes("composer-context-ring-popup")
     )).length, 0);
+  });
+});
+
+test("native-only queued counts have no edit or delete controls", () => {
+  withInteractiveHooks((rerender) => {
+    const tree = rerender({
+      onSend: noop,
+      onAbort: noop,
+      isStreaming: true,
+      queuedMessages: { revision: 0, items: [], nativeQueuedCount: 3 },
+    });
+    const status = findHostElements(tree, (type, props) => type === "div" && props.role === "status"
+      && /Queued on device|chatInput\.queuedNativeCount/.test(textContent(props.children)));
+    assert.equal(status.length, 1);
+    assert.match(textContent(status[0]), /3/);
+    assert.deepEqual(findHostElements(status[0], (type) => type === "button"), []);
+    assert.deepEqual(findHostElements(tree, (type, props) => type === "div" && props["data-queue-id"]), []);
+  });
+});
+
+test("queued items expose per-id edit, delete, and follow-up steer", async () => {
+  await withInteractiveHooks(async (rerender) => {
+    const recalled = [];
+    const deleted = [];
+    const promoted = [];
+    let recallResult = "from-queue";
+    const snapshot = {
+      revision: 4,
+      nativeQueuedCount: 2,
+      items: [
+        { id: "q1", text: "same", lane: "followUp", status: "queued" },
+        { id: "q2", text: "same", lane: "followUp", status: "queued" },
+        { id: "q-send", text: "in flight", lane: "steer", status: "sending" },
+        { id: "q-fail", text: "broke", lane: "followUp", status: "failed", error: "timeout" },
+      ],
+    };
+    const props = {
+      onSend: noop,
+      onAbort: noop,
+      isStreaming: true,
+      queuedMessages: snapshot,
+      onRecallQueuedMessage: async (id) => {
+        recalled.push(id);
+        return recallResult;
+      },
+      onDeleteQueuedMessage: async (id) => {
+        deleted.push(id);
+        return true;
+      },
+      onPromoteQueuedToSteer: async (id) => {
+        promoted.push(id);
+        return true;
+      },
+    };
+
+    const findRow = (tree, id) => findHostElements(
+      tree,
+      (type, rowProps) => type === "div" && rowProps["data-queue-id"] === id,
+    )[0];
+    const findButtons = (row) => findHostElements(row, (type) => type === "button");
+    const buttonByTitle = (row, pattern) => findButtons(row).find((button) => (
+      pattern.test(String(button.props.title ?? "")) || pattern.test(textContent(button))
+    ));
+
+    const tree = rerender(props);
+    const follow = findRow(tree, "q1");
+    const duplicate = findRow(tree, "q2");
+    const sending = findRow(tree, "q-send");
+    const failed = findRow(tree, "q-fail");
+    assert.ok(follow && duplicate && sending && failed);
+    const nativeStatus = findHostElements(tree, (type, props) => type === "div" && props.role === "status"
+      && /Queued on device|chatInput\.queuedNativeCount/.test(textContent(props.children)))[0];
+    assert.ok(nativeStatus);
+    assert.deepEqual(findHostElements(nativeStatus, (type) => type === "button"), []);
+    assert.equal(findButtons(follow).length, 3);
+    assert.equal(findButtons(duplicate).length, 3);
+    assert.equal(findButtons(sending).length, 2);
+    assert.equal(findButtons(failed).length, 2);
+    assert.ok(findButtons(sending).every((button) => button.props.disabled));
+    assert.ok(findButtons(follow).every((button) => !button.props.disabled));
+    assert.ok(findButtons(failed).every((button) => !button.props.disabled));
+    assert.match(textContent(failed), /timeout/);
+    assert.ok(findHostElements(failed, (type, alertProps) => type === "span" && alertProps.role === "alert")[0]);
+
+    buttonByTitle(duplicate, /Edit this queued message|chatInput\.queuedEditTitle/)?.props.onClick();
+    await Promise.resolve();
+    await Promise.resolve();
+    const afterEdit = rerender(props);
+    const textarea = findHostElements(afterEdit, (type) => type === "textarea")[0];
+    assert.deepEqual(recalled, ["q2"]);
+    assert.equal(textarea.props.value, "from-queue");
+
+    recallResult = null;
+    buttonByTitle(findRow(afterEdit, "q1"), /Edit this queued message|chatInput\.queuedEditTitle/)?.props.onClick();
+    await Promise.resolve();
+    await Promise.resolve();
+    const afterFailedRecall = rerender(props);
+    const textareaAfterMiss = findHostElements(afterFailedRecall, (type) => type === "textarea")[0];
+    assert.deepEqual(recalled, ["q2", "q1"]);
+    assert.equal(textareaAfterMiss.props.value, "from-queue");
+
+    buttonByTitle(findRow(afterFailedRecall, "q1"), /Remove this queued message|chatInput\.queuedDeleteTitle/)?.props.onClick();
+    buttonByTitle(findRow(afterFailedRecall, "q1"), /Deliver this message as a steer|chatInput\.queuedSteerTitle/)?.props.onClick();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.deepEqual(deleted, ["q1"]);
+    assert.deepEqual(promoted, ["q1"]);
+
+    const sendingEdit = buttonByTitle(findRow(afterFailedRecall, "q-send"), /Edit this queued message|chatInput\.queuedEditTitle/);
+    sendingEdit?.props.onClick();
+    await Promise.resolve();
+    assert.deepEqual(recalled, ["q2", "q1"]);
   });
 });
 
