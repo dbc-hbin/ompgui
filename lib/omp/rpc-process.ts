@@ -2,15 +2,15 @@ import { type ChildProcessWithoutNullStreams, spawn } from "child_process";
 import { createInterface } from "readline";
 import { sanitizeProjectCommandEnvironment } from "../project-command-env";
 import { resolveOmpBin } from "./omp-cli";
-import { encodeRpcFrames, RpcFrameDecoder, type RpcFrameRecord, type RpcProtocolVersion } from "./rpc-frame";
+import { RpcFrameDecoder, type RpcFrameRecord, type RpcProtocolVersion } from "./rpc-frame";
 
 /**
  * Process + protocol layer for `omp --mode rpc-ui` (NDJSON over stdio).
  * Protocol v1: commands `{id, type, ...}` on stdin; `{type:"response", id, ...}`
  * plus interleaved event frames on stdout. omp announces readiness with a
  * `{type:"ready"}` frame before accepting commands. When readiness advertises
- * protocol v2, callers negotiate it before sending normal commands; oversized
- * logical frames are then carried as bounded `rpc_chunk` sequences.
+ * protocol v2, callers negotiate bounded `rpc_chunk` sequences for output.
+ * Commands on stdin remain single JSONL records in both protocol versions.
  */
 
 export interface RpcResponseFrame {
@@ -59,6 +59,7 @@ export interface RpcProcessOptions {
   dependencies?: {
     resolveOmpBin?: typeof resolveOmpBin;
     spawn?: typeof spawn;
+    kill?: typeof process.kill;
   };
 }
 
@@ -75,17 +76,18 @@ export class RpcProcess {
   private exited = false;
   private exitInfo: { code: number | null; signal: NodeJS.Signals | null } | null = null;
   private protocolVersion: RpcProtocolVersion = 1;
-  private nextChunkId = 1;
   private readonly spawnProcess: typeof spawn;
-  // Serializes physical stdin writes: a v2 logical frame can span multiple
-  // `rpc_chunk` records (>1 MiB payloads), and two frames written concurrently
-  // would interleave their chunk sequences on stdin, which RpcFrameDecoder
-  // rejects. Each logical frame is enqueued whole.
+  private readonly killProcess: typeof process.kill;
+  private readonly exit = Promise.withResolvers<void>();
+  private disposePromise: Promise<void> | null = null;
+  // Wait for each native JSONL write callback before serializing the next
+  // command, preserving order and backpressure without buffering every record.
   private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(options: RpcProcessOptions) {
     const resolveBin = options.dependencies?.resolveOmpBin ?? resolveOmpBin;
     this.spawnProcess = options.dependencies?.spawn ?? spawn;
+    this.killProcess = options.dependencies?.kill ?? process.kill;
     const bin = resolveBin();
     if (!bin) {
       throw new Error("omp binary not found. Install oh-my-pi or set OMP_WEB_OMP_BIN.");
@@ -186,9 +188,19 @@ export class RpcProcess {
         entry.reject(exitError);
       }
       this.pending.clear();
+      this.exit.resolve();
       options.onExit?.({ code, signal, stderrTail: this.stderrTail });
     };
-    this.child.on("exit", finalize);
+    this.child.on("exit", (code, signal) => {
+      // Reap the detached group at the native exit boundary, before notifying
+      // callers. Never retain its numeric ID for a later dispose/retry: after
+      // this point it could belong to an unrelated process. Spawn errors do
+      // not prove group ownership and must not enter this path.
+      if (!this.exited && process.platform !== "win32" && this.child.pid) {
+        try { this.killProcess(-this.child.pid, "SIGKILL"); } catch {}
+      }
+      finalize(code, signal);
+    });
     this.child.on("error", (error) => {
       this.stderrTail = (this.stderrTail + `\nspawn error: ${error.message}`).slice(-STDERR_TAIL_LIMIT);
       finalize(null, null);
@@ -214,7 +226,7 @@ export class RpcProcess {
     return Promise.race([this.readyPromise, timeout]);
   }
 
-  /** Enables bounded protocol-v2 framing when the ready frame advertises it. */
+  /** Enables bounded protocol-v2 output framing when readiness advertises it. */
   async negotiateProtocol(ready: RpcFrame): Promise<RpcProtocolVersion> {
     const supported = Array.isArray(ready.supportedProtocolVersions) ? ready.supportedProtocolVersions : [];
     if (!supported.includes(2)) return this.protocolVersion;
@@ -281,34 +293,26 @@ export class RpcProcess {
   }
 
   private writeFrame(frame: RpcFrame, callback: (error?: Error | null) => void): void {
-    let lines: string[];
-    try {
-      lines = encodeRpcFrames(frame, this.protocolVersion, `web-${this.nextChunkId++}`);
-    } catch (error) {
-      callback(error instanceof Error ? error : new Error(String(error)));
-      return;
-    }
-    // Enqueue the entire encoded logical frame; the next frame's physical
-    // records only start after this frame's last write callback completes.
-    this.writeQueue = this.writeQueue.then(
-      () => new Promise<void>((resolve) => {
-        if (this.exited || this.child.stdin.destroyed) {
-          callback(new Error("RPC process is not running"));
-          resolve();
-          return;
-        }
-        let index = 0;
-        const writeNext = (error?: Error | null) => {
-          if (error || index === lines.length) {
-            callback(error ?? null);
-            resolve();
-            return;
-          }
-          this.child.stdin.write(lines[index++], writeNext);
-        };
-        writeNext();
-      }),
-    );
+    this.writeQueue = this.writeQueue.then(() => {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      const complete = (error?: Error | null) => {
+        callback(error);
+        resolve();
+      };
+      if (this.exited || this.child.stdin.destroyed) {
+        complete(new Error("RPC process is not running"));
+        return promise;
+      }
+      try {
+        // Native OMP dispatches each stdin JSONL record directly, even after
+        // negotiating v2 output. Serialize only at the final write boundary;
+        // no chunk/base64 copies or output-protocol size caps apply to input.
+        this.child.stdin.write(`${JSON.stringify(frame)}\n`, complete);
+      } catch (error) {
+        complete(error instanceof Error ? error : new Error(String(error)));
+      }
+      return promise;
+    });
   }
 
   private handleResponse(response: RpcResponseFrame): void {
@@ -337,11 +341,12 @@ export class RpcProcess {
    * then SIGKILL on the whole process group. Resolves once the process has
    * exited. Safe to call during server teardown — escalation timers are
    * unref'd so they never keep the event loop alive on their own. */
-  async dispose(gracePeriodMs = 5_000): Promise<void> {
-    if (this.exited) return;
-    const exited = new Promise<void>((resolve) => {
-      if (this.exited) return resolve();
-      this.child.once("exit", () => resolve());
+  dispose(gracePeriodMs = 5_000): Promise<void> {
+    if (this.disposePromise) return this.disposePromise;
+    if (this.exited) return this.exit.promise;
+    this.disposePromise = this.exit.promise.then(() => {
+      clearTimeout(timer);
+      clearTimeout(killTimer);
     });
     try {
       this.child.stdin.end();
@@ -356,12 +361,14 @@ export class RpcProcess {
         const args = ["/pid", String(pid), "/t", ...(force ? ["/f"] : [])];
         const reaper = this.spawnProcess("taskkill", args, { windowsHide: true, stdio: "ignore" });
         reaper.once("error", () => {
-          try { this.child.kill(signal); } catch {}
+          if (!this.exited) {
+            try { this.child.kill(signal); } catch {}
+          }
         });
         return;
       }
       try {
-        process.kill(-pid, signal);
+        this.killProcess(-pid, signal);
       } catch {
         try { this.child.kill(signal); } catch {}
       }
@@ -374,8 +381,6 @@ export class RpcProcess {
     }, gracePeriodMs * 2);
     timer.unref?.();
     killTimer.unref?.();
-    await exited;
-    clearTimeout(timer);
-    clearTimeout(killTimer);
+    return this.disposePromise;
   }
 }

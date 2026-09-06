@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Edit3, Plus, Search, Trash2, Download, RefreshCw, X, Wrench, Eye } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -26,13 +26,18 @@ export function AgentsConfig({ cwd, onSaved }: Props) {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<AgentDefinition | null>(null);
   const [models, setModels] = useState<AgentModelOption[]>([]);
-  const [disabledMap, setDisabledMap] = useState<Record<string, boolean>>({});
+  const [disabledMap, setDisabledMap] = useState<Record<string, boolean> | null>(null);
+  const [savingDisabled, setSavingDisabled] = useState(false);
+  const savingDisabledRef = useRef(false);
+  const loadVersion = useRef(0);
   const [unpacking, setUnpacking] = useState(false);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (preserveError = false) => {
+    if (savingDisabledRef.current) return;
+    const version = ++loadVersion.current;
     setLoading(true);
-    setError(null);
+    if (!preserveError) setError(null);
     try {
       const qs = cwd ? `?cwd=${encodeURIComponent(cwd)}` : "";
       const [agentsRes, models, settingsRes] = await Promise.all([
@@ -43,14 +48,15 @@ export function AgentsConfig({ cwd, onSaved }: Props) {
 
       if (!agentsRes.ok) throw new Error(`HTTP ${agentsRes.status}`);
       const agentsData = await agentsRes.json();
+      const sd = settingsRes.ok ? await settingsRes.json() : null;
+      if (version !== loadVersion.current) return;
       setAgents(agentsData.agents ?? []);
 
       if (models) {
         setModels(agentModelOptionsFromResponse(models));
       }
 
-      if (settingsRes.ok) {
-        const sd = await settingsRes.json();
+      if (sd) {
         const taskSettings = sd.settings?.task;
         const disabledList = Array.isArray(taskSettings?.disabledAgents) ? taskSettings.disabledAgents : [];
         const map: Record<string, boolean> = {};
@@ -60,15 +66,15 @@ export function AgentsConfig({ cwd, onSaved }: Props) {
         setDisabledMap(map);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (version === loadVersion.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (version === loadVersion.current) setLoading(false);
     }
   }, [cwd]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void load(true);
+  }, [load, savingDisabled]);
 
   const filteredAgents = useMemo(() => {
     return agents.filter((a) => {
@@ -81,18 +87,37 @@ export function AgentsConfig({ cwd, onSaved }: Props) {
   }, [agents, scopeFilter, searchQuery]);
 
   const toggleAgentDisabled = async (name: string, disable: boolean) => {
-    const nextDisabled = { ...disabledMap, [name]: disable };
-    setDisabledMap(nextDisabled);
-    const disabledArray = Object.keys(nextDisabled).filter((k) => nextDisabled[k]);
+    if (savingDisabledRef.current) return;
+    savingDisabledRef.current = true;
+    setSavingDisabled(true);
+    ++loadVersion.current;
+    setError(null);
+    setStatusNotice(null);
     try {
-      await fetch("/api/omp-settings", {
+      const currentResponse = await fetch("/api/omp-settings");
+      if (!currentResponse.ok) throw new Error(`HTTP ${currentResponse.status}`);
+      const current = await currentResponse.json();
+      const disabledNames = new Set<string>(current.settings?.task?.disabledAgents ?? []);
+      if (disable) disabledNames.add(name);
+      else disabledNames.delete(name);
+      const response = await fetch("/api/omp-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ settings: { task: { disabledAgents: disabledArray } } }),
+        body: JSON.stringify({ settings: { task: { disabledAgents: [...disabledNames] } } }),
       });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error ?? `HTTP ${response.status}`);
+      }
+      const saved = await response.json();
+      const names: string[] = saved.settings?.task?.disabledAgents ?? [];
+      setDisabledMap(Object.fromEntries(names.map((agentName) => [agentName, true])));
       onSaved?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      savingDisabledRef.current = false;
+      setSavingDisabled(false);
     }
   };
 
@@ -336,13 +361,14 @@ export function AgentsConfig({ cwd, onSaved }: Props) {
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(280px, 1fr))", gap: 10, overflowY: "auto", minHeight: 0 }}>
           {filteredAgents.map((agent) => {
-            const isAgentDisabled = Boolean(disabledMap[agent.name] ?? agent.disabled);
+            const isAgentDisabled = Boolean(disabledMap ? disabledMap[agent.name] : agent.disabled);
             return (
               <AgentCard
                 key={`${agent.source}-${agent.name}`}
                 agent={agent}
                 disabled={isAgentDisabled}
                 models={models}
+                savingDisabled={savingDisabled}
                 onToggleDisabled={(val) => void toggleAgentDisabled(agent.name, val)}
                 onEdit={() => setEditingAgent(agent)}
                 onDelete={() => void handleDelete(agent)}
@@ -373,6 +399,7 @@ function AgentCard({
   agent,
   disabled,
   models,
+  savingDisabled,
   onToggleDisabled,
   onEdit,
   onDelete,
@@ -380,6 +407,7 @@ function AgentCard({
 }: {
   agent: AgentDefinition;
   disabled: boolean;
+  savingDisabled: boolean;
   models: AgentModelOption[];
   onToggleDisabled: (disabled: boolean) => void;
   onEdit: () => void;
@@ -449,6 +477,8 @@ function AgentCard({
           <input
             type="checkbox"
             checked={!disabled}
+            disabled={savingDisabled}
+            aria-busy={savingDisabled}
             onChange={(e) => onToggleDisabled(!e.target.checked)}
             style={{ cursor: "pointer" }}
           />

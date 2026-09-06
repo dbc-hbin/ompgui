@@ -1,3 +1,5 @@
+import type { MessageQueueSnapshot } from "./message-queue";
+
 // Local mirrors of the omp shapes used by omp-web. omp's SDK packages are
 // Bun-only, so these types are hand-maintained against
 // oh-my-pi/packages/coding-agent/src/modes/rpc/rpc-types.ts (protocol v1).
@@ -88,6 +90,8 @@ export interface WebSessionState {
   model?: ModelLike & { name?: string; reasoning?: boolean; thinking?: { efforts?: string[] } };
   messageCount: number;
   queuedMessageCount: number;
+  /** Server-owned pre-dispatch queue. Native OMP count stays in queuedMessageCount. */
+  messageQueue: MessageQueueSnapshot;
   contextUsage: ContextUsage | null;
   systemPrompt: string;
   thinkingLevel: string;

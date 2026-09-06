@@ -590,16 +590,11 @@ export function getTodoPhasesFromEntries(entries: readonly SessionEntry[], leafI
   if (leafId === null || entries.length === 0) return [];
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
   let entry = leafId ? byId.get(leafId) : entries[entries.length - 1];
-  const path: SessionEntry[] = [];
   const seen = new Set<string>();
   while (entry && !seen.has(entry.id)) {
-    seen.add(entry.id);
-    path.push(entry);
-    entry = entry.parentId ? byId.get(entry.parentId) : undefined;
-  }
-
-  for (let index = path.length - 1; index >= 0; index--) {
-    const current = path[index];
+    const current = entry;
+    seen.add(current.id);
+    entry = current.parentId ? byId.get(current.parentId) : undefined;
     if (current.type === "custom" && current.customType === "user_todo_edit") {
       const phases = isRecord(current.data) ? parseTodoPhases(current.data.phases) : null;
       if (phases) return phases;
@@ -1006,15 +1001,13 @@ export function entryToUiMessage(
       }
       if (raw.role === "toolResult") {
         const deferMedia = options.deferToolResultImages === true;
-        const normalized = normalizeToolCalls(raw);
-        if (normalized.role !== "toolResult") return normalized;
-        const detailsRecord = isRecord(normalized.details) ? normalized.details : undefined;
+        const detailsRecord = isRecord(raw.details) ? raw.details : undefined;
         // Count presentable images (content + generated details.images)
         // BEFORE details stripping so the deferred marker is accurate even
         // though deferred materialization skips blob resolution.
-        const imageCount = collectToolResultImages({ content: normalized.content, details: detailsRecord }).length;
+        const imageCount = collectToolResultImages({ content: raw.content, details: detailsRecord }).length;
         if (deferMedia) {
-          const omitted = omitToolResultBase64Images(normalized);
+          const omitted = omitToolResultBase64Images(raw);
           // Deferred mode also strips generated details.images (they are
           // base64 too) and attaches the lazy-load marker.
           const stripped = stripToolResultDetails(omitted);
@@ -1026,20 +1019,7 @@ export function entryToUiMessage(
         }
         // Full projection: merge generated details.images into content so
         // history can render them, then strip internal details as before.
-        const message = stripToolResultDetails(normalized, true);
-        if (!options.deferThinking || message.role !== "assistant") return message;
-        // Guard like the loader does for bad lines: normalizeToolCalls passes
-        // non-array content through unchanged, so a string-content assistant
-        // entry must not 500 the whole context route.
-        if (!Array.isArray(message.content)) return message;
-        return {
-          ...message,
-          content: message.content.map((block) => (
-            block.type === "thinking" && typeof block.thinking === "string" && block.thinking.trim() !== ""
-              ? { ...block, thinking: "", deferred: true }
-              : block
-          )),
-        };
+        return stripToolResultDetails(raw, true);
       }
       const normalized = normalizeToolCalls(raw);
       const message = stripToolResultDetails(normalized);

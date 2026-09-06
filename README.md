@@ -2,7 +2,15 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-> **Android APK (Android 12+)** — Use the Kotlin companion app to connect to a remote ompgui server, with a read-only offline snapshot of the latest session. [Download ompgui Remote v0.6.5](https://github.com/dbc-hbin/ompgui/releases/download/v0.6.5/ompgui-remote-v0.6.5.apk) · [Release notes](https://github.com/dbc-hbin/ompgui/releases/tag/v0.6.5)
+> **Android APK (Android 12+)** — Use the Kotlin companion app to connect to a remote ompgui server, with a read-only offline snapshot of the latest session. [Download ompgui Remote v0.7.0](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.0/ompgui-remote-v0.7.0.apk) · [Release notes](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.0)
+
+> The Kotlin companion app in `android/` uses authenticated `/relay` WebSockets for session/history controls and linked messages, offline Mermaid diagrams and code highlighting, and inline image/PDF/audio/HTML/Markdown/DOCX previews. Visible-only file auto-refresh preserves unsaved edits; browsing supports allowed hidden files and archive search. Models/settings include the public models.dev catalog, advanced OMP settings, and actual per-session MCP runtime status shown separately from configuration. Attachments are streamed into staging rather than packed into one giant phone JSON payload: up to 10 images at 10 MiB each and, independently, 10 text attachments at 256 KiB each. OMP's own image normalization and provider-specific image-count limi…
+>
+> New in v0.7.0: Settings redesigned with tabbed categories and always-visible search (web-like parity), all Strings migrated to string resources (English/Korean/Japanese/Chinese complete), Usage sheet redesigned with capacity chips and color-coded progress bars, tighter session/message spacing, and no regressions.
+>
+> Its native interface follows the web app’s Warm and OMP palettes, with a compact project/session tree, a Settings/Usage footer, and a compact composer with a single-row toolbar. History, session information, commands, and runtime controls live in the session menu; secondary workspace actions remain in overflow menus. Runtime controls use expandable tree categories with aligned current values. Settings use compact row selectors, and dropdown menus are anchored to their triggers. Native Android controls, file pickers, sheet navigation, and distinct touch regions of at least 48 dp are retained.
+>
+> This companion client does not replace the published v0.7.0 APK or add a hosted/E2E relay. To build, use JDK 21, run `npm install` at the repository root, then run `./gradlew :app:assembleDebug` from `android/`; offline assets are generated from the installed npm dependencies. Output: `android/app/build/outputs/apk/debug/app-debug.apk`. Server-disabled update, logout, and stored API-key mutations remain unavailable.
 
 Local web UI for the [oh-my-pi (omp) coding agent](https://github.com/can1357/oh-my-pi). ompgui reads your local omp session files and gives you a browser workspace for session browsing, real-time chat, model configuration, skill management, and project file preview.
 

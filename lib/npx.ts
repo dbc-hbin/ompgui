@@ -34,22 +34,6 @@ function findNpxCli(): string | null {
   return null;
 }
 
-function findNpmCli(): string | null {
-  const nodeDir = dirname(execPath);
-  const candidates = [
-    join(nodeDir, "node_modules", "npm", "bin", "npm-cli.js"),
-    join(nodeDir, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
-  ];
-  for (const p of candidates) {
-    try {
-      if (existsSync(p)) return p;
-    } catch {
-      // ignore
-    }
-  }
-  return null;
-}
-
 export interface RunNpxOptions {
   timeout?: number;
   cwd?: string;
@@ -70,19 +54,6 @@ export async function runNpx(args: string[], opts: RunNpxOptions = {}): Promise<
   const { command, commandArgs } = npxCli
     ? { command: execPath, commandArgs: [npxCli, ...args] }
     : { command: "npx", commandArgs: args };
-  return execFileAsync(command, commandArgs, {
-    timeout: opts.timeout,
-    cwd: opts.cwd,
-    env: opts.env,
-  });
-}
-
-/** Run npm through Node's bundled CLI, including on Windows where npm.cmd cannot be execFile'd safely. */
-export async function runNpm(args: string[], opts: RunNpxOptions = {}): Promise<RunNpxResult> {
-  const npmCli = findNpmCli();
-  const { command, commandArgs } = npmCli
-    ? { command: execPath, commandArgs: [npmCli, ...args] }
-    : { command: "npm", commandArgs: args };
   return execFileAsync(command, commandArgs, {
     timeout: opts.timeout,
     cwd: opts.cwd,

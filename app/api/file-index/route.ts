@@ -7,9 +7,9 @@ import path from "path";
 import {
   getAllowedFileRoots,
   isExistingFilePathAllowed,
-  isFilePathAllowed,
   isWindowsAbsolutePath,
 } from "@/lib/file-access";
+import { isPathWithinRoots } from "@/lib/path-security";
 import { buildEntriesFromFiles, filterFileEntries, type FileIndexEntry } from "@/lib/file-fuzzy";
 
 const execFileAsync = promisify(execFile);
@@ -125,7 +125,7 @@ export async function GET(req: NextRequest) {
     const query = req.nextUrl.searchParams.get("q")?.slice(0, MAX_QUERY_LENGTH) ?? "";
 
     const allowedRoots = await getAllowedFileRoots();
-    if (!isFilePathAllowed(cwd, allowedRoots)) {
+    if (!isPathWithinRoots(cwd, allowedRoots)) {
       return NextResponse.json({ error: "Access denied", code: "access_denied" }, { status: 403 });
     }
 

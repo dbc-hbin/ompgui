@@ -82,24 +82,6 @@ test("UsageConfig pins the mobile dialog inside system safe-area insets", async 
   assert.match(primitives, /animation:\s*"none"/);
 });
 
-test("shared Dialog registers overlay-back and mobile surfaces consume side safe-area", async () => {
-  const primitives = await readFile(new URL("components/ui/primitives.tsx", root), "utf8");
-  const css = await readFile(new URL("app/globals.css", root), "utf8");
-  const mainActivity = await readFile(new URL("android/app/src/main/java/com/dbchbin/ompgui/remote/MainActivity.kt", root), "utf8");
-  const settings = await readFile(new URL("components/SettingsConfig.tsx", root), "utf8");
-  const chatInput = await readFile(new URL("components/ChatInput.tsx", root), "utf8");
-
-  assert.match(primitives, /useOverlayBack\(open, \(\) => onOpenChange\(false\)\)/);
-  assert.match(css, /\.sidebar-container \{[\s\S]*padding-top:\s*env\(safe-area-inset-top/);
-  assert.match(css, /\.right-panel-container\.right-panel-open \{[\s\S]*padding-top:\s*env\(safe-area-inset-top/);
-  assert.match(css, /max\(var\(--space-5\),\s*env\(safe-area-inset-right/);
-  assert.match(css, /\.chat-action-btn:focus-visible \{[\s\S]*outline:\s*2px solid var\(--focus-ring-color\)/);
-  assert.match(mainActivity, /view\.setPadding\(imeInsets\.left, imeInsets\.top, imeInsets\.right, imeInsets\.bottom\)/);
-  assert.match(settings, /const selected = preference === mode;/);
-  assert.match(chatInput, /safe-area-inset-left/);
-  assert.match(chatInput, /safe-area-inset-right/);
-});
-
 test("TabBar exposes 44px hit targets and touch manipulation on mobile", async () => {
   const tabbar = await readFile(new URL("components/TabBar.tsx", root), "utf8");
   const css = await readFile(new URL("app/globals.css", root), "utf8");

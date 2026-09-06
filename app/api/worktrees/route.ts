@@ -2,14 +2,15 @@ import { NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/api-utils";
 import { existsSync } from "fs";
 import { addWorktree, findCurrentWorktreePath, listWorktrees, removeWorktree, resolveProject } from "@/lib/worktree";
-import { allowFileRoot, getAllowedFileRoots, isExistingFilePathAllowed, isFilePathAllowed } from "@/lib/file-access";
+import { allowFileRoot, getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
+import { isPathWithinRoots } from "@/lib/path-security";
 import { projectIdentityKey } from "@/lib/project-identity";
 
 /** Same gate as /api/files: only session cwds / project roots / explicitly
  *  allowed dirs may be inspected or mutated through this endpoint. */
 async function checkCwdAllowed(cwd: string): Promise<NextResponse | null> {
   const allowedRoots = await getAllowedFileRoots();
-  if (!isFilePathAllowed(cwd, allowedRoots) || !isExistingFilePathAllowed(cwd, allowedRoots)) {
+  if (!isPathWithinRoots(cwd, allowedRoots) || !isExistingFilePathAllowed(cwd, allowedRoots)) {
     return NextResponse.json({ error: "Access denied", code: "access_denied" }, { status: 403 });
   }
   return null;

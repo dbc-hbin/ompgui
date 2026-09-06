@@ -30,7 +30,16 @@ import { toast } from "@/components/ui/toast";
 import { expandWebSlashCommand } from "@/lib/web-slash-commands";
 import { createActiveGoal, parseActiveGoal, type ActiveGoal, type ActivePlan } from "@/lib/web-mode-state";
 import { deriveContextUsage, mergeContextUsage, resolveContextWindow } from "@/lib/context-usage";
-import { matchesSessionLoadGeneration, matchesStateLoadFence } from "@/lib/session-load-fence";
+import { matchesSessionLoadGeneration, matchesStateLoadFence, matchesQueueRevision } from "@/lib/session-load-fence";
+import {
+  EMPTY_QUEUE_SNAPSHOT,
+  parseMessageQueueSnapshot,
+  parseRecallQueuedMessageResult,
+  snapshotFromAgentState,
+  type MessageQueueLane,
+  type MessageQueueSnapshot,
+  type QueueMutationResult,
+} from "@/lib/message-queue";
 import { getRemoteReplicaOrigin, loadRemoteReplicaSnapshot, persistRemoteReplicaSnapshot, projectRemoteReplica } from "@/lib/remote-replica";
 import type { RemoteReplicaSnapshot } from "@/lib/remote-replica";
 import { loadClientModels } from "@/lib/client-model-store";
@@ -49,7 +58,7 @@ import {
   type FollowScrollIntent,
 } from "@/lib/chat-follow-scroll";
 import type { HostToolDefinition, HostUriSchemeDefinition, RpcAvailableSlashCommand, SessionStatsInfo, TodoPhase } from "@/lib/pi-types";
-import { isRecord } from "@/lib/type-guards";
+import { asNumber, isRecord } from "@/lib/type-guards";
 import {
   parseSubagentActivityEvent,
   parseSubagentLifecycle,
@@ -241,75 +250,23 @@ type AgentStateResponse = {
   isCompacting?: boolean;
   extensionStatuses?: ExtensionStatusItem[];
   extensionWidgets?: ExtensionWidgetItem[];
-  // omp only reports a count; the queued texts are tracked client-side.
   queuedMessageCount?: number;
+  messageQueue?: unknown;
   todoPhases?: TodoPhase[];
 };
 
-export interface QueuedMessages {
-  steering: string[];
-  followUp: string[];
+function resetQueueSnapshot(): MessageQueueSnapshot {
+  return { ...EMPTY_QUEUE_SNAPSHOT, items: [], nativeQueuedCount: undefined };
 }
 
-const EMPTY_QUEUE: QueuedMessages = { steering: [], followUp: [] };
-
-// omp reports only queuedMessageCount over RPC; the queued texts live in React
-// state and would vanish on reload. Mirror them into sessionStorage (per
-// session, best-effort, size-bounded) so a reload can restore the queue panel.
-const QUEUE_STORAGE_PREFIX = "omp-queue-";
-const QUEUE_STORAGE_MAX_CHARS = 50_000;
-
-function isEmptyQueue(queue: QueuedMessages): boolean {
-  return queue.steering.length === 0 && queue.followUp.length === 0;
-}
-
-function readPersistedQueue(sessionId: string): QueuedMessages | null {
-  try {
-    const raw = sessionStorage.getItem(QUEUE_STORAGE_PREFIX + sessionId);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<QueuedMessages> | null;
-    const onlyStrings = (value: unknown): string[] =>
-      Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-    const queue = { steering: onlyStrings(parsed?.steering), followUp: onlyStrings(parsed?.followUp) };
-    return isEmptyQueue(queue) ? null : queue;
-  } catch {
-    return null;
-  }
-}
-
-function persistQueue(sessionId: string, queue: QueuedMessages): void {
-  try {
-    const key = QUEUE_STORAGE_PREFIX + sessionId;
-    if (isEmptyQueue(queue)) {
-      sessionStorage.removeItem(key);
-      return;
-    }
-    // Size bound: drop oldest texts until the payload fits.
-    let bounded = queue;
-    let raw = JSON.stringify(bounded);
-    while (raw.length > QUEUE_STORAGE_MAX_CHARS && bounded.steering.length + bounded.followUp.length > 1) {
-      bounded = bounded.steering.length >= bounded.followUp.length
-        ? { ...bounded, steering: bounded.steering.slice(1) }
-        : { ...bounded, followUp: bounded.followUp.slice(1) };
-      raw = JSON.stringify(bounded);
-    }
-    if (raw.length > QUEUE_STORAGE_MAX_CHARS) {
-      sessionStorage.removeItem(key);
-      return;
-    }
-    sessionStorage.setItem(key, raw);
-  } catch {
-    // Best-effort only (quota exceeded, private mode, SSR).
-  }
-}
-
-function clearPersistedQueue(sessionId: string | null): void {
-  if (!sessionId) return;
-  try {
-    sessionStorage.removeItem(QUEUE_STORAGE_PREFIX + sessionId);
-  } catch {
-    // ignore storage errors
-  }
+/** Command results are `{ queue, recalled? }`. Unwrap `.queue`; recall acks
+ * require `recalled` via parseRecallQueuedMessageResult. Not an SSE event. */
+function unwrapQueueCommandResult(value: unknown): QueueMutationResult | null {
+  if (!isRecord(value)) return null;
+  const queue = parseMessageQueueSnapshot(value.queue);
+  if (!queue) return null;
+  if (value.recalled === undefined || value.recalled === null) return { queue };
+  return parseRecallQueuedMessageResult(value);
 }
 
 function normalizeThinkingLevel(level: string | undefined): ThinkingLevelOption {
@@ -719,7 +676,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [extensionCustomUi, setExtensionCustomUi] = useState<ExtensionUiCustomRequest | null>(null);
   const [extensionStatuses, setExtensionStatuses] = useState<ExtensionStatusItem[]>([]);
   const [extensionWidgets, setExtensionWidgets] = useState<ExtensionWidgetItem[]>([]);
-  const [queuedMessages, setQueuedMessages] = useState<QueuedMessages>({ steering: [], followUp: [] });
+  const [queuedMessages, setQueuedMessages] = useState<MessageQueueSnapshot>(resetQueueSnapshot);
   const [subagents, setSubagents] = useState<SubagentInfo[]>([]);
   const [subagentEvents, setSubagentEvents] = useState<Record<string, SubagentActivityEvent[]>>({});
   const [subagentTranscriptVersions, setSubagentTranscriptVersions] = useState<Record<string, number>>({});
@@ -764,10 +721,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // aborted turn's terminal agent_end must not tear down the new run that is
   // starting. Cleared on the new run's agent_start (or the intercept itself).
   const interruptReplyPendingRef = useRef(false);
-  // Timestamp of the last client-side queue mutation (steer/follow-up sent).
-  // get_state snapshots may lag behind the RPC round-trip, so a snapshot
-  // reporting queuedMessageCount === 0 must not wipe a queue we just wrote.
-  const queueMutatedAtRef = useRef(0);
+  // Last applied authoritative queue revision. -1 means no snapshot yet, so
+  // the first fetch/event can land even at revision 0. Revisions are per
+  // wrapper and may restart at 0 after reconnect — queueRequestFenceRef drops
+  // in-flight responses from the previous epoch.
+  const queueRevisionRef = useRef(-1);
+  const queueRequestFenceRef = useRef(0);
+  const [queueEnqueuePending, setQueueEnqueuePending] = useState(false);
   const agentRunningRef = useRef(false);
   const bashRunningRef = useRef(false);
   const bashRecoveryIdRef = useRef(0);
@@ -812,9 +772,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // not advance it: detached children outlive agent_end.
   const subagentRosterGenerationRef = useRef(0);
   const optimisticUserMessageKeyRef = useRef<string | null>(null);
-  // True once this mount has persisted a non-empty queue: gates removal so a
-  // just-mounted empty state cannot wipe a stored queue before restore runs.
-  const queuePersistDirtyRef = useRef(false);
   const eventCoalescerRef = useRef<MessageUpdateCoalescer | null>(null);
 
   // New sessions can create their runtime as part of the first mutation. An
@@ -1252,6 +1209,98 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [applyAuthoritativeModel, beginAuthoritativeModelSync, canMutateSession, applySnapshotThinkingLevel]);
 
+  const beginQueueEpoch = useCallback(() => {
+    queueRequestFenceRef.current += 1;
+    queueRevisionRef.current = -1;
+    setQueuedMessages(resetQueueSnapshot());
+  }, []);
+
+  const applyQueueSnapshot = useCallback((
+    snapshot: MessageQueueSnapshot,
+    sid: string,
+    sessionLoadGeneration: number,
+    connectionFence: number,
+    mode: "event" | "fetch" | "reset",
+    nativeQueuedCount?: number,
+  ): boolean => {
+    if (!hookAliveRef.current) return false;
+    if (mode === "reset") {
+      if (sessionIdRef.current !== sid && sid !== "") return false;
+      beginQueueEpoch();
+      return true;
+    }
+    if (
+      !matchesQueueRevision(
+        sessionIdRef.current,
+        sid,
+        sessionLoadGenerationRef.current,
+        sessionLoadGeneration,
+        queueRequestFenceRef.current,
+        connectionFence,
+        queueRevisionRef.current,
+        snapshot.revision,
+        mode,
+      )
+    ) return false;
+    queueRevisionRef.current = snapshot.revision;
+    const overlayNative = nativeQueuedCount ?? snapshot.nativeQueuedCount;
+    setQueuedMessages({
+      ...snapshot,
+      nativeQueuedCount: overlayNative,
+    });
+    return true;
+  }, [beginQueueEpoch]);
+
+  const applyNativeQueuedCount = useCallback((
+    count: number | undefined,
+    sid: string,
+    sessionLoadGeneration: number,
+    connectionFence: number,
+  ) => {
+    if (count === undefined || !hookAliveRef.current) return;
+    if (sessionIdRef.current !== sid) return;
+    if (sessionLoadGenerationRef.current !== sessionLoadGeneration) return;
+    if (queueRequestFenceRef.current !== connectionFence) return;
+    setQueuedMessages((prev) => {
+      if (prev.nativeQueuedCount === count) return prev;
+      return { ...prev, nativeQueuedCount: count };
+    });
+  }, []);
+
+  const applyQueueFromAgentState = useCallback((
+    state: AgentStateResponse | undefined,
+    sid: string,
+    sessionLoadGeneration: number,
+    connectionFence: number,
+  ) => {
+    const nativeQueuedCount = asNumber(state?.queuedMessageCount);
+    const snapshot = snapshotFromAgentState(state);
+    if (snapshot) {
+      applyQueueSnapshot(snapshot, sid, sessionLoadGeneration, connectionFence, "fetch", nativeQueuedCount);
+      return;
+    }
+    applyNativeQueuedCount(nativeQueuedCount, sid, sessionLoadGeneration, connectionFence);
+  }, [applyNativeQueuedCount, applyQueueSnapshot]);
+
+  const fetchMessageQueue = useCallback(async (sid: string) => {
+    const sessionLoadGeneration = sessionLoadGenerationRef.current;
+    const runtimeLoadGeneration = runtimeLoadGenerationRef.current;
+    const connectionFence = queueRequestFenceRef.current;
+    try {
+      const data = await sendAgentCommand<unknown>(sid, { type: "get_message_queue" });
+      if (
+        !hookAliveRef.current
+        || !matchesSessionLoadGeneration(sessionIdRef.current, sid, sessionLoadGenerationRef.current, sessionLoadGeneration)
+        || runtimeLoadGenerationRef.current !== runtimeLoadGeneration
+        || queueRequestFenceRef.current !== connectionFence
+      ) return;
+      const result = unwrapQueueCommandResult(data);
+      if (result) applyQueueSnapshot(result.queue, sid, sessionLoadGeneration, connectionFence, "fetch");
+    } catch {
+      // Older runtimes without get_message_queue keep get_state's native count.
+    }
+  }, [applyQueueSnapshot]);
+
   const applyLoadedAgentState = useCallback((
     sid: string,
     agentState: { running: boolean; state?: AgentStateResponse },
@@ -1294,19 +1343,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (liveState.extensionStatuses !== undefined) setExtensionStatuses(liveState.extensionStatuses ?? []);
       if (liveState.extensionWidgets !== undefined) setExtensionWidgets(liveState.extensionWidgets ?? []);
       if (liveState.todoPhases !== undefined) setTodoPhases(liveState.todoPhases ?? []);
-      if (liveState.queuedMessageCount === 0 && Date.now() - queueMutatedAtRef.current >= 5000) setQueuedMessages(EMPTY_QUEUE);
+      applyQueueFromAgentState(liveState, sid, sessionLoadGeneration, queueRequestFenceRef.current);
     } else {
       // No live wrapper: the ring and compaction state must not freeze on the
       // last live snapshot. The derived message usage remains authoritative.
+      // Native queuedMessageCount is not a list and must not be wiped here;
+      // the next get_state / get_message_queue applies the overlay.
       setContextUsage(null);
       isCompactingRef.current = false;
       setIsCompacting(false);
-      if (!agentState.running && Date.now() - queueMutatedAtRef.current >= 5000) setQueuedMessages(EMPTY_QUEUE);
     }
     updateRuntimeReadiness(sid, runtimeLoadGeneration, { runtime: "ready" });
     setRuntimeError(null);
     return true;
-  }, [applyAuthoritativeModel, setContextUsage, updateRuntimeReadiness, applySnapshotThinkingLevel]);
+  }, [applyAuthoritativeModel, applyQueueFromAgentState, setContextUsage, updateRuntimeReadiness, applySnapshotThinkingLevel]);
 
   const loadRuntimeStateForGeneration = useCallback(async (
     sid: string,
@@ -1578,7 +1628,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (!eventConnectionManager.isCurrent(sid, source)) return;
         try {
           const event = JSON.parse(eventMessage.data) as AgentEvent;
-          if (event.type === "connected") eventConnectionManager.markConnected(sid, source);
+          if (event.type === "connected") {
+            eventConnectionManager.markConnected(sid, source);
+            beginQueueEpoch();
+            void fetchMessageQueue(sid);
+          }
           if (event.type === "session_closed") {
             // The server-side RPC wrapper was intentionally disposed (idle
             // timeout, update restart, or teardown). Flush any preceding
@@ -1599,7 +1653,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       };
     }
     return readiness;
-  }, [eventCoalescer, eventConnectionManager]);
+  }, [beginQueueEpoch, eventCoalescer, eventConnectionManager, fetchMessageQueue]);
   connectEventsRef.current = connectEvents;
 
   const respondToExtensionUi = useCallback(async (
@@ -1696,6 +1750,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     void registerHostTools(sid);
     void registerHostUriSchemes(sid);
     void refreshSubagentRoster(sid);
+    beginQueueEpoch();
+    void fetchMessageQueue(sid);
   };
 
   /** Answer a host_tool_call with a toolResult payload. */
@@ -2108,13 +2164,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setBashRunning(true);
       void waitForBashSettlement(sid);
     }
-    if (liveState?.queuedMessageCount === 0) {
-      clearPersistedQueue(sid);
-    } else if (typeof liveState?.queuedMessageCount === "number") {
-      const persisted = readPersistedQueue(sid);
-      if (persisted) setQueuedMessages((prev) => (isEmptyQueue(prev) ? persisted : prev));
-    }
-  }, [connectEvents, registerHostTools, registerHostUriSchemes, scheduleInitialRosterRefresh, waitForBashSettlement, waitForPromptSettlement]);
+    if (liveState) applyQueueFromAgentState(liveState, sid, sessionLoadGenerationRef.current, queueRequestFenceRef.current);
+    void fetchMessageQueue(sid);
+  }, [applyQueueFromAgentState, connectEvents, fetchMessageQueue, registerHostTools, registerHostUriSchemes, scheduleInitialRosterRefresh, waitForBashSettlement, waitForPromptSettlement]);
 
   const retryRuntimeState = useCallback(async () => {
     const sid = sessionIdRef.current;
@@ -2158,9 +2210,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setIsCompacting(state?.isCompacting ?? false);
       // Also mid-run: this poll is the only todo-phase refresh while streaming.
       if (state?.todoPhases !== undefined) setTodoPhases(state.todoPhases ?? []);
+      applyQueueFromAgentState(state, sid, sessionLoadGenerationRef.current, queueRequestFenceRef.current);
       // And the only reliable re-sync for a missed subagent lifecycle frame.
       void refreshSubagentRoster(sid);
-      if ((!state || state.queuedMessageCount === 0) && Date.now() - queueMutatedAtRef.current >= 5000) setQueuedMessages(EMPTY_QUEUE);
       const busy = data.running && state
         && (state.isStreaming || state.isPromptRunning || state.isCompacting);
       if (busy || !agentRunningRef.current) return;
@@ -2178,7 +2230,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch {
       // Network still down — the next poll / visibility / online tick retries.
     }
-  }, [canMutateSession, finishPromptWithoutStream, refreshSubagentRoster, setContextUsage]);
+  }, [applyQueueFromAgentState, canMutateSession, finishPromptWithoutStream, refreshSubagentRoster, setContextUsage]);
 
   // Recovery net for missed SSE events: while the agent is running, verify
   // against the server periodically and whenever the tab returns to the
@@ -2248,60 +2300,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   useEffect(() => {
     agentRunningRef.current = agentRunning;
   }, [agentRunning]);
-
-  const consumeQueuedMessage = useCallback((text: string) => {
-    if (!text) return;
-    setQueuedMessages((prev) => {
-      const si = prev.steering.indexOf(text);
-      if (si !== -1) return { ...prev, steering: prev.steering.filter((_, i) => i !== si) };
-      const fi = prev.followUp.indexOf(text);
-      if (fi !== -1) return { ...prev, followUp: prev.followUp.filter((_, i) => i !== fi) };
-      return prev;
-    });
-  }, []);
-
-  /** Remove one queued message from the client-side queue mirror. omp's RPC
-   *  protocol has no queue-mutation commands, so this only affects the queue
-   *  panel: a message removed here may still be delivered by the running agent
-   *  (it then arrives in the chat like any delivered turn). */
-  const removeQueuedMessage = useCallback((text: string) => {
-    if (!text || !canMutateSession()) return;
-    setQueuedMessages((prev) => {
-      const si = prev.steering.indexOf(text);
-      const fi = prev.followUp.indexOf(text);
-      if (si === -1 && fi === -1) return prev;
-      return {
-        steering: si === -1 ? prev.steering : prev.steering.filter((_, i) => i !== si),
-        followUp: fi === -1 ? prev.followUp : prev.followUp.filter((_, i) => i !== fi),
-      };
-    });
-  }, [canMutateSession]);
-
-  /** Promote the first queued follow-up to a steering message (client-side
-   *  relabel; the delivery order itself is owned by omp). */
-  const promoteQueuedToSteer = useCallback((text: string) => {
-    if (!text || !canMutateSession()) return;
-    setQueuedMessages((prev) => {
-      const fi = prev.followUp.indexOf(text);
-      if (fi === -1) return prev;
-      return {
-        steering: [...prev.steering, text],
-        followUp: prev.followUp.filter((_, i) => i !== fi),
-      };
-    });
-  }, [canMutateSession]);
-
-  // Mirror queued texts into sessionStorage so a reload can restore them.
-  // The dirty gate keeps the initial empty state from wiping a stored queue
-  // before the mount-time restore has run.
-  useEffect(() => {
-    const sid = sessionIdRef.current;
-    if (!sid) return;
-    const empty = isEmptyQueue(queuedMessages);
-    if (empty && !queuePersistDirtyRef.current) return;
-    queuePersistDirtyRef.current = !empty;
-    persistQueue(sid, queuedMessages);
-  }, [queuedMessages]);
 
   const handleAgentEvent = useCallback((event: AgentEvent) => {
     switch (event.type) {
@@ -2395,13 +2393,27 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               if (d.state?.extensionStatuses !== undefined) setExtensionStatuses(d.state.extensionStatuses ?? []);
               if (d.state?.extensionWidgets !== undefined) setExtensionWidgets(d.state.extensionWidgets ?? []);
               if (d.state?.todoPhases !== undefined) setTodoPhases(d.state.todoPhases ?? []);
-              // omp reports only a queued count; an empty (or dead) session
-              // means the client-tracked queue texts are stale.
-              if ((!d.state || d.state.queuedMessageCount === 0) && Date.now() - queueMutatedAtRef.current >= 5000) setQueuedMessages(EMPTY_QUEUE);
+              applyQueueFromAgentState(d.state, endedSid, sessionLoadGenerationRef.current, queueRequestFenceRef.current);
+              void fetchMessageQueue(endedSid);
             })
             .catch(() => {});
         }
         onAgentEnd?.();
+        break;
+      }
+      case "message_queue_update": {
+        const sid = sessionIdRef.current;
+        if (!sid) break;
+        const snapshot = parseMessageQueueSnapshot(event.queue);
+        if (snapshot) {
+          applyQueueSnapshot(
+            snapshot,
+            sid,
+            sessionLoadGenerationRef.current,
+            queueRequestFenceRef.current,
+            "event",
+          );
+        }
         break;
       }
       case "prompt_result":
@@ -2548,8 +2560,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           const deliveredKey = userMessageKey(delivered);
           const optimisticKey = optimisticUserMessageKeyRef.current;
           optimisticUserMessageKeyRef.current = null;
-          // Delivered steering/follow-up texts leave the client-tracked queue.
-          consumeQueuedMessage(extractMessageText(delivered));
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             if (optimisticKey && last?.role === "user" && userMessageKey(last) === optimisticKey) {
@@ -2856,7 +2866,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         handleExtensionUiRequest(event as unknown as IncomingExtensionUiRequest);
         break;
     }
-  }, [addNotice, consumeQueuedMessage, finishPromptWithoutStream, handleExtensionUiRequest, handleHostToolCall, handleHostUriRequest, loadSession, mergeSubagents, onAgentEnd, reconcileAgentState, applyAuthoritativeModel, beginAuthoritativeModelSync, refreshSubagentHistory, setContextUsage, applySnapshotThinkingLevel, setThinkingLevelTracked]);
+  }, [addNotice, applyQueueFromAgentState, applyQueueSnapshot, fetchMessageQueue, finishPromptWithoutStream, handleExtensionUiRequest, handleHostToolCall, handleHostUriRequest, loadSession, mergeSubagents, onAgentEnd, reconcileAgentState, applyAuthoritativeModel, beginAuthoritativeModelSync, refreshSubagentHistory, setContextUsage, applySnapshotThinkingLevel, setThinkingLevelTracked]);
   handleAgentEventRef.current = handleAgentEvent;
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]): Promise<boolean> => {
@@ -3461,31 +3471,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // the real user message when pi delivers it (user message_end event). An
   // optimistic chat bubble here would duplicate the queue panel and turn into
   // a ghost message if the queue is recalled.
-  const toPiImages = (images?: AttachedImage[]) => images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
-  const handleSteer = useCallback(async (message: string, images?: AttachedImage[]) => {
-    const sid = sessionIdRef.current;
-    if (!sid || !canMutateSession(sid)) return;
-    const piImages = toPiImages(images);
-    try {
-      await sendAgentCommand(sid, {
-        // Use prompt's streaming path so omp applies magic-keyword notices
-        // before queueing the user message (direct steer bypasses that hook).
-        type: "prompt",
-        message,
-        streamingBehavior: "steer",
-        ...(piImages?.length ? { images: piImages } : {}),
-      });
-      // omp emits no queue snapshots; track the queued text locally until it
-      // is delivered (user message_end) or the queue count drops to zero.
-      queueMutatedAtRef.current = Date.now();
-      setQueuedMessages((prev) => ({ ...prev, steering: [...prev.steering, message] }));
-    } catch (e) {
-      console.error("Failed to steer:", e);
-      addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
-      opts.chatInputRef?.current?.insertIfEmpty(message);
-    }
-  }, [addNotice, canMutateSession, opts.chatInputRef]);
-
   const handlePromptWithStreamingBehavior = useCallback(async (
     message: string,
     behavior: "steer" | "followUp",
@@ -3493,46 +3478,155 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   ) => {
     const sid = sessionIdRef.current;
     if (!sid || !canMutateSession(sid)) return;
-    const piImages = toPiImages(images);
+    if (images && images.length > 0) {
+      addNotice({ type: "error", message: translate("chatInput.imagesCannotQueue") });
+      opts.chatInputRef?.current?.insertIfEmpty(message);
+      return;
+    }
+    const lane: MessageQueueLane = behavior === "steer" ? "steer" : "followUp";
+    setQueueEnqueuePending(true);
     try {
-      await sendAgentCommand(sid, {
-        type: "prompt",
+      await ensureEventsConnected(sid);
+      const sessionLoadGeneration = sessionLoadGenerationRef.current;
+      const connectionFence = queueRequestFenceRef.current;
+      if (
+        !matchesSessionLoadGeneration(sessionIdRef.current, sid, sessionLoadGenerationRef.current, sessionLoadGeneration)
+        || !canMutateSession(sid)
+      ) return;
+      const data = await sendAgentCommand<unknown>(sid, {
+        type: "enqueue_message",
         message,
-        streamingBehavior: behavior,
-        ...(piImages?.length ? { images: piImages } : {}),
+        lane,
       });
-      queueMutatedAtRef.current = Date.now();
-      setQueuedMessages((prev) => behavior === "steer"
-        ? { ...prev, steering: [...prev.steering, message] }
-        : { ...prev, followUp: [...prev.followUp, message] });
+      if (queueRequestFenceRef.current !== connectionFence) {
+        void fetchMessageQueue(sid);
+        return;
+      }
+      const result = unwrapQueueCommandResult(data);
+      if (result) applyQueueSnapshot(result.queue, sid, sessionLoadGeneration, connectionFence, "fetch");
+      else await fetchMessageQueue(sid);
     } catch (e) {
       console.error("Failed to queue prompt:", e);
       addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
       opts.chatInputRef?.current?.insertIfEmpty(message);
+      void fetchMessageQueue(sid);
+    } finally {
+      setQueueEnqueuePending(false);
     }
-  }, [addNotice, canMutateSession, opts.chatInputRef]);
+  }, [addNotice, applyQueueSnapshot, canMutateSession, ensureEventsConnected, fetchMessageQueue, opts.chatInputRef]);
 
-  const handleFollowUp = useCallback(async (message: string, images?: AttachedImage[]) => {
+  const failQueueMutation = useCallback((sid: string, error: unknown) => {
+    addNotice({
+      type: "error",
+      message: error instanceof Error ? error.message : translate("chatInput.queuedOpFailed"),
+    });
+    void fetchMessageQueue(sid);
+  }, [addNotice, fetchMessageQueue]);
+
+  const handleRecallQueuedMessage = useCallback(async (id: string): Promise<string | null> => {
     const sid = sessionIdRef.current;
-    if (!sid || !canMutateSession(sid)) return;
-    const piImages = toPiImages(images);
-    try {
-      await sendAgentCommand(sid, {
-        // Keep queued follow-ups on omp's prompt path so magic-keyword
-        // notices are added before the user message enters the queue.
-        type: "prompt",
-        message,
-        streamingBehavior: "followUp",
-        ...(piImages?.length ? { images: piImages } : {}),
-      });
-      queueMutatedAtRef.current = Date.now();
-      setQueuedMessages((prev) => ({ ...prev, followUp: [...prev.followUp, message] }));
-    } catch (e) {
-      console.error("Failed to follow up:", e);
-      addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
-      opts.chatInputRef?.current?.insertIfEmpty(message);
+    if (!sid || !id || !canMutateSession(sid)) return null;
+    const sessionLoadGeneration = sessionLoadGenerationRef.current;
+    const connectionFence = queueRequestFenceRef.current;
+    const expectedRevision = queueRevisionRef.current;
+    if (expectedRevision < 0) {
+      failQueueMutation(sid, new Error(translate("chatInput.queuedOpFailed")));
+      return null;
     }
-  }, [addNotice, canMutateSession, opts.chatInputRef]);
+    try {
+      const data = await sendAgentCommand<unknown>(sid, {
+        type: "recall_queued_message",
+        id,
+        expectedRevision,
+      });
+      if (
+        !matchesSessionLoadGeneration(sessionIdRef.current, sid, sessionLoadGenerationRef.current, sessionLoadGeneration)
+        || queueRequestFenceRef.current !== connectionFence
+      ) {
+        return null;
+      }
+      const result = parseRecallQueuedMessageResult(data);
+      if (!result) {
+        failQueueMutation(sid, new Error(translate("chatInput.queuedOpFailed")));
+        return null;
+      }
+      applyQueueSnapshot(result.queue, sid, sessionLoadGeneration, connectionFence, "fetch");
+      return result.recalled.text;
+    } catch (e) {
+      failQueueMutation(sid, e);
+      return null;
+    }
+  }, [applyQueueSnapshot, canMutateSession, failQueueMutation]);
+
+  const handleDeleteQueuedMessage = useCallback(async (id: string): Promise<boolean> => {
+    const sid = sessionIdRef.current;
+    if (!sid || !id || !canMutateSession(sid)) return false;
+    const sessionLoadGeneration = sessionLoadGenerationRef.current;
+    const connectionFence = queueRequestFenceRef.current;
+    const expectedRevision = queueRevisionRef.current;
+    if (expectedRevision < 0) {
+      failQueueMutation(sid, new Error(translate("chatInput.queuedOpFailed")));
+      return false;
+    }
+    try {
+      const data = await sendAgentCommand<unknown>(sid, {
+        type: "delete_queued_message",
+        id,
+        expectedRevision,
+      });
+      if (
+        !matchesSessionLoadGeneration(sessionIdRef.current, sid, sessionLoadGenerationRef.current, sessionLoadGeneration)
+        || queueRequestFenceRef.current !== connectionFence
+      ) {
+        return false;
+      }
+      const result = unwrapQueueCommandResult(data);
+      if (!result) {
+        failQueueMutation(sid, new Error(translate("chatInput.queuedOpFailed")));
+        return false;
+      }
+      applyQueueSnapshot(result.queue, sid, sessionLoadGeneration, connectionFence, "fetch");
+      return true;
+    } catch (e) {
+      failQueueMutation(sid, e);
+      return false;
+    }
+  }, [applyQueueSnapshot, canMutateSession, failQueueMutation]);
+
+  const handlePromoteQueuedMessage = useCallback(async (id: string): Promise<boolean> => {
+    const sid = sessionIdRef.current;
+    if (!sid || !id || !canMutateSession(sid)) return false;
+    const sessionLoadGeneration = sessionLoadGenerationRef.current;
+    const connectionFence = queueRequestFenceRef.current;
+    const expectedRevision = queueRevisionRef.current;
+    if (expectedRevision < 0) {
+      failQueueMutation(sid, new Error(translate("chatInput.queuedOpFailed")));
+      return false;
+    }
+    try {
+      const data = await sendAgentCommand<unknown>(sid, {
+        type: "promote_queued_message",
+        id,
+        expectedRevision,
+      });
+      if (
+        !matchesSessionLoadGeneration(sessionIdRef.current, sid, sessionLoadGenerationRef.current, sessionLoadGeneration)
+        || queueRequestFenceRef.current !== connectionFence
+      ) {
+        return false;
+      }
+      const result = unwrapQueueCommandResult(data);
+      if (!result) {
+        failQueueMutation(sid, new Error(translate("chatInput.queuedOpFailed")));
+        return false;
+      }
+      applyQueueSnapshot(result.queue, sid, sessionLoadGeneration, connectionFence, "fetch");
+      return true;
+    } catch (e) {
+      failQueueMutation(sid, e);
+      return false;
+    }
+  }, [applyQueueSnapshot, canMutateSession, failQueueMutation]);
 
   const handleAbortCompaction = useCallback(async () => {
     const sid = sessionIdRef.current;
@@ -3647,6 +3741,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
     subagentVersionFlushRef.current = null;
     subagentActivityFlushRef.current = null;
+    queueRequestFenceRef.current += 1;
+    queueRevisionRef.current = -1;
+    setQueuedMessages(resetQueueSnapshot());
+    setQueueEnqueuePending(false);
   }, [eventConnectionManager]);
 
   // Keep callback identities out of this lifecycle boundary. In particular,
@@ -3894,7 +3992,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     liveModelMeta,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, compactResult, currentModel, displayModel, sessionStats,
-    slashCommands, slashCommandsLoading, queuedMessages,
+    slashCommands, slashCommandsLoading, queuedMessages, queueEnqueuePending,
     notices: noticeState.visible, dismissNotice, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
     isAutoModelSelection: isNew && newSessionModel === null,
     agentPhase,
@@ -3906,8 +4004,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     pendingScrollToUserRef, initialScrollDoneRef,
     // Actions
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange, handleFastModeChange, handleAutoRetryChange, handleInterruptModeChange, handleAutoCompactionChange, handleSteeringModeChange, handleFollowUpModeChange, handleCycleModel, handleCycleThinkingLevel, handleAbortRetry, handleInterruptAndReply,
-    handleCompact, handleHandoff, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction, retryRuntimeState,
-    removeQueuedMessage, promoteQueuedToSteer,
+    handleCompact, handleHandoff, handlePromptWithStreamingBehavior, handleAbortCompaction, retryRuntimeState,
+    handleRecallQueuedMessage, handleDeleteQueuedMessage, handlePromoteQueuedMessage,
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands, setActiveLeafId, setData, setMessages,
     dispatch, setAgentRunning, setForkingEntryId,

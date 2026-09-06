@@ -1,5 +1,6 @@
 apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
+apply plugin: 'org.jetbrains.kotlin.plugin.compose'
 
 def releaseSigningPropertiesFile = System.getenv('OMPGUI_ANDROID_SIGNING_PROPERTIES')
     ? file(System.getenv('OMPGUI_ANDROID_SIGNING_PROPERTIES'))
@@ -9,20 +10,63 @@ if (releaseSigningPropertiesFile.exists()) {
     releaseSigningPropertiesFile.withInputStream { releaseSigningProperties.load(it) }
 }
 
+def parityPreviewAssets = layout.buildDirectory.dir('generated/parityPreviewAssets')
+def previewAssetScript = rootProject.file('scripts/prepare-preview-assets.mjs')
+def previewNodeModules = rootProject.file('../node_modules')
+def previewNodeExecutable = providers.gradleProperty('nodeExecutable')
+    .orElse(providers.environmentVariable('NODE_BINARY'))
+    .orElse('node')
+
+def prepareParityPreviewAssets = tasks.register('prepareParityPreviewAssets', Exec) {
+    group = 'build'
+    description = 'Bundle installed Mermaid and Prism assets for offline native previews'
+    workingDir rootProject.projectDir
+    executable previewNodeExecutable.get()
+    args previewAssetScript.absolutePath, parityPreviewAssets.get().asFile.absolutePath
+    inputs.property('nodeExecutable', previewNodeExecutable)
+    inputs.file(previewAssetScript)
+    inputs.files(fileTree(previewNodeModules) {
+        include 'mermaid/package.json', 'mermaid/LICENSE', 'mermaid/dist/mermaid.min.js'
+        include 'prismjs/package.json', 'prismjs/LICENSE', 'prismjs/components.json', 'prismjs/dependencies.js'
+        include 'prismjs/components/prism-*.min.js'
+    }).withPathSensitivity(PathSensitivity.RELATIVE)
+    outputs.files(
+        parityPreviewAssets.map { it.file('preview/mermaid.min.js') },
+        parityPreviewAssets.map { it.file('preview/prism.min.js') }
+    )
+}
+
+tasks.named('preBuild').configure {
+    dependsOn prepareParityPreviewAssets
+}
+
 android {
+    sourceSets {
+        main.assets.srcDir(parityPreviewAssets)
+    }
     namespace = "com.dbchbin.ompgui.remote"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
         applicationId "com.dbchbin.ompgui.remote"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 605
-        versionName "0.6.5"
+        versionCode 700
+        versionName "0.7.0"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
+    }
+    buildFeatures {
+        compose true
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+    kotlinOptions {
+        jvmTarget = '21'
     }
     signingConfigs {
         if (releaseSigningPropertiesFile.exists()) {
@@ -55,25 +99,34 @@ gradle.taskGraph.whenReady { graph ->
     }
 }
 
-repositories {
-    flatDir{
-        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
-    }
-}
-
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.activity:activity-ktx:$androidxActivityVersion"
+    implementation "androidx.activity:activity-compose:$androidxActivityVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation "androidx.lifecycle:lifecycle-runtime-ktx:$lifecycleVersion"
+    implementation "androidx.lifecycle:lifecycle-runtime-compose:$lifecycleVersion"
+    implementation "androidx.lifecycle:lifecycle-viewmodel-compose:$lifecycleVersion"
+    implementation "androidx.lifecycle:lifecycle-process:$lifecycleVersion"
+    implementation "androidx.security:security-crypto:$securityCryptoVersion"
     implementation "org.jetbrains.kotlin:kotlin-stdlib"
-    implementation project(':capacitor-android')
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:$coroutinesVersion"
+    implementation "com.squareup.okhttp3:okhttp:$okhttpVersion"
+    implementation "androidx.camera:camera-core:$cameraxVersion"
+    implementation "androidx.camera:camera-camera2:$cameraxVersion"
+    implementation "androidx.camera:camera-lifecycle:$cameraxVersion"
+    implementation "androidx.camera:camera-view:$cameraxVersion"
+    implementation "com.google.mlkit:barcode-scanning:17.3.0"
+    implementation platform("androidx.compose:compose-bom:$composeBomVersion")
+    implementation "androidx.compose.ui:ui"
+    implementation "androidx.compose.ui:ui-tooling-preview"
+    implementation "androidx.compose.material3:material3"
+    implementation "androidx.compose.material:material-icons-extended"
+    debugImplementation "androidx.compose.ui:ui-tooling"
     testImplementation "junit:junit:$junitVersion"
     testImplementation "org.json:json:20240303"
-    implementation project(':capacitor-cordova-android-plugins')
 }
-
-apply from: 'capacitor.build.gradle'
 
 try {
     def servicesJSON = file('google-services.json')

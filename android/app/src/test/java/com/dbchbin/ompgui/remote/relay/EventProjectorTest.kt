@@ -1,0 +1,101 @@
+package com.dbchbin.ompgui.remote.relay
+
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class EventProjectorTest {
+    @Test
+    fun finalMessageWithoutStreamingUpdatesStillAppearsAfterUser() {
+        val current = listOf(DisplayMessage(role = "user", text = "question"))
+        val event = JSONObject().put("type", "message_end").put(
+            "message", JSONObject().put("role", "assistant").put("text", "answer"),
+        )
+        val result = EventProjector.applyMessages(current, event)
+        assertEquals(listOf("question", "answer"), result.map { it.text })
+        assertFalse(result.last().streaming)
+    }
+
+    @Test
+    fun streamedLongResponseRemainsAvailableAfterFinalEvent() {
+        val text = "x".repeat(8_000) + " final paragraph"
+        val message = JSONObject().put("role", "assistant").put("text", text)
+        val streaming = EventProjector.applyMessages(emptyList(), JSONObject().put("type", "message_update").put("message", message))
+        val completed = EventProjector.applyMessages(streaming, JSONObject().put("type", "message_end").put("message", message))
+        assertEquals(text, completed.single().text)
+        assertFalse(completed.single().streaming)
+    }
+
+    @Test
+    fun replacesStreamingAssistantThenFreezesOnEnd() {
+        val start = JSONObject(
+            """{"type":"message_update","message":{"role":"assistant","content":[{"type":"text","text":"Hel"}]}}""",
+        )
+        val next = JSONObject(
+            """{"type":"message_update","message":{"role":"assistant","text":"Hello"}}""",
+        )
+        val end = JSONObject(
+            """{"type":"message_end","message":{"role":"assistant","text":"Hello!"}}""",
+        )
+        val afterStart = EventProjector.applyMessages(emptyList(), start)
+        assertEquals(1, afterStart.size)
+        assertTrue(afterStart[0].streaming)
+        assertEquals("Hel", afterStart[0].text)
+
+        val afterNext = EventProjector.applyMessages(afterStart, next)
+        assertEquals(1, afterNext.size)
+        assertEquals("Hello", afterNext[0].text)
+        assertTrue(afterNext[0].streaming)
+
+        val frozen = EventProjector.applyMessages(afterNext, end)
+        assertEquals("Hello!", frozen[0].text)
+        assertFalse(frozen[0].streaming)
+    }
+
+    @Test
+    fun runningFlagFollowsAgentLifecycle() {
+        assertTrue(EventProjector.applyRunning(false, JSONObject("""{"type":"agent_start"}""")))
+        assertTrue(EventProjector.applyRunning(true, JSONObject("""{"type":"agent_end","isTerminal":false}""")))
+        assertFalse(EventProjector.applyRunning(true, JSONObject("""{"type":"agent_end"}""")))
+        assertFalse(EventProjector.applyRunning(true, JSONObject("""{"type":"session_closed"}""")))
+    }
+
+    @Test
+    fun terminalStopFiresOnlyWhenRunning() {
+        assertTrue(
+            EventProjector.isTerminalStop(true, JSONObject("""{"type":"agent_end"}""")),
+        )
+        assertTrue(
+            EventProjector.isTerminalStop(true, JSONObject("""{"type":"session_closed"}""")),
+        )
+        // Non-terminal agent_end (streaming chunk done) is not a stop.
+        assertFalse(
+            EventProjector.isTerminalStop(true, JSONObject("""{"type":"agent_end","isTerminal":false}""")),
+        )
+        // Duplicate/late terminal events when nothing runs must not notify.
+        assertFalse(
+            EventProjector.isTerminalStop(false, JSONObject("""{"type":"agent_end"}""")),
+        )
+        assertFalse(
+            EventProjector.isTerminalStop(false, JSONObject("""{"type":"session_closed"}""")),
+        )
+        assertFalse(
+            EventProjector.isTerminalStop(true, JSONObject("""{"type":"agent_start"}""")),
+        )
+    }
+
+    @Test
+    fun userPromptAppearsOnlyOnDeliveryAndIdenticalSuccessivePromptsRemainDistinct() {
+        val message = JSONObject().put("role", "user").put("text", "again")
+        val start = JSONObject().put("type", "message_start").put("message", message)
+        val end = JSONObject().put("type", "message_end").put("message", message)
+        val started = EventProjector.applyMessages(emptyList(), start)
+        assertEquals(emptyList<DisplayMessage>(), started)
+        val delivered = EventProjector.applyMessages(started, end)
+        assertEquals(listOf("again"), delivered.map { it.text })
+        val second = EventProjector.applyMessages(EventProjector.applyMessages(delivered, start), end)
+        assertEquals(listOf("again", "again"), second.map { it.text })
+    }
+}

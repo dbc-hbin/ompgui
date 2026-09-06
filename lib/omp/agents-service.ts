@@ -3,7 +3,10 @@ import path from "path";
 import { parseDocument, stringify } from "yaml";
 import { getAgentDir } from "./paths";
 import { readNativeSettings } from "./settings-config";
-import { getAllowedFileRoots, isExistingFilePathAllowed, isFilePathAllowed } from "../file-access";
+import { getAllowedFileRoots, isExistingFilePathAllowed } from "../file-access";
+
+import { isPathWithinRoots, resolvePathWithMissingLeaf } from "../path-security";
+import { writeConfigFileAtomic } from "./config-file";
 
 export type AgentSource = "bundled" | "user" | "project" | "extension";
 
@@ -151,10 +154,13 @@ export function findProjectAgentsDir(cwd: string): string | null {
   let current = path.resolve(cwd);
   while (true) {
     const agentsDir = path.join(current, ".omp", "agents");
-    if (existsSync(agentsDir)) return agentsDir;
-
     const ompDir = path.join(current, ".omp");
-    if (existsSync(ompDir)) return agentsDir; // If .omp exists, project agents go into .omp/agents
+    if (existsSync(agentsDir) || existsSync(ompDir)) {
+      if (!isPathWithinRoots(resolvePathWithMissingLeaf(agentsDir), new Set([resolvePathWithMissingLeaf(current)]))) {
+        throw new Error(`Access denied to project agents directory: ${agentsDir}`);
+      }
+      return agentsDir;
+    }
 
     const parent = path.dirname(current);
     if (parent === current) return null;
@@ -256,48 +262,32 @@ export async function discoverAgents(cwd: string = process.cwd()): Promise<{
   };
 }
 
-async function resolveTargetFilePath(params: {
-  scope: "user" | "project";
-  name: string;
-  cwd?: string;
-}): Promise<string> {
-  if (!validateAgentIdentifier(params.name)) {
-    throw new Error(`Invalid agent identifier: "${params.name}"`);
-  }
-
+async function resolveTargetDirectory(params: { scope: "user" | "project"; cwd?: string }): Promise<string> {
   let dir: string;
+  let root: string;
   if (params.scope === "user") {
+    root = resolvePathWithMissingLeaf(getAgentDir());
     dir = getUserAgentsDir();
   } else {
     const cwd = params.cwd || process.cwd();
     const roots = await getAllowedFileRoots();
-    if (!isExistingFilePathAllowed(cwd, roots)) {
-      throw new Error(`Access denied to project path: ${cwd}`);
-    }
-    const projectAgents = findProjectAgentsDir(cwd);
-    dir = projectAgents || path.join(path.resolve(cwd), ".omp", "agents");
-
-    if (existsSync(dir)) {
-      const realDir = await fs.realpath(dir);
-      if (!isExistingFilePathAllowed(realDir, roots)) {
-        throw new Error(`Access denied to project agents directory: ${dir}`);
-      }
-      dir = realDir;
-    } else {
-      if (!isFilePathAllowed(dir, roots)) {
-        throw new Error(`Access denied to project agents directory: ${dir}`);
-      }
-    }
+    if (!isExistingFilePathAllowed(cwd, roots)) throw new Error(`Access denied to project path: ${cwd}`);
+    dir = findProjectAgentsDir(cwd) || path.join(path.resolve(cwd), ".omp", "agents");
+    root = await fs.realpath(path.dirname(path.dirname(dir)));
+    if (!isExistingFilePathAllowed(root, roots)) throw new Error(`Access denied to project root: ${root}`);
   }
+  const target = resolvePathWithMissingLeaf(dir);
+  if (!isPathWithinRoots(target, new Set([root]))) throw new Error(`Access denied to agents directory: ${dir}`);
+  return target;
+}
 
+async function resolveTargetFilePath(params: { scope: "user" | "project"; name: string; cwd?: string }): Promise<string> {
+  if (!validateAgentIdentifier(params.name)) throw new Error(`Invalid agent identifier: "${params.name}"`);
+  const dir = await resolveTargetDirectory(params);
+  const target = resolvePathWithMissingLeaf(path.join(dir, `${params.name}.md`));
+  if (!isPathWithinRoots(target, new Set([dir]))) throw new Error(`Access denied to target agent file: ${target}`);
   await fs.mkdir(dir, { recursive: true });
-  const targetPath = path.join(dir, `${params.name}.md`);
-  if (params.scope === "project" && existsSync(targetPath)) {
-    const realTarget = await fs.realpath(targetPath);
-    const roots = await getAllowedFileRoots();
-    if (!isExistingFilePathAllowed(realTarget, roots)) throw new Error(`Access denied to target agent file: ${targetPath}`);
-  }
-  return targetPath;
+  return target;
 }
 
 function serializeAgentMarkdown(params: {
@@ -306,6 +296,7 @@ function serializeAgentMarkdown(params: {
   tools?: string[];
   model?: string | string[];
   thinkingLevel?: string;
+  blocking?: boolean;
   prewalk?: boolean | string;
   advisor?: boolean | string;
   systemPrompt?: string;
@@ -324,7 +315,7 @@ function serializeAgentMarkdown(params: {
 
   // Preserve any extra frontmatter keys
   for (const [k, v] of Object.entries(params)) {
-    if (k !== "name" && k !== "description" && k !== "tools" && k !== "model" && k !== "thinkingLevel" && k !== "prewalk" && k !== "advisor" && k !== "systemPrompt" && v !== undefined) {
+    if (k !== "name" && k !== "description" && k !== "tools" && k !== "model" && k !== "thinkingLevel" && k !== "prewalk" && k !== "advisor" && k !== "systemPrompt" && !["scope", "cwd", "source", "filePath", "isShadowed", "overrideModel", "prewalkOverride", "advisorOverride", "disabled"].includes(k) && v !== undefined) {
       frontmatterObj[k] = v;
     }
   }
@@ -342,6 +333,7 @@ export async function createAgent(params: {
   tools?: string[];
   model?: string | string[];
   thinkingLevel?: string;
+  blocking?: boolean;
   prewalk?: boolean | string;
   advisor?: boolean | string;
   systemPrompt: string;
@@ -353,9 +345,7 @@ export async function createAgent(params: {
   }
 
   const content = serializeAgentMarkdown(params);
-  const tempPath = `${targetPath}.${Date.now()}.tmp`;
-  await fs.writeFile(tempPath, content, { encoding: "utf8", mode: 0o600 });
-  await fs.rename(tempPath, targetPath);
+  writeConfigFileAtomic(targetPath, content);
   return targetPath;
 }
 
@@ -366,6 +356,7 @@ export async function updateAgent(params: {
   tools?: string[];
   model?: string | string[];
   thinkingLevel?: string;
+  blocking?: boolean;
   prewalk?: boolean | string;
   advisor?: boolean | string;
   systemPrompt?: string;
@@ -386,14 +377,13 @@ export async function updateAgent(params: {
     tools: params.tools ?? parsed.tools,
     model: params.model ?? parsed.model,
     thinkingLevel: params.thinkingLevel ?? parsed.thinkingLevel,
+    blocking: params.blocking ?? parsed.blocking,
     prewalk: params.prewalk ?? parsed.prewalk,
     advisor: params.advisor ?? parsed.advisor,
     systemPrompt: params.systemPrompt ?? parsed.systemPrompt,
   });
 
-  const tempPath = `${targetPath}.${Date.now()}.tmp`;
-  await fs.writeFile(tempPath, updatedContent, { encoding: "utf8", mode: 0o600 });
-  await fs.rename(tempPath, targetPath);
+  writeConfigFileAtomic(targetPath, updatedContent);
   return targetPath;
 }
 
@@ -415,27 +405,7 @@ export async function unpackBundledAgents(params: {
   cwd?: string;
   force?: boolean;
 }): Promise<{ targetDir: string; count: number }> {
-  let targetDir: string;
-  if (params.scope === "user") {
-    targetDir = getUserAgentsDir();
-  } else {
-    const cwd = params.cwd || process.cwd();
-    const roots = await getAllowedFileRoots();
-    if (!isExistingFilePathAllowed(cwd, roots)) {
-      throw new Error(`Access denied to project path: ${cwd}`);
-    }
-    const projectAgents = findProjectAgentsDir(cwd);
-    targetDir = projectAgents || path.join(path.resolve(cwd), ".omp", "agents");
-    if (existsSync(targetDir)) {
-      const realDir = await fs.realpath(targetDir);
-      if (!isExistingFilePathAllowed(realDir, roots)) {
-        throw new Error(`Access denied to project agents directory: ${targetDir}`);
-      }
-      targetDir = realDir;
-    } else if (!isFilePathAllowed(targetDir, roots)) {
-      throw new Error(`Access denied to project agents directory: ${targetDir}`);
-    }
-  }
+  const targetDir = await resolveTargetDirectory(params);
 
   await fs.mkdir(targetDir, { recursive: true });
 
@@ -456,9 +426,7 @@ export async function unpackBundledAgents(params: {
       systemPrompt: def.systemPrompt || "",
     });
 
-    const tempFile = `${targetFile}.${Date.now()}.tmp`;
-    await fs.writeFile(tempFile, content, { encoding: "utf8", mode: 0o600 });
-    await fs.rename(tempFile, targetFile);
+    writeConfigFileAtomic(targetFile, content);
     count++;
   }
 

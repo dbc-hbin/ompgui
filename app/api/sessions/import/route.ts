@@ -5,7 +5,6 @@ import path from "path";
 import { randomUUID } from "crypto";
 import { getSessionsDir, getSessionDirNameForCwd } from "@/lib/omp/paths";
 import { invalidateSessionListCache } from "@/lib/session-reader";
-import { invalidateSessionFileListCache } from "@/lib/omp/session-files";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 import { parseJsonWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
 const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
@@ -52,24 +51,23 @@ export async function POST(req: Request) {
       } catch {
         return null;
       }
-      if (entry && typeof entry === "object") {
-        const record = entry as { type?: unknown; cwd?: unknown; message?: unknown };
-        if (record.type === "session" && typeof record.cwd === "string") cwd = record.cwd;
-        if (record.type === "session") {
-          return JSON.stringify({ ...record, id: freshId });
-        }
-        // Imported bashExecution entries must not carry fullOutputPath: the
-        // bash-output route authorizes tmpdir files only when the session
-        // references them, and an imported file could otherwise forge a
-        // reference to any pi-bash-*.log (the referenced temp file never
-        // survives an import anyway).
-        if (record.type === "message") {
-          const message = record.message;
-          if (message && typeof message === "object" && (message as { role?: unknown }).role === "bashExecution") {
-            const safeMessage = { ...message as Record<string, unknown> };
-            delete safeMessage.fullOutputPath;
-            return JSON.stringify({ ...record, message: safeMessage });
-          }
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+      const record = entry as { type?: unknown; cwd?: unknown; message?: unknown };
+      if (record.type === "session" && typeof record.cwd === "string") cwd = record.cwd;
+      if (record.type === "session") {
+        return JSON.stringify({ ...record, id: freshId });
+      }
+      // Imported bashExecution entries must not carry fullOutputPath: the
+      // bash-output route authorizes tmpdir files only when the session
+      // references them, and an imported file could otherwise forge a
+      // reference to any pi-bash-*.log (the referenced temp file never
+      // survives an import anyway).
+      if (record.type === "message") {
+        const message = record.message;
+        if (message && typeof message === "object" && (message as { role?: unknown }).role === "bashExecution") {
+          const safeMessage = { ...message as Record<string, unknown> };
+          delete safeMessage.fullOutputPath;
+          return JSON.stringify({ ...record, message: safeMessage });
         }
       }
       return line;
@@ -94,7 +92,6 @@ export async function POST(req: Request) {
     // New session must appear immediately: clear both the list cache and the
     // mtime-keyed walk cache (the AGENTS.md-documented Windows/NTFS trap).
     invalidateSessionListCache();
-    invalidateSessionFileListCache();
 
     return NextResponse.json({ success: true, sessionFile });
   } catch (error) {

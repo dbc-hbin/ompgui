@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
-import { deleteMcpServer, parseMcpListOutput, readDiscoveredMcpServers, readMcpConfig, readUserMcpConfig, type McpLiveServer, validateMcpServer, writeMcpServer } from "@/lib/omp/mcp-config";
+import { deleteMcpServer, mergeMcpServers, parseMcpListOutput, readDiscoveredMcpServers, readMcpConfig, readUserMcpConfig, type McpLiveServer, validateMcpServer, writeMcpServer } from "@/lib/omp/mcp-config";
 import { readSessionHeader, resolveSessionPath } from "@/lib/session-reader";
 import { getRpcSession, resolveSpawnCwdResult, startRpcSession } from "@/lib/rpc-manager";
 import { parseJsonWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
@@ -12,16 +12,6 @@ const MAX_MCP_REQUEST_BYTES = 1024 * 1024;
 function mcpErrorResponse(error: unknown) {
   const status = error instanceof RequestBodyTooLargeError ? 413 : 400;
   return NextResponse.json({ error: error instanceof RequestBodyTooLargeError ? "MCP request is too large" : error instanceof Error ? error.message : String(error) }, { status });
-}
-
-function mergeMcpServers(primary: McpLiveServer[], secondary: McpLiveServer[]): McpLiveServer[] {
-  const result = [...primary];
-  const seen = new Set(primary.map((server) => `${server.source}:${server.name}`));
-  for (const server of secondary) {
-    const key = `${server.source}:${server.name}`;
-    if (!seen.has(key)) result.push(server);
-  }
-  return result;
 }
 
 async function allowedCwd(cwd: unknown): Promise<string> {
@@ -69,7 +59,7 @@ export async function GET(request: Request) {
       }),
     };
     const sessionId = params.get("sessionId");
-    let liveServers: ReturnType<typeof parseMcpListOutput> | undefined;
+    let liveServers: McpLiveServer[] | undefined;
     let liveError: string | undefined;
     if (sessionId) {
       try {

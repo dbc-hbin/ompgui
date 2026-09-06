@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync } from "fs";
+import { writeConfigFileAtomic } from "./config-file";
 import { dirname } from "path";
 import { isMap, parseDocument } from "yaml";
 import { getSettingsPath } from "./paths";
@@ -125,9 +126,9 @@ function filterKnownSection(
 
 /** Return a reviewed, runtime-safe settings subset without changing values.
  * This is exported for the API route so it can merge a patch before writing. */
-export function filterNativeSettings(settings: NativeSettings): NativeSettings {
+export function filterNativeSettings(settings: unknown): NativeSettings {
   if (!isRecord(settings)) throw new Error("Settings must be an object");
-  const source = settings as unknown as Record<string, unknown>;
+  const source = settings;
   const output: Record<string, unknown> = {};
   for (const key of [
     "defaultThinkingLevel", "hideThinkingBlock", "externalThinking", "textVerbosity", "personality",
@@ -432,8 +433,7 @@ export function writeNativeSettings(settings: NativeSettings): void {
     // Keep document-level comments when turning a new or comment-only file
     // into a mapping, just as we do for an existing mapping below.
     doc.contents = doc.createNode(reviewed) as unknown as typeof doc.contents;
-    const temp = `${path}.tmp-${process.pid}-${Date.now()}`;
-    try { writeFileSync(temp, doc.toString(), "utf8"); renameSync(temp, path); } catch (error) { try { if (existsSync(temp)) unlinkSync(temp); } catch {} throw error; }
+    writeConfigFileAtomic(path, doc.toString());
     return;
   }
   if (!isMap(doc.contents)) throw new Error(`${path} must contain a YAML mapping`);
@@ -472,6 +472,5 @@ export function writeNativeSettings(settings: NativeSettings): void {
   for (const [key, value] of Object.entries(reviewed.github ?? {})) doc.setIn(["github", key], value);
   for (const [key, value] of Object.entries(reviewed.security ?? {})) doc.setIn(["security", key], value);
   for (const [key, value] of Object.entries(reviewed.checkpoint ?? {})) doc.setIn(["checkpoint", key], value);
-  const temp = `${path}.tmp-${process.pid}-${Date.now()}`;
-  try { writeFileSync(temp, doc.toString(), "utf8"); renameSync(temp, path); } catch (error) { try { if (existsSync(temp)) unlinkSync(temp); } catch {} throw error; }
+  writeConfigFileAtomic(path, doc.toString());
 }

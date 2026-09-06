@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import {
-  invalidateSessionFileListCache,
   listArchivedSessionInfos,
   restoreArchivedSessionWithArtifacts,
   SessionArchiveError,
@@ -43,7 +42,6 @@ export async function POST(req: Request) {
     // invalidate all of them before resolving the restored session for the UI.
     invalidateSessionPathCache(restored.id);
     invalidateSessionListCache();
-    invalidateSessionFileListCache();
     const session = (await listAllSessions()).find((item) => item.id === restored.id);
     return NextResponse.json({ ok: true, sessionId: restored.id, session });
   } catch (error) {

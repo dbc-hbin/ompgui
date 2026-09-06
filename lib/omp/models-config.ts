@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
-import { basename, dirname, join } from "path";
+import { existsSync, mkdirSync, readFileSync } from "fs";
+import { dirname } from "path";
+import { writeConfigFileAtomic } from "./config-file";
 import { isMap, isScalar, isSeq, parseDocument, stringify, type Document } from "yaml";
 import { getModelsConfigPath } from "./paths";
 import { isRecord } from "../type-guards";
@@ -718,12 +719,5 @@ export function writeModelsConfig(config: ModelsFileConfig, options: WriteModels
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   // Write-then-rename: a crash mid-write must not leave models.yml truncated,
   // which would disable every custom model until the user repairs it by hand.
-  const temp = join(dir, `.${basename(current.path)}.ompgui-${process.pid}-${Date.now()}.tmp`);
-  try {
-    writeFileSync(temp, text, "utf8");
-    renameSync(temp, current.path);
-  } catch (error) {
-    rmSync(temp, { force: true });
-    throw error;
-  }
+  writeConfigFileAtomic(current.path, text);
 }

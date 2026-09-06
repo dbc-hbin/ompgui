@@ -8,7 +8,8 @@ import {
   subscribeSubmitDuringRunBehavior,
   type SubmitDuringRunBehavior,
 } from "@/lib/composer-prefs";
-import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
+import type { BuiltinSlashCommandResult, CompactResultInfo, SlashCommandInfo } from "@/hooks/useAgentSession";
+import type { MessageQueueItem, MessageQueueSnapshot } from "@/lib/message-queue";
 import type { ActiveGoal, ActivePlan } from "@/lib/web-mode-state";
 import { formatGoalElapsed } from "@/lib/web-mode-state";
 import { toast } from "@/components/ui/toast";
@@ -63,8 +64,6 @@ interface ModelOption {
 interface Props {
   onSend: (message: string, images?: AttachedImage[]) => void;
   onAbort: () => void;
-  onSteer?: (message: string, images?: AttachedImage[]) => void;
-  onFollowUp?: (message: string, images?: AttachedImage[]) => void;
   onPromptWithStreamingBehavior?: (message: string, behavior: "steer" | "followUp", images?: AttachedImage[]) => void;
   /** Existing-session RPC mutations stay disabled until state is ready. */
   runtimeReady?: boolean;
@@ -91,16 +90,16 @@ interface Props {
   modelNameOverride?: string | null;
   retryInfo?: { attempt: number; maxAttempts: number; errorMessage?: string } | null;
   onAbortRetry?: () => void;
-  queuedMessages?: QueuedMessages | null;
+  queuedMessages?: MessageQueueSnapshot | null;
+  onRecallQueuedMessage?: (id: string) => Promise<string | null>;
+  onDeleteQueuedMessage?: (id: string) => Promise<boolean>;
+  onPromoteQueuedToSteer?: (id: string) => Promise<boolean>;
+  queueEnqueuePending?: boolean;
   inputHistory?: string[];
   /** Context window usage for the circular indicator (percentage only). */
   contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null;
   /** Accumulated session cost shown in the context details popover. */
   sessionCost?: number | null;
-  /** Remove one queued message from the queue panel (Edit/Delete/Steer). */
-  onRemoveQueuedMessage?: (text: string) => void;
-  /** Relabel the first queued follow-up as a steering message. */
-  onPromoteQueuedToSteer?: (text: string) => void;
   slashCommands?: SlashCommandInfo[];
   slashCommandsLoading?: boolean;
   onLoadSlashCommands?: () => Promise<SlashCommandInfo[]> | SlashCommandInfo[];
@@ -285,20 +284,24 @@ function QueuedActionButton({
   title,
   accent = false,
   disabled = false,
+  busy = false,
   children,
 }: {
   onClick: () => void;
   title: string;
   accent?: boolean;
   disabled?: boolean;
+  busy?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled}
+      disabled={disabled || busy}
       title={title}
+      aria-label={title}
+      aria-busy={busy || undefined}
       style={{
         flexShrink: 0,
         padding: "4px 8px", minHeight: 24,
@@ -306,13 +309,14 @@ function QueuedActionButton({
         borderRadius: "var(--radius-control)",
         background: "transparent",
         color: accent ? "var(--accent)" : "var(--text-dim)",
-        cursor: disabled ? "not-allowed" : "pointer",
-        opacity: disabled ? 0.5 : 1,
+        cursor: disabled || busy ? "not-allowed" : "pointer",
+        opacity: disabled || busy ? 0.5 : 1,
         fontSize: "var(--text-sm)",
         fontWeight: accent ? 600 : 400,
         transition: "background var(--dur-fast) var(--ease-out-warm), color var(--dur-fast) var(--ease-out-warm)",
       }}
       onMouseEnter={(e) => {
+        if (disabled || busy) return;
         e.currentTarget.style.background = "var(--bg-hover)";
         if (!accent) e.currentTarget.style.color = "var(--text-muted)";
       }}
@@ -425,18 +429,17 @@ function ComposerModeStatus({ goal, plan }: { goal?: ActiveGoal | null; plan?: A
 }
 
 export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatInput({
-  onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelsLoading, onModelChange, fastModeEnabled, fastModeActive, fastModeSupported, onFastModeChange,
+  onSend, onAbort, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelsLoading, onModelChange, fastModeEnabled, fastModeActive, fastModeSupported, onFastModeChange,
   onAbortCompaction, isCompacting, compactResult,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap, modelNameOverride,
   retryInfo, queuedMessages, inputHistory = [], onAbortRetry,
+  onRecallQueuedMessage, onDeleteQueuedMessage, onPromoteQueuedToSteer, queueEnqueuePending = false,
   slashCommands, slashCommandsLoading, onLoadSlashCommands,
   onBuiltinCommand,
   onAudioUnlock,
   onPromptWithStreamingBehavior,
   runtimeReady = true,
   contextUsage, sessionCost,
-  onRemoveQueuedMessage,
-  onPromoteQueuedToSteer,
   draftKey,
   cwd,
   activeGoal,
@@ -476,6 +479,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const [fileIndex, setFileIndex] = useState<{ cwd: string; entries: FileIndexEntry[]; truncated: boolean } | null>(null);
   const [fileIndexLoading, setFileIndexLoading] = useState(false);
   const [atServerResult, setAtServerResult] = useState<{ cwd: string; query: string; matches: FileIndexEntry[] } | null>(null);
+  const [queueBusyId, setQueueBusyId] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -493,7 +497,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const atItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const historyItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const fileIndexMetaRef = useRef<{ cwd: string; fetchedAt: number } | null>(null);
-  const fileIndexFetchingRef = useRef<string | null>(null);
   const draftKeyRef = useRef(draftKey);
   const valueRef = useRef(value);
   const attachedImagesRef = useRef(attachedImages);
@@ -515,6 +518,24 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     }
   }, [runtimeReady]);
 
+  const prependDraft = useCallback((text: string) => {
+    if (!text.trim()) return;
+    const ta = textareaRef.current;
+    const current = ta ? ta.value : valueRef.current;
+    // Mirrors the TUI's queue restore: queued text first, then whatever
+    // the user already typed, separated by a blank line.
+    const combined = [text, current].filter((t) => t.trim()).join("\n\n");
+    setValue(combined);
+    setAtQuery(null);
+    requestAnimationFrame(() => {
+      if (!ta) return;
+      ta.focus();
+      ta.setSelectionRange(combined.length, combined.length);
+      ta.style.height = "auto";
+      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+    });
+  }, []);
+
   useImperativeHandle(ref, () => ({
     insertIfEmpty(text: string) {
       const ta = textareaRef.current;
@@ -530,21 +551,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       });
     },
     prependText(text: string) {
-      if (!text.trim()) return;
-      const ta = textareaRef.current;
-      const current = ta ? ta.value : value;
-      // Mirrors the TUI's queue restore: queued text first, then whatever
-      // the user already typed, separated by a blank line.
-      const combined = [text, current].filter((t) => t.trim()).join("\n\n");
-      setValue(combined);
-      setAtQuery(null);
-      requestAnimationFrame(() => {
-        if (!ta) return;
-        ta.focus();
-        ta.setSelectionRange(combined.length, combined.length);
-        ta.style.height = "auto";
-        ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
-      });
+      prependDraft(text);
     },
     insertText(text: string) {
       const ta = textareaRef.current;
@@ -920,18 +927,24 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     if (!needsServerSearch || !cwd || !atQueryText) return;
     const fetchCwd = cwd;
     const query = atQueryText;
+    const controller = new AbortController();
     const timer = setTimeout(() => {
-      fetch(`/api/file-index?cwd=${encodeURIComponent(fetchCwd)}&q=${encodeURIComponent(query)}`)
+      fetch(`/api/file-index?cwd=${encodeURIComponent(fetchCwd)}&q=${encodeURIComponent(query)}`, { signal: controller.signal })
         .then((res) => {
           if (!res.ok) throw new Error(`file search failed: ${res.status}`);
           return res.json() as Promise<{ matches?: FileIndexEntry[] }>;
         })
-        .then((data) => setAtServerResult({ cwd: fetchCwd, query, matches: data.matches ?? [] }))
+        .then((data) => {
+          if (!controller.signal.aborted) setAtServerResult({ cwd: fetchCwd, query, matches: data.matches ?? [] });
+        })
         .catch(() => {
           // Keep showing local matches; the next keystroke retries.
         });
     }, 150);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [needsServerSearch, atQueryText, cwd]);
 
   const serverResultInUse = needsServerSearch
@@ -957,30 +970,32 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   // ~10s, so re-opening refreshes cheaply; while typing nothing refetches.
   const atTokenActive = atQuery !== null;
   useEffect(() => {
-    if (!atTokenActive || !cwd) return;
     const meta = fileIndexMetaRef.current;
-    if (meta && meta.cwd === cwd && Date.now() - meta.fetchedAt < 10_000) return;
-    if (fileIndexFetchingRef.current === cwd) return;
-    fileIndexFetchingRef.current = cwd;
+    if (!atTokenActive || !cwd || (meta && meta.cwd === cwd && Date.now() - meta.fetchedAt < 10_000)) {
+      setFileIndexLoading(false);
+      return;
+    }
+    const controller = new AbortController();
     const fetchCwd = cwd;
     setFileIndexLoading(true);
-    fetch(`/api/file-index?cwd=${encodeURIComponent(fetchCwd)}`)
+    fetch(`/api/file-index?cwd=${encodeURIComponent(fetchCwd)}`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`file index failed: ${res.status}`);
         return res.json() as Promise<{ files?: string[]; truncated?: boolean }>;
       })
       .then((data) => {
+        if (controller.signal.aborted) return;
         setFileIndex({ cwd: fetchCwd, entries: buildEntriesFromFiles(data.files ?? []), truncated: !!data.truncated });
         fileIndexMetaRef.current = { cwd: fetchCwd, fetchedAt: Date.now() };
       })
       .catch(() => {
         // Leave any previous index in place; next open retries.
-        fileIndexMetaRef.current = null;
+        if (!controller.signal.aborted) fileIndexMetaRef.current = null;
       })
       .finally(() => {
-        fileIndexFetchingRef.current = null;
-        setFileIndexLoading(false);
+        if (!controller.signal.aborted) setFileIndexLoading(false);
       });
+    return () => controller.abort();
   }, [atTokenActive, cwd]);
 
   const applyAtCompletion = useCallback((entry: FileIndexEntry) => {
@@ -1075,80 +1090,60 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
   const sendQueued = useCallback((mode: "steer" | "followup") => {
     const msg = value.trim();
-    if (!runtimeReady) return;
+    if (!runtimeReady || queueEnqueuePending || !onPromptWithStreamingBehavior) return;
     if (!msg && !attachedImages.length && !attachedTextFiles.length) return;
     if (attachedImages.length || attachedTextFiles.length) return;
     onAudioUnlock?.();
     const streamingBehavior = mode === "steer" ? "steer" : "followUp";
-    if (msg.startsWith("/") && onPromptWithStreamingBehavior) {
-      // Web commands must be expanded even when queued: the raw slash text
-      // would otherwise reach omp as a literal message (its /goal //plan are
-      // TUI-only). Action commands (compact/...) keep the raw text so omp's
-      // own ACP handlers can run them.
-      const expansion = expandWebSlashCommand(msg);
-      if (expansion.kind === "expand") {
-        onPromptWithStreamingBehavior(expansion.prompt, streamingBehavior, attachedImages.length ? attachedImages : undefined);
-        clearInput();
-        return;
-      }
-      if (expansion.kind === "usage-error") {
-        toast.error(t("chatInput.commandUsageTitle"), t("agentSession.commandRequiresArgs", {
-          command: expansion.command,
-          usage: t(expansion.argumentHintKey),
-        }));
-        return;
-      }
-      onPromptWithStreamingBehavior(msg, streamingBehavior, attachedImages.length ? attachedImages : undefined);
-      clearInput();
+    const expansion = expandWebSlashCommand(msg);
+    if (expansion.kind === "usage-error") {
+      toast.error(t("chatInput.commandUsageTitle"), t("agentSession.commandRequiresArgs", {
+        command: expansion.command,
+        usage: t(expansion.argumentHintKey),
+      }));
       return;
     }
-    if (mode === "steer" && onSteer) {
-      onSteer(msg, attachedImages.length ? attachedImages : undefined);
-    } else if (mode === "followup" && onFollowUp) {
-      onFollowUp(msg, attachedImages.length ? attachedImages : undefined);
-    }
+    // Keep action commands on omp's prompt path; expand web-only commands.
+    onPromptWithStreamingBehavior(expansion.kind === "expand" ? expansion.prompt : msg, streamingBehavior);
     clearInput();
-  }, [value, attachedImages, attachedTextFiles, runtimeReady, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock, t]);
+  }, [value, attachedImages, attachedTextFiles, runtimeReady, queueEnqueuePending, onPromptWithStreamingBehavior, clearInput, onAudioUnlock, t]);
 
   // ── Queued follow-up bar ────────────────────────────────────────────────
-  // omp reports only a queued count over RPC; the texts are tracked in a
-  // client-side mirror, so Edit/Delete/Steer act on that mirror through the
-  // session hook's helpers.
-  const queuedEntries = [
-    ...(queuedMessages?.followUp ?? []).map((text) => ({ kind: "follow-up" as const, text })),
-    ...(queuedMessages?.steering ?? []).map((text) => ({ kind: "steer" as const, text })),
-  ];
-  const firstQueued = queuedEntries[0] ?? null;
-  const queuedCount = queuedEntries.length;
+  const queuedItems = queuedMessages?.items ?? [];
+  const nativeQueuedCount = queuedMessages?.nativeQueuedCount ?? 0;
+  const showQueuedBar = queuedItems.length > 0 || nativeQueuedCount > 0;
 
-  const handleQueuedEdit = useCallback(() => {
-    if (!runtimeReady || !firstQueued) return;
-    onRemoveQueuedMessage?.(firstQueued.text);
-    setValue(firstQueued.text);
-    setAtQuery(null);
-    setHistoryMenuOpen(false);
-    requestAnimationFrame(() => {
-      const ta = textareaRef.current;
-      if (!ta) return;
-      ta.focus();
-      ta.setSelectionRange(firstQueued.text.length, firstQueued.text.length);
-      ta.style.height = "auto";
-      ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
-    });
-  }, [firstQueued, onRemoveQueuedMessage, runtimeReady]);
-
-  const handleQueuedDelete = useCallback(() => {
-    if (!runtimeReady || !firstQueued) return;
-    onRemoveQueuedMessage?.(firstQueued.text);
-  }, [firstQueued, onRemoveQueuedMessage, runtimeReady]);
-
-  const handleQueuedSteer = useCallback(() => {
-    if (!runtimeReady || !firstQueued) return;
-    if (firstQueued.kind === "follow-up") {
-      onPromoteQueuedToSteer?.(firstQueued.text);
+  const runQueuedMutation = useCallback(async (id: string, run: () => Promise<unknown>) => {
+    if (!runtimeReady || queueBusyId) return;
+    setQueueBusyId(id);
+    try {
+      await run();
+    } finally {
+      setQueueBusyId((current) => (current === id ? null : current));
     }
-    // Already a steering message: nothing to promote.
-  }, [firstQueued, onPromoteQueuedToSteer, runtimeReady]);
+  }, [queueBusyId, runtimeReady]);
+
+  const handleQueuedEdit = useCallback((item: MessageQueueItem) => {
+    if (item.status === "sending" || !onRecallQueuedMessage) return;
+    void runQueuedMutation(item.id, async () => {
+      const text = await onRecallQueuedMessage(item.id);
+      if (typeof text === "string" && text.length > 0) prependDraft(text);
+    });
+  }, [onRecallQueuedMessage, prependDraft, runQueuedMutation]);
+
+  const handleQueuedDelete = useCallback((item: MessageQueueItem) => {
+    if (item.status === "sending" || !onDeleteQueuedMessage) return;
+    void runQueuedMutation(item.id, async () => {
+      await onDeleteQueuedMessage(item.id);
+    });
+  }, [onDeleteQueuedMessage, runQueuedMutation]);
+
+  const handleQueuedSteer = useCallback((item: MessageQueueItem) => {
+    if (item.status !== "queued" || item.lane !== "followUp" || !onPromoteQueuedToSteer) return;
+    void runQueuedMutation(item.id, async () => {
+      await onPromoteQueuedToSteer(item.id);
+    });
+  }, [onPromoteQueuedToSteer, runQueuedMutation]);
 
   const getNextSlashIndex = useCallback((direction: "up" | "down" | "left" | "right") => {
     const lastIndex = filteredSlashCommands.length - 1;
@@ -1310,18 +1305,18 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
           return;
         }
         e.preventDefault();
-        if (isStreaming && (onSteer || onFollowUp)) {
+        if (isStreaming && onPromptWithStreamingBehavior) {
           // Submit-during-run behavior comes from Settings (Steer current run
           // by default, or Queue follow-up); no in-composer selector.
           const behavior = getSubmitDuringRunBehavior();
-          if (behavior === "steer" && onSteer) sendQueued("steer");
+          if (behavior === "steer") sendQueued("steer");
           else sendQueued("followup");
         } else {
           handleSend();
         }
       }
     },
-    [isMobile, isStreaming, runtimeReady, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, filteredSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
+    [isMobile, isStreaming, runtimeReady, onPromptWithStreamingBehavior, onAbort, slashMenuOpen, slashQuery, filteredSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
   );
 
   const handleInput = useCallback(() => {
@@ -1474,8 +1469,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     isStreaming,
     hasQueueableDraft,
     submitDuringRunBehavior,
-    Boolean(onSteer),
-    Boolean(onFollowUp),
+    Boolean(onPromptWithStreamingBehavior),
+    Boolean(onPromptWithStreamingBehavior),
   );
   const thinkingLevelOptions = React.useMemo(
     () => selectableThinkingLevels(availableThinkingLevels),
@@ -2228,53 +2223,127 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             );
           })()}
         {/* Queued follow-up bar — thin strip attached to the composer's top
-            edge. Hidden entirely when nothing is queued. */}
-        {firstQueued && (
-          <div style={{
-            border: "1px solid var(--border)",
-            borderBottom: "none",
-            borderRadius: "var(--radius-card) var(--radius-card) 0 0",
-            background: "var(--bg-panel)",
-            padding: "5px 8px 5px 12px",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            minWidth: 0,
-          }}>
-            <span style={{
-              flexShrink: 0,
-              fontSize: "var(--text-xs)",
-              fontWeight: 600,
-              letterSpacing: "0.06em",
-              textTransform: "uppercase",
-              color: "var(--text-muted)",
-            }}>
-              {firstQueued.kind === "steer" ? t("chatInput.queuedSteer") : t("chatInput.queuedFollowUp")}
-              {queuedCount > 1 && <span style={{ color: "var(--text-dim)" }}>{" · " + queuedCount}</span>}
-            </span>
-            <span
-              title={firstQueued.text}
-              style={{
-                flex: 1,
-                minWidth: 0,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                fontSize: "var(--text-sm)",
-                color: "var(--text-muted)",
-              }}
-            >
-              {firstQueued.text}
-            </span>
-            <QueuedActionButton disabled={!runtimeReady} onClick={handleQueuedEdit} title={t("chatInput.queuedEditTitle")}>
-              {t("chatInput.queuedEdit")}
-            </QueuedActionButton>
-            <QueuedActionButton disabled={!runtimeReady} onClick={handleQueuedDelete} title={t("chatInput.queuedDeleteTitle")}>
-              {t("chatInput.queuedDelete")}
-            </QueuedActionButton>
-            <QueuedActionButton disabled={!runtimeReady} onClick={handleQueuedSteer} title={t("chatInput.queuedSteerTitle")} accent>
-              {t("chatInput.queuedSteerAction")}
-            </QueuedActionButton>
+            edge. Hidden entirely when nothing is queued. Native-only counts
+            have no edit/delete controls. */}
+        {showQueuedBar && (
+          <div
+            style={{
+              border: "1px solid var(--border)",
+              borderBottom: "none",
+              borderRadius: "var(--radius-card) var(--radius-card) 0 0",
+              background: "var(--bg-panel)",
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: 168,
+              overflowY: "auto",
+              minWidth: 0,
+            }}
+          >
+            {nativeQueuedCount > 0 && (
+              <div
+                role="status"
+                style={{
+                  padding: "5px 12px",
+                  fontSize: "var(--text-sm)",
+                  color: "var(--text-muted)",
+                }}
+              >
+                {t("chatInput.queuedNativeCount", { count: String(nativeQueuedCount) })}
+              </div>
+            )}
+            {queuedItems.map((item) => {
+              const busy = queueBusyId === item.id;
+              const sending = item.status === "sending";
+              const failed = item.status === "failed";
+              const controlsDisabled = !runtimeReady || busy || sending;
+              return (
+                <div
+                  key={item.id}
+                  data-queue-id={item.id}
+                  style={{
+                    padding: "5px 8px 5px 12px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    minWidth: 0,
+                    borderTop: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
+                  }}
+                >
+                  <span style={{
+                    flexShrink: 0,
+                    fontSize: "var(--text-xs)",
+                    fontWeight: 600,
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    color: failed ? "var(--status-error)" : "var(--text-muted)",
+                  }}>
+                    {sending
+                      ? t("chatInput.queuedSending")
+                      : failed
+                        ? t("chatInput.queuedFailed")
+                        : item.lane === "steer" ? t("chatInput.queuedSteer") : t("chatInput.queuedFollowUp")}
+                  </span>
+                  <span
+                    title={item.text}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      fontSize: "var(--text-sm)",
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    {item.text}
+                  </span>
+                  {failed && (
+                    <span
+                      role="alert"
+                      title={item.error || t("chatInput.queuedUncertain")}
+                      style={{
+                        flexShrink: 1,
+                        minWidth: 0,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        fontSize: "var(--text-xs)",
+                        color: "var(--status-error)",
+                      }}
+                    >
+                      {item.error || t("chatInput.queuedUncertain")}
+                    </span>
+                  )}
+                  <QueuedActionButton
+                    disabled={controlsDisabled}
+                    busy={busy}
+                    onClick={() => handleQueuedEdit(item)}
+                    title={t("chatInput.queuedEditTitle")}
+                  >
+                    {t("chatInput.queuedEdit")}
+                  </QueuedActionButton>
+                  <QueuedActionButton
+                    disabled={controlsDisabled}
+                    busy={busy}
+                    onClick={() => handleQueuedDelete(item)}
+                    title={t("chatInput.queuedDeleteTitle")}
+                  >
+                    {t("chatInput.queuedDelete")}
+                  </QueuedActionButton>
+                  {item.lane === "followUp" && item.status === "queued" && (
+                    <QueuedActionButton
+                      disabled={controlsDisabled}
+                      busy={busy}
+                      onClick={() => handleQueuedSteer(item)}
+                      title={t("chatInput.queuedSteerTitle")}
+                      accent
+                    >
+                      {t("chatInput.queuedSteerAction")}
+                    </QueuedActionButton>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
           <div
@@ -2823,12 +2892,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
             {/* Desktop keeps both explicit run actions. Mobile submits through
                 the primary action using the behavior selected in Settings. */}
-            {isStreaming && !isMobile && onSteer && (
+            {isStreaming && !isMobile && onPromptWithStreamingBehavior && (
               <button
                 type="button"
                 className="composer-queue-action composer-queue-action-steer ui-focus-ring"
                 onClick={() => sendQueued("steer")}
-                disabled={!runtimeReady || !value.trim() || !!attachedImages.length || !!attachedTextFiles.length}
+                disabled={!runtimeReady || queueEnqueuePending || !value.trim() || !!attachedImages.length || !!attachedTextFiles.length}
                 title={(attachedImages.length || attachedTextFiles.length) ? t("chatInput.imagesCannotQueue") : t("chatInput.steerNowTitle")}
                 aria-label={t("chatInput.steer")}
               >
@@ -2838,12 +2907,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 <span className="composer-queue-action-label">{t("chatInput.steer")}</span>
               </button>
             )}
-            {isStreaming && !isMobile && onFollowUp && (
+            {isStreaming && !isMobile && onPromptWithStreamingBehavior && (
               <button
                 type="button"
                 className="composer-queue-action composer-queue-action-followup ui-focus-ring"
                 onClick={() => sendQueued("followup")}
-                disabled={!runtimeReady || !value.trim() || !!attachedImages.length || !!attachedTextFiles.length}
+                disabled={!runtimeReady || queueEnqueuePending || !value.trim() || !!attachedImages.length || !!attachedTextFiles.length}
                 title={(attachedImages.length || attachedTextFiles.length) ? t("chatInput.imagesCannotQueue") : t("chatInput.followUpTitle")}
                 aria-label={t("chatInput.followUp")}
               >
@@ -2863,7 +2932,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 onClick={() => sendQueued(mobileRunSubmitMode)}
                 title={mobileRunSubmitMode === "steer" ? t("chatInput.steerNowTitle") : t("chatInput.followUpTitle")}
                 aria-label={mobileRunSubmitMode === "steer" ? t("chatInput.steer") : t("chatInput.followUp")}
-                disabled={!runtimeReady}
+                disabled={!runtimeReady || queueEnqueuePending}
                 data-state="run-submit"
               >
                 <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

@@ -1,17 +1,9 @@
 import { NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/api-utils";
-import { statSync, type Stats } from "fs";
-import { homedir } from "os";
-import { isAbsolute, resolve } from "path";
+import { ProjectPathError, validateProjectPath } from "@/lib/project-registry";
 import { allowFileRoot } from "@/lib/file-access";
 import { projectIdentityKey } from "@/lib/project-identity";
 import { resolveProject } from "@/lib/worktree";
-
-function normalizeCwd(cwd: string): string {
-  if (cwd === "~") return homedir();
-  if (cwd.startsWith("~/")) return resolve(homedir(), cwd.slice(2));
-  return isAbsolute(cwd) ? cwd : resolve(cwd);
-}
 
 // POST /api/cwd/validate  body: { cwd: string }
 // Validates a candidate workspace before the UI selects it.
@@ -20,21 +12,7 @@ export async function POST(req: Request) {
     const body = await req.json() as { cwd?: unknown };
     const cwd = typeof body.cwd === "string" ? body.cwd.trim() : "";
 
-    if (!cwd) {
-      return NextResponse.json({ error: "Path is required", code: "path_required" }, { status: 400 });
-    }
-
-    const normalizedCwd = normalizeCwd(cwd);
-    let stat: Stats;
-    try {
-      stat = statSync(normalizedCwd);
-    } catch {
-      return NextResponse.json({ error: `Directory does not exist: ${cwd}`, code: "directory_not_found" }, { status: 400 });
-    }
-
-    if (!stat.isDirectory()) {
-      return NextResponse.json({ error: `Path is not a directory: ${cwd}`, code: "not_a_directory" }, { status: 400 });
-    }
+    const normalizedCwd = validateProjectPath(cwd);
 
     allowFileRoot(normalizedCwd);
     const project = await resolveProject(normalizedCwd);
@@ -45,6 +23,9 @@ export async function POST(req: Request) {
       projectKey: projectIdentityKey(project.projectRoot),
     });
   } catch (error) {
+    if (error instanceof ProjectPathError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: 400 });
+    }
     return apiErrorResponse(error);
   }
 }

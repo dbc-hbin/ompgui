@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/api-utils";
+import { FilePreviewError, previewDocxFile } from "@/lib/file-preview";
 import fs from "fs";
+import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
+import { isPathWithinRoots } from "@/lib/path-security";
 import path from "path";
 import {
   getAllowedFileRoots,
   isExistingFilePathAllowed,
-  isFilePathAllowed,
   isWindowsAbsolutePath,
   normalizeSlashes,
 } from "@/lib/file-access";
@@ -86,7 +89,7 @@ async function getUploadDirectory(segments: string[]): Promise<
 > {
   const directory = filePathFromSegments(segments);
   const allowedRoots = await getAllowedFileRoots();
-  if (!isFilePathAllowed(directory, allowedRoots)) {
+  if (!isPathWithinRoots(directory, allowedRoots)) {
     return { response: NextResponse.json({ error: "Access denied", code: "access_denied" }, { status: 403 }) };
   }
 
@@ -111,7 +114,7 @@ async function getUploadDirectory(segments: string[]): Promise<
       // Ignore stale session roots that no longer exist.
     }
   }
-  if (!isFilePathAllowed(realDirectory, realRoots)) {
+  if (!isPathWithinRoots(realDirectory, realRoots)) {
     return { response: NextResponse.json({ error: "Access denied", code: "access_denied" }, { status: 403 }) };
   }
 
@@ -222,20 +225,34 @@ export async function POST(
         continue;
       }
 
-      if (conflictSet.has(file.name)) {
-        try {
-          fs.unlinkSync(destination);
-        } catch (error) {
-          recordError(file, error);
-          continue;
-        }
-      }
-
+      let temporary: string | undefined;
       try {
-        fs.writeFileSync(destination, bytes, { flag: "wx" });
+        if (strategy === "overwrite" && conflictSet.has(file.name)) {
+          const candidate = path.join(directory, `.omp-upload-${randomUUID()}`);
+          const descriptor = fs.openSync(candidate, "wx", 0o600);
+          temporary = candidate;
+          try {
+            fs.writeFileSync(descriptor, bytes);
+          } finally {
+            fs.closeSync(descriptor);
+          }
+          // Never follow a destination symlink or replace a non-file that
+          // appeared since inspection. Rename commits only complete bytes.
+          const current = fs.lstatSync(destination, { throwIfNoEntry: false });
+          if (current && (!current.isFile() || current.isSymbolicLink())) {
+            throw new Error("Cannot replace a directory or symbolic link");
+          }
+          if (current) fs.chmodSync(temporary, current.mode & 0o777);
+          fs.renameSync(temporary, destination);
+          temporary = undefined;
+        } else {
+          fs.writeFileSync(destination, bytes, { flag: "wx" });
+        }
         uploaded.push(file.name);
       } catch (error) {
         recordError(file, error);
+      } finally {
+        if (temporary) fs.rmSync(temporary, { force: true });
       }
     }
 
@@ -250,43 +267,12 @@ export async function POST(
 
 function createFileBodyStream(filePath: string, range?: { start: number; end: number }): ReadableStream<Uint8Array> {
   const fileStream = fs.createReadStream(filePath, range);
-  let closed = false;
-
-  return new ReadableStream<Uint8Array>({
-    start(controller) {
-      fileStream.on("data", (chunk: Buffer) => {
-        if (closed) return;
-        try {
-          controller.enqueue(new Uint8Array(chunk));
-        } catch {
-          closed = true;
-          fileStream.destroy();
-        }
-      });
-      fileStream.once("end", () => {
-        if (closed) return;
-        closed = true;
-        try {
-          controller.close();
-        } catch {
-          // The browser may cancel media probes before the file stream ends.
-        }
-      });
-      fileStream.once("error", (error) => {
-        if (closed) return;
-        closed = true;
-        try {
-          controller.error(error);
-        } catch {
-          // The response was already abandoned by the client.
-        }
-      });
+  return Readable.toWeb(fileStream, {
+    strategy: {
+      highWaterMark: fileStream.readableHighWaterMark,
+      size: (chunk: Uint8Array) => chunk.byteLength,
     },
-    cancel() {
-      closed = true;
-      fileStream.destroy();
-    },
-  });
+  }) as ReadableStream<Uint8Array>;
 }
 
 function encodeHeaderValue(value: string): string {
@@ -308,6 +294,10 @@ function streamFile(filePath: string, stat: fs.Stats, contentType: string, range
     "Cache-Control": "no-cache",
     "Accept-Ranges": "bytes",
     "Content-Disposition": getContentDisposition(filePath, asDownload),
+    // SVG is an active document when opened directly, not just an image.
+    // Keep PDF out of sandbox so native browser PDF viewers still work.
+    "Content-Security-Policy": "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; media-src 'self' blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'" + (contentType === "image/svg+xml" ? "; sandbox" : ""),
+    "X-Content-Type-Options": "nosniff",
   };
 
   if (!rangeHeader) {
@@ -360,64 +350,6 @@ function streamFile(filePath: string, stat: fs.Stats, contentType: string, range
   });
 }
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function wrapDocxPreviewHtml(bodyHtml: string, fileName: string): string {
-  return `<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-  :root { color-scheme: light; }
-  html, body { margin: 0; min-height: 100%; background: #eef1f5; color: #171717; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 28px; }
-  main {
-    box-sizing: border-box;
-    max-width: 840px;
-    min-height: calc(100vh - 56px);
-    margin: 0 auto;
-    padding: 56px 64px;
-    background: #fff;
-    box-shadow: 0 8px 28px rgba(15, 23, 42, 0.14);
-  }
-  .file-title {
-    margin: 0 0 28px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid #e5e7eb;
-    color: #6b7280;
-    font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    word-break: break-word;
-  }
-  h1, h2, h3, h4, h5, h6 { line-height: 1.3; margin: 1.1em 0 0.45em; color: #111827; }
-  p { margin: 0.65em 0; line-height: 1.7; }
-  table { border-collapse: collapse; max-width: 100%; margin: 1em 0; }
-  th, td { border: 1px solid #d1d5db; padding: 6px 9px; vertical-align: top; }
-  img { max-width: 100%; height: auto; }
-  pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-  a { color: #2563eb; }
-  @media (max-width: 720px) {
-    body { padding: 0; background: #fff; }
-    main { min-height: 100vh; padding: 28px 22px; box-shadow: none; }
-  }
-</style>
-</head>
-<body>
-<main>
-<div class="file-title">${escapeHtml(fileName)}</div>
-${bodyHtml}
-</main>
-</body>
-</html>`;
-}
-
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
@@ -433,7 +365,7 @@ export async function GET(
     const sessionId = request.nextUrl.searchParams.get("sessionId");
 
     const allowedRoots = await getAllowedFileRoots();
-    const allowedByRoot = isFilePathAllowed(filePath, allowedRoots);
+    const allowedByRoot = isPathWithinRoots(filePath, allowedRoots);
     const allowedBySessionReference =
       !allowedByRoot &&
       type !== "list" &&
@@ -514,15 +446,11 @@ export async function GET(
         return NextResponse.json({ error: "DOCX too large for preview (>10MB)", code: "docx_too_large" }, { status: 413 });
       }
 
-      const mammoth = await import("mammoth");
-      const result = await mammoth.convertToHtml(
-        { path: filePath },
-        {
-          externalFileAccess: false,
-          convertImage: mammoth.images.dataUri,
-        }
-      );
-      const html = wrapDocxPreviewHtml(result.value, path.basename(filePath));
+      const canonicalPath = fs.realpathSync(filePath);
+      if (!allowedBySessionReference && !isExistingFilePathAllowed(canonicalPath, allowedRoots)) {
+        return NextResponse.json({ error: "Access denied", code: "access_denied" }, { status: 403 });
+      }
+      const { html } = await previewDocxFile(canonicalPath);
       return new Response(html, {
         headers: {
           "Content-Type": "text/html; charset=utf-8",
@@ -614,6 +542,7 @@ export async function GET(
 
     return NextResponse.json({ entries, path: filePath });
   } catch (error) {
+    if (error instanceof FilePreviewError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     return apiErrorResponse(error);
   }
 }

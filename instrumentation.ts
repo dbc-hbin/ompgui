@@ -4,6 +4,14 @@ export async function register(): Promise<void> {
   const { configureHttpDispatcher } = await import("@/lib/http-dispatcher");
   configureHttpDispatcher();
 
+  try {
+    const { attachRelayGateway } = await import("@/lib/relay/gateway");
+    attachRelayGateway();
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.warn(`[ompgui] relay gateway failed to attach: ${detail}`);
+  }
+
   // Startup diagnostics: agent dir. Kept to one line so it greps cleanly;
   // failures here must never block boot.
   try {

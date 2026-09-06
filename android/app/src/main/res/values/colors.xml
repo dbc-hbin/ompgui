@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="shell_background">#101317</color>
+    <color name="colorPrimary">#9B4DFF</color>
+    <color name="colorPrimaryDark">#1B1916</color>
+    <color name="colorAccent">#9B4DFF</color>
 </resources>

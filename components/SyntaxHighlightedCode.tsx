@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import {
   COARSE_POINTER_MEDIA_QUERY,
   countCodeLines,
-  ensureLanguageRegistered,
   isLanguageRegistered,
   shouldShowCodeLineNumbers,
   SyntaxHighlighter,
@@ -61,23 +60,12 @@ export function SyntaxHighlightedCode({ code, lang }: Props) {
     getCoarsePointerSnapshot,
     getCoarsePointerServerSnapshot,
   );
-  const [ready, setReady] = useState(() => isLanguageRegistered(lang));
   const showLineNumbers = shouldShowCodeLineNumbers({
     isCoarsePointer,
     lineCount: countCodeLines(code),
   });
 
-  useEffect(() => {
-    let cancelled = false;
-    setReady(isLanguageRegistered(lang));
-    const promise = ensureLanguageRegistered(lang);
-    if (promise) {
-      promise.then(() => { if (!cancelled) setReady(true); });
-    }
-    return () => { cancelled = true; };
-  }, [lang]);
-
-  if (!ready) {
+  if (!isLanguageRegistered(lang)) {
     return <PlainCode code={code} />;
   }
 

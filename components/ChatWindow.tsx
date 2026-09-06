@@ -532,7 +532,7 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
     liveModelMeta,
     retryInfo, contextUsage, forkingEntryId,
     isCompacting, compactResult, displayModel: displayModelValue, sessionStats,
-    slashCommands, slashCommandsLoading, queuedMessages,
+    slashCommands, slashCommandsLoading, queuedMessages, queueEnqueuePending,
     notices, dismissNotice, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
     isAutoModelSelection,
     agentPhase, activeGoal, activePlan,
@@ -540,8 +540,8 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
     isNew,
     sessionIdRef, messagesEndRef, scrollContainerRef,
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
-    handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
-    removeQueuedMessage, promoteQueuedToSteer,
+    handlePromptWithStreamingBehavior, handleAbortCompaction,
+    handleRecallQueuedMessage, handleDeleteQueuedMessage, handlePromoteQueuedMessage,
     handleBuiltinSlashCommand,
     handleThinkingLevelChange, handleFastModeChange, handleCycleModel, handleCycleThinkingLevel, handleAbortRetry, loadSlashCommands,
   } = useAgentSession({
@@ -718,8 +718,6 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
       onSend={handleSend}
       onAbort={handleAbort}
       runtimeReady={runtimeReady}
-      onSteer={runtimeReady && agentRunning ? handleSteer : undefined}
-      onFollowUp={runtimeReady && agentRunning ? handleFollowUp : undefined}
       onPromptWithStreamingBehavior={runtimeReady && agentRunning ? handlePromptWithStreamingBehavior : undefined}
       isStreaming={sessionBusy}
       model={displayModelValue}
@@ -747,11 +745,13 @@ export function ChatWindow({ session, newSessionCwd, advisorEnabled, toolCallsDe
       activePlan={activePlan}
       advisorEnabled={advisorEnabled}
       queuedMessages={queuedMessages}
+      onRecallQueuedMessage={runtimeReady ? handleRecallQueuedMessage : undefined}
+      onDeleteQueuedMessage={runtimeReady ? handleDeleteQueuedMessage : undefined}
+      onPromoteQueuedToSteer={runtimeReady ? handlePromoteQueuedMessage : undefined}
+      queueEnqueuePending={queueEnqueuePending}
       inputHistory={inputHistory}
       contextUsage={contextUsage}
       sessionCost={sessionStats?.cost ?? null}
-      onRemoveQueuedMessage={removeQueuedMessage}
-      onPromoteQueuedToSteer={promoteQueuedToSteer}
       slashCommands={slashCommands}
       slashCommandsLoading={slashCommandsLoading}
       onLoadSlashCommands={runtimeReady ? loadSlashCommands : undefined}
