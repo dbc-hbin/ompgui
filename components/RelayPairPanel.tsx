@@ -20,7 +20,7 @@ interface DeviceRow {
   lastSeenAt: string;
 }
 
-export function RelayPairPanel() {
+export function RelayPairPanel({ embedded = false }: { embedded?: boolean }) {
   const { t } = useI18n();
   const [relayUrl, setRelayUrl] = useState("");
   const [statusUrl, setStatusUrl] = useState<string | undefined>();
@@ -106,18 +106,9 @@ export function RelayPairPanel() {
     }
   }
 
-  return (
-    <main style={{ flex: 1, display: "grid", placeItems: "center", padding: 20, background: "var(--bg)" }}>
-      <section
-        style={{
-          width: "min(100%, 520px)",
-          padding: 32,
-          background: "var(--bg-panel)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius-modal)",
-          boxShadow: "var(--shadow-modal)",
-        }}
-      >
+  const body = (
+    <>
+      {!embedded ? (
         <div
           style={{
             width: 40,
@@ -132,94 +123,127 @@ export function RelayPairPanel() {
         >
           <Link2 size={19} aria-hidden="true" />
         </div>
+      ) : null}
+      {embedded ? (
+        <h3 style={{ margin: 0, fontSize: "var(--text-base)", fontWeight: 600, color: "var(--text)" }}>
+          {t("relayPair.title")}
+        </h3>
+      ) : (
         <h1 className="display-serif" style={{ margin: 0, fontSize: "calc(var(--text-xl) + var(--space-5) - var(--space-1))", color: "var(--text)" }}>
           {t("relayPair.title")}
         </h1>
-        <p style={{ margin: "10px 0 24px", color: "var(--text-muted)", fontSize: "var(--text-base)", lineHeight: 1.5 }}>
-          {t("relayPair.description")}
-        </p>
-        <div style={{ display: "grid", gap: 14 }}>
-          <Field label={t("relayPair.urlLabel")} hint={statusUrl && !relayUrl ? statusUrl : undefined}>
-            <TextInput
-              value={relayUrl}
-              onChange={setRelayUrl}
-              placeholder="wss://machine.tailnet.ts.net/relay"
-              autoComplete="off"
-              spellCheck={false}
-              mono
+      )}
+      <p style={{ margin: embedded ? "4px 0 16px" : "10px 0 24px", color: "var(--text-muted)", fontSize: "var(--text-base)", lineHeight: 1.5 }}>
+        {t("relayPair.description")}
+      </p>
+      <p style={{ margin: "0 0 16px", color: "var(--text-dim)", fontSize: "var(--text-sm)", lineHeight: 1.45 }}>
+        {t("relayPair.steps")}
+      </p>
+      <div style={{ display: "grid", gap: 14 }}>
+        <Field label={t("relayPair.urlLabel")} hint={statusUrl && !relayUrl ? statusUrl : undefined}>
+          <TextInput
+            value={relayUrl}
+            onChange={setRelayUrl}
+            placeholder="wss://machine.tailnet.ts.net/relay"
+            autoComplete="off"
+            spellCheck={false}
+            mono
+          />
+        </Field>
+        <Button type="button" variant="primary" busy={busy} disabled={busy} onClick={() => void createOffer()}>
+          {busy ? t("relayPair.creating") : t("relayPair.create")}
+        </Button>
+        {error ? <p style={{ margin: 0, color: "var(--danger, #c44)", fontSize: "var(--text-sm)" }}>{error}</p> : null}
+        {offer ? (
+          <div style={{ display: "grid", gap: 8 }}>
+            {qrSvg ? (
+              <div style={{ display: "grid", justifyItems: "center", gap: 8 }}>
+                <div
+                  role="img"
+                  aria-label={t("relayPair.qrHint")}
+                  className="relay-pair-qr"
+                  style={{
+                    width: 212,
+                    height: 212,
+                    boxSizing: "border-box",
+                    background: "#fff",
+                    color: "#000",
+                    padding: 12,
+                    borderRadius: "var(--radius-control)",
+                    border: "1px solid var(--border)",
+                    isolation: "isolate",
+                  }}
+                  dangerouslySetInnerHTML={{ __html: qrSvg }}
+                />
+                <p style={{ margin: 0, color: "var(--text-dim)", fontSize: "var(--text-sm)", textAlign: "center" }}>
+                  {t("relayPair.qrHint")}
+                </p>
+              </div>
+            ) : null}
+            <label style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>{t("relayPair.linkLabel")}</label>
+            <textarea
+              readOnly
+              value={offer.uri}
+              rows={4}
+              style={{
+                width: "100%",
+                resize: "vertical",
+                fontFamily: "var(--font-mono)",
+                fontSize: "var(--text-sm)",
+                padding: 10,
+                borderRadius: "var(--radius-control)",
+                border: "1px solid var(--border)",
+                background: "var(--bg)",
+                color: "var(--text)",
+              }}
             />
-          </Field>
-          <Button type="button" variant="primary" busy={busy} disabled={busy} onClick={() => void createOffer()}>
-            {busy ? t("relayPair.creating") : t("relayPair.create")}
-          </Button>
-          {error ? <p style={{ margin: 0, color: "var(--danger, #c44)", fontSize: "var(--text-sm)" }}>{error}</p> : null}
-          {offer ? (
-            <div style={{ display: "grid", gap: 8 }}>
-              {qrSvg ? (
-                <div style={{ display: "grid", justifyItems: "center", gap: 8 }}>
-                  <div
-                    role="img"
-                    aria-label={t("relayPair.qrHint")}
-                    style={{
-                      width: 196,
-                      height: 196,
-                      color: "var(--text)",
-                      background: "#fff",
-                      padding: 8,
-                      borderRadius: "var(--radius-control)",
-                      border: "1px solid var(--border)",
-                    }}
-                    dangerouslySetInnerHTML={{ __html: qrSvg }}
-                  />
-                  <p style={{ margin: 0, color: "var(--text-dim)", fontSize: "var(--text-sm)", textAlign: "center" }}>
-                    {t("relayPair.qrHint")}
-                  </p>
-                </div>
-              ) : null}
-              <label style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>{t("relayPair.linkLabel")}</label>
-              <textarea
-                readOnly
-                value={offer.uri}
-                rows={4}
-                style={{
-                  width: "100%",
-                  resize: "vertical",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: "var(--text-sm)",
-                  padding: 10,
-                  borderRadius: "var(--radius-control)",
-                  border: "1px solid var(--border)",
-                  background: "var(--bg)",
-                  color: "var(--text)",
-                }}
-              />
-              <Button type="button" variant="secondary" onClick={() => void copyUri()}>
-                {copied ? t("relayPair.copied") : t("relayPair.copy")}
-              </Button>
-              <p style={{ margin: 0, color: "var(--text-dim)", fontSize: "var(--text-sm)" }}>
-                {t("relayPair.expires", { time: new Date(offer.expiresAt).toLocaleTimeString() })}
-              </p>
-            </div>
-          ) : null}
-          <div>
-            <h2 style={{ margin: "16px 0 8px", fontSize: "var(--text-base)", color: "var(--text)" }}>{t("relayPair.devicesTitle")}</h2>
-            {devices.length === 0 ? (
-              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>{t("relayPair.noDevices")}</p>
-            ) : (
-              <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
-                {devices.map((device) => (
-                  <li key={device.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-                    <div>
-                      <div style={{ color: "var(--text)", fontSize: "var(--text-sm)" }}>{device.label || device.id}</div>
-                      <div style={{ color: "var(--text-dim)", fontSize: "var(--text-sm)", fontFamily: "var(--font-mono)" }}>{device.id}</div>
-                    </div>
-                    <Button type="button" variant="secondary" onClick={() => void revoke(device.id)}>{t("relayPair.revoke")}</Button>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <Button type="button" variant="secondary" onClick={() => void copyUri()}>
+              {copied ? t("relayPair.copied") : t("relayPair.copy")}
+            </Button>
+            <p style={{ margin: 0, color: "var(--text-dim)", fontSize: "var(--text-sm)" }}>
+              {t("relayPair.expires", { time: new Date(offer.expiresAt).toLocaleTimeString() })}
+            </p>
           </div>
+        ) : null}
+        <div>
+          <h2 style={{ margin: "16px 0 8px", fontSize: "var(--text-base)", color: "var(--text)" }}>{t("relayPair.devicesTitle")}</h2>
+          {devices.length === 0 ? (
+            <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>{t("relayPair.noDevices")}</p>
+          ) : (
+            <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
+              {devices.map((device) => (
+                <li key={device.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                  <div>
+                    <div style={{ color: "var(--text)", fontSize: "var(--text-sm)" }}>{device.label || device.id}</div>
+                    <div style={{ color: "var(--text-dim)", fontSize: "var(--text-sm)", fontFamily: "var(--font-mono)" }}>{device.id}</div>
+                  </div>
+                  <Button type="button" variant="secondary" onClick={() => void revoke(device.id)}>{t("relayPair.revoke")}</Button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
+      </div>
+    </>
+  );
+
+  if (embedded) {
+    return <div style={{ display: "flex", flexDirection: "column", gap: 0, maxWidth: 520 }}>{body}</div>;
+  }
+
+  return (
+    <main style={{ flex: 1, display: "grid", placeItems: "center", padding: 20, background: "var(--bg)" }}>
+      <section
+        style={{
+          width: "min(100%, 520px)",
+          padding: 32,
+          background: "var(--bg-panel)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius-modal)",
+          boxShadow: "var(--shadow-modal)",
+        }}
+      >
+        {body}
       </section>
     </main>
   );

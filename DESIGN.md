@@ -163,8 +163,9 @@ items with a notice.
   responses, logs, or the browser.
 - `/relay` is a WebSocket for paired phone remotes on the same Next.js port
   (Tailscale Funnel 443). It is not cookie-authenticated. A Mac-side pairing
-  offer (`/pair` or `ompgui pair`) issues a one-time secret; the phone then
-  holds a device token whose hash is stored in `~/.omp/agent/ompgui-relay.json`.
+  offer (Settings → Connect Phone, or `/pair` / `ompgui pair`) issues a
+  one-time secret; the phone then holds a device token whose hash is stored
+  in `~/.omp/agent/ompgui-relay.json`.
   Pairing secrets and tokens are never logged. After authenticated hello,
   correlated domain requests expose a finite, validated action set for
   `sessions`, `files`, `models`, `extensions`, and `system`, alongside session

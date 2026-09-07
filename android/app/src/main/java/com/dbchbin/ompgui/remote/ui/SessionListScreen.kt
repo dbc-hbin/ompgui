@@ -126,6 +126,7 @@ fun SessionListScreen(
     slashCommands: List<RelaySlashCommand> = emptyList(),
     worktrees: List<RelayWorktree> = emptyList(),
     worktreesGit: Boolean = false,
+    worktreesError: String? = null,
     onFetchArchives: () -> Unit = {},
     onRestoreArchive: (String) -> Unit = {},
     onFetchWorktrees: (String) -> Unit = {},
@@ -569,10 +570,13 @@ fun SessionListScreen(
                         IconButton(onClick = { worktreesOpen = false }) { Icon(Icons.Filled.Close, stringResource(R.string.session_list_close_worktrees)) }
                     }
                     Text(selectedProject.orEmpty(), color = OmpColors.TextMuted, fontSize = 12.sp)
-                    if (worktreesGit) WorktreeManageRow(worktrees,
+                    worktreesError?.takeIf { it.isNotBlank() }?.let {
+                        Text(it, color = OmpColors.StatusError, fontSize = 13.sp, modifier = Modifier.padding(vertical = 4.dp))
+                    }
+                    if (worktreesError.isNullOrBlank() && worktreesGit) WorktreeManageRow(worktrees,
                         onFetch = { selectedProject?.let(onFetchWorktrees) },
                         onRemove = { path -> selectedProject?.let { worktreeForceConfirm = false; worktreeRemoveTarget = it to path } })
-                    else Text(stringResource(R.string.session_list_no_git_worktrees), color = OmpColors.TextMuted, modifier = Modifier.padding(vertical = 12.dp))
+                    else if (worktreesError.isNullOrBlank()) Text(stringResource(R.string.session_list_no_git_worktrees), color = OmpColors.TextMuted, modifier = Modifier.padding(vertical = 12.dp))
                     TextButton(onClick = { worktreesOpen = false; onPrepareNewSession(); newSessionOpen = true }) { Text(stringResource(R.string.session_list_new_session_add_worktree)) }
                 }
             }
@@ -607,6 +611,7 @@ fun SessionListScreen(
                 initialCwd = selectedProject,
                 worktrees = worktrees,
                 worktreesGit = worktreesGit,
+                worktreesError = worktreesError,
                 onFetchWorktrees = onFetchWorktrees,
                 onAddWorktree = onAddWorktree,
                 onAddProject = onAddProject,

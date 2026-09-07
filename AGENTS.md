@@ -86,7 +86,7 @@ app/api/
   relay/devices/[id]/route.ts     DELETE revoke a paired device
 
 app/relay/route.ts                GET 426 (WebSocket upgrade is attached in Node)
-app/pair/page.tsx                 Mac pairing UI for /relay
+app/pair/page.tsx                 Standalone pairing page (same panel as Settings → Connect Phone)
 
 android/                          Compose phone client for /relay (not Capacitor WebView)
 

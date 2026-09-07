@@ -45,27 +45,49 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Embedded in the settings scroll container; each inventory has bounded pages. */
+/**
+ * Extensions & Tools inventory aligned with web EXTENSION_TABS:
+ * Optional Tools → MCP Servers → Skills → Plugins.
+ * Embedded in the settings scroll container; each inventory has bounded pages.
+ */
 @Composable
-fun ExtensionSettingsPanel(requester: RelayRequester, cwd: String) {
-    key(requester, cwd) {
-        var selected by rememberSaveable { mutableStateOf(0) }
+fun ExtensionSettingsPanel(
+    requester: RelayRequester,
+    cwd: String,
+    optionalToolsContent: (@Composable () -> Unit)? = null,
+) {
+    key(requester, cwd, optionalToolsContent != null) {
+        var selected by rememberSaveable(optionalToolsContent != null) { mutableStateOf(0) }
         val tabState = rememberSaveableStateHolder()
-        val sections = listOf(
-            stringResource(R.string.extension_tab_mcp),
-            stringResource(R.string.extension_tab_skills),
-            stringResource(R.string.extension_tab_plugins),
-        )
+        val hasOptionalTools = optionalToolsContent != null
+        val sections = buildList {
+            if (hasOptionalTools) add(stringResource(R.string.extension_tab_optional_tools))
+            add(stringResource(R.string.extension_tab_mcp))
+            add(stringResource(R.string.extension_tab_skills))
+            add(stringResource(R.string.extension_tab_plugins))
+        }
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            ScrollableTabRow(selectedTabIndex = selected, containerColor = OmpColors.Bg, contentColor = OmpColors.Text, edgePadding = 0.dp) {
+            ScrollableTabRow(
+                selectedTabIndex = selected.coerceIn(0, sections.lastIndex),
+                containerColor = OmpColors.Bg,
+                contentColor = OmpColors.Text,
+                edgePadding = 0.dp,
+            ) {
                 sections.forEachIndexed { index, title ->
-                    Tab(selected = selected == index, onClick = { selected = index }, modifier = Modifier.heightIn(min = 48.dp), text = { Text(title) })
+                    Tab(
+                        selected = selected == index,
+                        onClick = { selected = index },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                        text = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    )
                 }
             }
             tabState.SaveableStateProvider(selected) {
-                when (selected) {
-                    0 -> ExtensionMcpSection(requester, cwd)
-                    1 -> ExtensionSkillsSection(requester, cwd)
+                val optionalOffset = if (hasOptionalTools) 1 else 0
+                when {
+                    hasOptionalTools && selected == 0 -> optionalToolsContent?.invoke()
+                    selected == optionalOffset -> ExtensionMcpSection(requester, cwd)
+                    selected == optionalOffset + 1 -> ExtensionSkillsSection(requester, cwd)
                     else -> ExtensionPluginsSection(requester, cwd)
                 }
             }

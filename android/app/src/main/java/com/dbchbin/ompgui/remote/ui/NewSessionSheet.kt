@@ -73,6 +73,7 @@ fun NewSessionSheet(
     initialMessage: String = "",
     worktrees: List<RelayWorktree> = emptyList(),
     worktreesGit: Boolean = false,
+    worktreesError: String? = null,
     onFetchWorktrees: (String) -> Unit = {},
     onAddWorktree: (String, String) -> Unit = { _, _ -> },
     onAddProject: (String) -> Unit = {},
@@ -247,6 +248,9 @@ fun NewSessionSheet(
                     ) { Text(stringResource(R.string.new_session_add_worktree)) }
                 }
             }
+            }
+            worktreesError?.takeIf { it.isNotBlank() }?.let {
+                Text(it, color = OmpColors.StatusError, fontSize = 13.sp)
             }
             val currentModel = if (provider != null && modelId != null) {
                 models.find { it.provider == provider && it.id == modelId }

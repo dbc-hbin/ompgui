@@ -10,6 +10,13 @@ const pkgDir = path.join(__dirname, "..");
 const options = parseLaunchOptions();
 if (options.help || options.version) process.exit(0);
 if (options.command) {
+  if (["service", "start", "stop", "restart", "status"].includes(options.command)) {
+    require("./ompgui-service").runServiceCli(options).catch((error) => {
+      console.error(error.message);
+      process.exitCode = 1;
+    });
+    return;
+  }
   if (options.command === "update") {
     if (options.extraPositionals.length) {
       console.error(`Unknown ompgui command: ${[options.command, ...options.extraPositionals].join(" ")}`);

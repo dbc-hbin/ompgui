@@ -62,6 +62,8 @@ data class RemoteUiState(
     val archives: List<RelayArchive> = emptyList(),
     val worktrees: List<RelayWorktree> = emptyList(),
     val worktreesGit: Boolean = false,
+    /** Local owner for worktrees.list/add — never the global session banner. */
+    val worktreesError: String? = null,
     val branches: List<RelayBranch> = emptyList(),
     val branchLeafId: String? = null,
     val fileMatches: List<RelayFileMatch> = emptyList(),

@@ -62,11 +62,9 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -294,7 +292,7 @@ private fun trimFileName(name: String, max: Int = 16): String {
     return name.take(max) + "…"
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun ChatScreen(
     requester: RelayRequester,
@@ -470,10 +468,19 @@ fun ChatScreen(
             .safeDrawingPadding()
             .imePadding(),
     ) {
+        val hasActivity = chatNotices.any { it.type == "info" } ||
+            running || queueSteering.isNotEmpty() || queueFollowUp.isNotEmpty()
+        val panelCount = (if (todos.isNotEmpty()) 1 else 0) +
+            (if (subagents.isNotEmpty()) 1 else 0) +
+            (if (hasActivity || activityExpanded) 1 else 0)
+        // All expanded bodies share one budget; pinned headers never enter it.
+        // Reserve the 56dp app bar, 108dp minimum composer and layout spacing
+        // before allocating scroll space, including when IME shrinks this box.
         val activityViewportMax = minOf(
             176.dp,
             maxHeight * 0.4f,
-        )
+            (maxHeight - 192.dp - 52.dp * panelCount).coerceAtLeast(0.dp),
+        ) / panelCount.coerceAtLeast(1)
         Column(Modifier.fillMaxSize()) {
         ChatTopBar(
             title = title,
@@ -548,8 +555,23 @@ fun ChatScreen(
             }
         }
         if (!followLocked) {
-            androidx.compose.material3.TextButton(onClick = { followLocked = true }) {
-                Text(stringResource(R.string.chat_jump_to_latest), color = OmpColors.Accent)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                IconButton(
+                    onClick = { followLocked = true },
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.KeyboardArrowDown,
+                        contentDescription = stringResource(R.string.chat_jump_to_latest),
+                        tint = OmpColors.Accent,
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
             }
         }
         ChatHistoryHost(requester = requester, sessionId = sessionId, leafId = if (historicalView) branchLeafId else null, onOpenSession = onOpenSession, onEditMessage = onDraftChange, expanded = historyOpen, onDismiss = { historyOpen = false })
@@ -568,21 +590,21 @@ fun ChatScreen(
                 onDismissNotice = onDismissChatNotice,
                 onDismissRequest = onDismissExtensionDialog,
             )
-            val hasActivity = todos.any { it.tasks.isNotEmpty() } || subagents.isNotEmpty() ||
-                chatNotices.any { it.type == "info" } || running || queueSteering.isNotEmpty() || queueFollowUp.isNotEmpty()
+            // Pinned composer panels (web ComposerPanels parity): always visible
+            // collapsed headers — not buried inside the activity accordion.
+            TodoPanel(todos = todos, bodyMaxHeight = activityViewportMax)
+            SubagentPanel(
+                requester = requester,
+                sessionId = sessionId,
+                subagents = subagents,
+                bodyMaxHeight = activityViewportMax,
+            )
             if (hasActivity || activityExpanded) Row(
                 Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(8.dp))
                     .clickable { activityExpanded = !activityExpanded }.padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val tasks = remember(todos) { todos.flatMap { it.tasks } }
                 val summary = buildList {
-                    if (tasks.isNotEmpty()) {
-                        add(context.getString(R.string.chat_activity_todos, tasks.count { it.status == "completed" }, tasks.size))
-                    }
-                    if (subagents.isNotEmpty()) {
-                        add(context.getString(R.string.chat_activity_agents, subagents.size))
-                    }
                     if (chatNotices.any { it.type == "info" }) {
                         add(context.getString(R.string.chat_activity_notices, chatNotices.count { it.type == "info" }))
                     }
@@ -605,12 +627,6 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
             ExtensionNoticeList(chatNotices.filter { it.type == "info" }, onDismissChatNotice)
-            TodoPanel(todos = todos)
-            SubagentPanel(
-                requester = requester,
-                sessionId = sessionId,
-                subagents = subagents,
-            )
             if (!historicalView) {
             QueuePanel(
                 running = running,
@@ -1093,7 +1109,6 @@ private fun AttachmentChip(item: AttachmentItem, onRemove: () -> Unit) {
 // Model picker bottom sheet.
 // ---------------------------------------------------------------------------
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ModelPickerSheet(
     models: List<RelayModelOption>,
@@ -1107,62 +1122,62 @@ private fun ModelPickerSheet(
         val q = query.trim()
         models.filter { q.isEmpty() || it.name.contains(q, ignoreCase = true) || it.id.contains(q, ignoreCase = true) || it.provider.contains(q, ignoreCase = true) }
     }
-    ModalBottomSheet(
-        dragHandle = { OmpSheetDragHandle() },
+    OmpModalSheet(
         onDismissRequest = onClosePicker,
         containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
     ) {
-        OmpDialogSystemBars()
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.chat_model_picker), fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold, color = OmpColors.Text, modifier = Modifier.weight(1f))
-            IconButton(onClick = onClosePicker) { Icon(Icons.Filled.Close, stringResource(R.string.chat_model_close), tint = OmpColors.TextMuted) }
-        }
-        ModelSearchField(query, { query = it }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            if (filteredModels.isEmpty()) {
-                item {
-                    Text(
-                        if (query.isBlank()) stringResource(R.string.chat_model_empty) else stringResource(R.string.chat_model_no_matches),
-                        fontSize = 14.sp,
-                        color = OmpColors.TextMuted,
-                        modifier = Modifier.padding(vertical = 8.dp),
-                    )
-                }
+        Column(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.chat_model_picker), fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold, color = OmpColors.Text, modifier = Modifier.weight(1f))
+                IconButton(onClick = onClosePicker) { Icon(Icons.Filled.Close, stringResource(R.string.chat_model_close), tint = OmpColors.TextMuted) }
             }
-            items(filteredModels, key = { "${it.provider}/${it.id}" }) { option ->
-                val selected = currentModel?.provider == option.provider &&
-                    currentModel?.id == option.id
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (selected) OmpColors.BgHover else OmpColors.BgPanel)
-                        .clickable(enabled = !running) { onSelectModel(option) }
-                        .heightIn(min = 48.dp)
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(option.name, fontSize = 14.sp, color = OmpColors.Text)
+            ModelSearchField(query, { query = it }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (filteredModels.isEmpty()) {
+                    item {
                         Text(
-                            "${option.provider}/${option.id}",
-                            fontSize = 12.sp,
+                            if (query.isBlank()) stringResource(R.string.chat_model_empty) else stringResource(R.string.chat_model_no_matches),
+                            fontSize = 14.sp,
                             color = OmpColors.TextMuted,
+                            modifier = Modifier.padding(vertical = 8.dp),
                         )
                     }
-                    if (selected) {
-                        Icon(
-                            Icons.Filled.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = OmpColors.Accent,
-                        )
+                }
+                items(filteredModels, key = { "${it.provider}/${it.id}" }) { option ->
+                    val selected = currentModel?.provider == option.provider &&
+                        currentModel?.id == option.id
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (selected) OmpColors.BgHover else OmpColors.BgPanel)
+                            .clickable(enabled = !running) { onSelectModel(option) }
+                            .heightIn(min = 48.dp)
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(option.name, fontSize = 14.sp, color = OmpColors.Text)
+                            Text(
+                                "${option.provider}/${option.id}",
+                                fontSize = 12.sp,
+                                color = OmpColors.TextMuted,
+                            )
+                        }
+                        if (selected) {
+                            Icon(
+                                Icons.Filled.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = OmpColors.Accent,
+                            )
+                        }
                     }
                 }
             }
@@ -1170,7 +1185,6 @@ private fun ModelPickerSheet(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ThinkingPickerSheet(
     selected: String,
@@ -1178,48 +1192,48 @@ private fun ThinkingPickerSheet(
     onClose: () -> Unit,
     onSelect: (String) -> Unit,
 ) {
-    ModalBottomSheet(
-        dragHandle = { OmpSheetDragHandle() },
+    OmpModalSheet(
         onDismissRequest = onClose,
         containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
     ) {
-        OmpDialogSystemBars()
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.chat_thinking_level), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = OmpColors.Text, modifier = Modifier.weight(1f))
-            IconButton(onClick = onClose) { Icon(Icons.Filled.Close, stringResource(R.string.chat_thinking_close), tint = OmpColors.TextMuted) }
-        }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 332.dp).verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            THINKING_LEVELS.forEach { level ->
-                val isSelected = level == selected
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (isSelected) OmpColors.BgHover else OmpColors.BgPanel)
-                        .clickable(enabled = !running) { onSelect(level) }.heightIn(min = 48.dp)
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        level,
-                        fontSize = 14.sp,
-                        color = OmpColors.Text,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (isSelected) {
-                        Icon(
-                            Icons.Filled.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = OmpColors.Accent,
+        Column(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.chat_thinking_level), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = OmpColors.Text, modifier = Modifier.weight(1f))
+                IconButton(onClick = onClose) { Icon(Icons.Filled.Close, stringResource(R.string.chat_thinking_close), tint = OmpColors.TextMuted) }
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 332.dp).verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                THINKING_LEVELS.forEach { level ->
+                    val isSelected = level == selected
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isSelected) OmpColors.BgHover else OmpColors.BgPanel)
+                            .clickable(enabled = !running) { onSelect(level) }.heightIn(min = 48.dp)
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            level,
+                            fontSize = 14.sp,
+                            color = OmpColors.Text,
+                            modifier = Modifier.weight(1f),
                         )
+                        if (isSelected) {
+                            Icon(
+                                Icons.Filled.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = OmpColors.Accent,
+                            )
+                        }
                     }
                 }
             }
@@ -1229,7 +1243,6 @@ private fun ThinkingPickerSheet(
 
 
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BranchSheet(
     branches: List<RelayBranch>,
@@ -1237,52 +1250,52 @@ private fun BranchSheet(
     onPick: (RelayBranch) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(
-        dragHandle = { OmpSheetDragHandle() },
+    OmpModalSheet(
         onDismissRequest = onDismiss,
         containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
     ) {
-        OmpDialogSystemBars()
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 560.dp).verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.chat_menu_branches), fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-                    color = OmpColors.Text, modifier = Modifier.weight(1f))
-                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, stringResource(R.string.chat_branches_close), tint = OmpColors.TextMuted) }
-            }
-            if (branches.isEmpty()) {
-                Text(
-                    stringResource(R.string.chat_branches_empty),
-                    fontSize = 14.sp,
-                    color = OmpColors.TextMuted,
-                )
-            } else {
-                branches.forEach { branch ->
-                    val selected = branch.id == leafId
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (selected) OmpColors.BgHover else OmpColors.BgPanel)
-                            .clickable { onPick(branch) }.heightIn(min = 48.dp)
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(branch.label.ifBlank { branch.id }, fontSize = 14.sp, color = OmpColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            if (!branch.role.isNullOrBlank()) {
-                                Text(branch.role, fontSize = 12.sp, color = OmpColors.TextMuted, maxLines = 1)
+        Column(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 560.dp).verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.chat_menu_branches), fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                        color = OmpColors.Text, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, stringResource(R.string.chat_branches_close), tint = OmpColors.TextMuted) }
+                }
+                if (branches.isEmpty()) {
+                    Text(
+                        stringResource(R.string.chat_branches_empty),
+                        fontSize = 14.sp,
+                        color = OmpColors.TextMuted,
+                    )
+                } else {
+                    branches.forEach { branch ->
+                        val selected = branch.id == leafId
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (selected) OmpColors.BgHover else OmpColors.BgPanel)
+                                .clickable { onPick(branch) }.heightIn(min = 48.dp)
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(branch.label.ifBlank { branch.id }, fontSize = 14.sp, color = OmpColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                if (!branch.role.isNullOrBlank()) {
+                                    Text(branch.role, fontSize = 12.sp, color = OmpColors.TextMuted, maxLines = 1)
+                                }
                             }
-                        }
-                        if (selected) {
-                            Text("✓", fontSize = 14.sp, color = OmpColors.Accent)
+                            if (selected) {
+                                Text("✓", fontSize = 14.sp, color = OmpColors.Accent)
+                            }
                         }
                     }
                 }

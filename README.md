@@ -2,7 +2,7 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-> **Android APK (Android 12+)** — Use the Kotlin companion app to connect to a remote ompgui server, with a read-only offline snapshot of the latest session. [Download ompgui Remote v0.7.0](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.1/ompgui-remote-v0.7.0.apk) · [Release notes](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.1)
+> **Android APK (Android 12+)** — Use the Kotlin companion app to connect to a remote ompgui server, with a read-only offline snapshot of the latest session. [Download ompgui Remote v0.7.2](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.2/ompgui-remote-v0.7.2.apk) · [Release notes](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.2)
 
 > The Kotlin companion app in `android/` uses authenticated `/relay` WebSockets for session/history controls and linked messages, offline Mermaid diagrams and code highlighting, and inline image/PDF/audio/HTML/Markdown/DOCX previews. Visible-only file auto-refresh preserves unsaved edits; browsing supports allowed hidden files and archive search. Models/settings include the public models.dev catalog, advanced OMP settings, and actual per-session MCP runtime status shown separately from configuration. Attachments are streamed into staging rather than packed into one giant phone JSON payload: up to 10 images at 10 MiB each and, independently, 10 text attachments at 256 KiB each. OMP's own image normalization and provider-specific image-count limi…
 >
@@ -10,7 +10,7 @@
 >
 > Its native interface follows the web app’s Warm and OMP palettes, with a compact project/session tree, a Settings/Usage footer, and a compact composer with a single-row toolbar. History, session information, commands, and runtime controls live in the session menu; secondary workspace actions remain in overflow menus. Runtime controls use expandable tree categories with aligned current values. Settings use compact row selectors, and dropdown menus are anchored to their triggers. Native Android controls, file pickers, sheet navigation, and distinct touch regions of at least 48 dp are retained.
 >
-> This companion client does not replace the published v0.7.0 APK or add a hosted/E2E relay. To build, use JDK 21, run `npm install` at the repository root, then run `./gradlew :app:assembleDebug` from `android/`; offline assets are generated from the installed npm dependencies. Output: `android/app/build/outputs/apk/debug/app-debug.apk`. Server-disabled update, logout, and stored API-key mutations remain unavailable.
+> This companion client does not replace the published v0.7.2 APK or add a hosted/E2E relay. To build, use JDK 21, run `npm install` at the repository root, then run `./gradlew :app:assembleDebug` from `android/`; offline assets are generated from the installed npm dependencies. Output: `android/app/build/outputs/apk/debug/app-debug.apk`. Server-disabled update, logout, and stored API-key mutations remain unavailable.
 
 Local web UI for the [oh-my-pi (omp) coding agent](https://github.com/can1357/oh-my-pi). ompgui reads your local omp session files and gives you a browser workspace for session browsing, real-time chat, model configuration, skill management, and project file preview.
 
@@ -68,6 +68,31 @@ OMP_WEB_NO_OPEN=1 ompgui        # useful when running as a background service
 ```
 
 Set `OMP_WEB_PASSWORD` (or pass `--password`) to protect the interface and every API endpoint with a themed, password-only sign-in screen. A successful sign-in creates an HTTP-only signed session cookie for 30 days; changing the configured password invalidates existing sessions. Leaving the variable unset disables authentication. Remote use still requires HTTPS through a trusted reverse proxy or VPN so the password and session cookie cannot be intercepted. On Windows the env-variable syntax is `$env:OMP_WEB_PASSWORD="..."`; `ompgui --password "..."` works in every shell without that extra step.
+
+### macOS background service
+
+Bare `ompgui` runs in the foreground. For a persistent per-user macOS LaunchAgent, install the published npm package and set up the service from a terminal on the Mac. Installing a development checkout as the service is not supported.
+
+```bash
+npm install -g ompgui@latest
+ompgui service install         # install, enable login auto-start, and start now
+ompgui status                  # inspect service state
+```
+
+For a new service, `service install` accepts `--port`, `--hostname`, and `--password` as above. An existing `com.hanbinnoh.ompgui` service definition is validated and reused, preserving its paths, environment, and secrets; rerunning setup does not replace its settings with newly supplied flags.
+
+Use these commands as needed (not as a sequence):
+
+```bash
+ompgui service enable          # enable login auto-start
+ompgui service disable         # disable login auto-start; keep running and retain configuration
+ompgui start                   # start the installed service now
+ompgui stop                    # stop now; leave login auto-start unchanged
+ompgui restart                 # restart now
+ompgui service uninstall       # stop and remove the service definition, including saved service secrets
+```
+
+The browser GUI exposes these controls under **Settings → System & Updates → Background service** on macOS; the Android APK has no daemon controls. Stopping or uninstalling the server disconnects browser and mobile clients, so this page cannot start it again. After stopping, run `ompgui start` in the Mac's terminal to reconnect; after uninstalling, run `ompgui service install` again. If a foreground `ompgui` occupies the configured port, stop it with **Ctrl+C in its terminal** before installing or starting the service. The service commands do not kill an arbitrary process occupying the port.
 
 ## Remote & Mobile Access (Tailscale Recommended)
 

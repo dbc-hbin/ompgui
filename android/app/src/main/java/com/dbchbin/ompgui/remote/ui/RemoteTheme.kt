@@ -2,14 +2,22 @@ package com.dbchbin.ompgui.remote.ui
 
 import android.content.SharedPreferences
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -25,6 +33,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 import com.dbchbin.ompgui.remote.store.AppPreferences
@@ -79,6 +89,68 @@ private val RemoteShapes = Shapes(
 internal fun OmpSheetDragHandle() {
     Box(Modifier.fillMaxWidth().height(20.dp), contentAlignment = Alignment.Center) {
         Box(Modifier.size(32.dp, 4.dp).background(OmpColors.Border, RoundedCornerShape(2.dp)))
+    }
+}
+
+/**
+ * Non-swipe modal sheet: native [Dialog] + bottom-aligned [Surface].
+ *
+ * Replaces Material3 [androidx.compose.material3.ModalBottomSheet] for scrollable
+ * sheets so nested-scroll overscroll cannot dismiss, while system Back / outside
+ * dismiss use standard [Dialog] [onDismissRequest] (no custom Back plumbing).
+ *
+ * The dialog window owns Back and system/IME insets. Compact sheets wrap their
+ * content; full-height sheets give weighted scroll content the remaining space.
+ */
+@Composable
+fun OmpModalSheet(
+    onDismissRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+    fullHeight: Boolean = false,
+    containerColor: Color = OmpColors.Bg,
+    contentColor: Color = OmpColors.Text,
+    dragHandle: @Composable (() -> Unit)? = { OmpSheetDragHandle() },
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = true,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = false,
+        ),
+    ) {
+        OmpDialogSystemBars()
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val sheetHeight = maxHeight * 0.94f
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.32f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onDismissRequest,
+                    ),
+            )
+            Surface(
+                modifier = modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .then(if (fullHeight) Modifier.height(sheetHeight) else Modifier.heightIn(max = sheetHeight)),
+                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+                color = containerColor,
+                contentColor = contentColor,
+                tonalElevation = 0.dp,
+                shadowElevation = 6.dp,
+            ) {
+                Column(Modifier.fillMaxWidth()) {
+                    dragHandle?.invoke()
+                    content()
+                }
+            }
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 package com.dbchbin.ompgui.remote.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.Alignment
@@ -7,6 +8,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ExpandMore
@@ -16,7 +18,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -86,7 +90,7 @@ fun SettingsSheet(
     var notice by remember { mutableStateOf<String?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
     var reload by remember { mutableIntStateOf(0) }
-    var category by rememberSaveable { mutableStateOf("General") }
+    var category by rememberSaveable { mutableStateOf("Browse") }
     var confirmation by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
     var showUsage by remember { mutableStateOf(false) }
     val sectionState = rememberSaveableStateHolder()
@@ -95,8 +99,9 @@ fun SettingsSheet(
     val contentScroll = scrollPositions.getOrPut(scrollKey) { androidx.compose.foundation.ScrollState(0) }
     var modelsVisited by remember { mutableStateOf(false) }
     val modelCategory = category == "Models" || category == "Providers"
-    val categories = listOf("General", "Safety", "Models", "Providers", "Intelligence", "Agents", "Tools", "System")
+    val categories = listOf("Browse", "General", "Safety", "Models", "Providers", "Intelligence", "Agents", "Tools", "System")
     val categoryTitles = listOf(
+        stringResource(R.string.settings_category_browse),
         stringResource(R.string.settings_category_general),
         stringResource(R.string.settings_category_safety),
         stringResource(R.string.settings_category_models),
@@ -106,6 +111,22 @@ fun SettingsSheet(
         stringResource(R.string.settings_category_tools),
         stringResource(R.string.settings_category_system),
     )
+    val categoryDescriptions = listOf(
+        stringResource(R.string.settings_browse_hint),
+        stringResource(R.string.settings_category_desc_general),
+        stringResource(R.string.settings_category_desc_safety),
+        stringResource(R.string.settings_category_desc_models),
+        stringResource(R.string.settings_category_desc_providers),
+        stringResource(R.string.settings_category_desc_intelligence),
+        stringResource(R.string.settings_category_desc_agents),
+        stringResource(R.string.settings_category_desc_tools),
+        stringResource(R.string.settings_category_desc_system),
+    )
+    val contentCategories = categories.drop(1)
+    val contentTitles = categoryTitles.drop(1)
+    val contentDescriptions = categoryDescriptions.drop(1)
+    val selectedCategoryIndex = categories.indexOf(category).coerceAtLeast(0)
+    val selectedCategoryDescription = categoryDescriptions.getOrElse(selectedCategoryIndex) { "" }
     val groupAdvisor = stringResource(R.string.settings_group_advisor)
     val groupCompaction = stringResource(R.string.settings_group_compaction)
     val groupMemory = stringResource(R.string.settings_group_memory)
@@ -114,11 +135,19 @@ fun SettingsSheet(
     val groupMcp = stringResource(R.string.settings_group_mcp)
     val groupModels = stringResource(R.string.settings_group_models)
     val groupToolsSafety = stringResource(R.string.settings_group_tools_safety)
+    val groupAppearance = stringResource(R.string.settings_group_appearance)
+    val groupInterface = stringResource(R.string.settings_group_interface)
     val tabAgentInventory = stringResource(R.string.settings_tab_agent_inventory)
     val tabTaskDefaults = stringResource(R.string.settings_tab_task_defaults)
-    val tabExtensions = stringResource(R.string.settings_tab_extensions)
-    val tabBuiltinTools = stringResource(R.string.settings_tab_builtin_tools)
+    val settingsSubtabAria = stringResource(R.string.settings_subtab_aria)
+    val settingsNavAria = stringResource(R.string.settings_nav_aria)
+    val settingsAllSections = stringResource(R.string.settings_all_sections)
+    val settingsBrowseTitle = stringResource(R.string.settings_browse_title)
     LaunchedEffect(modelCategory) { if (modelCategory) modelsVisited = true }
+    // Migrate stale saveable values if any future ids change; keep unknown as Browse.
+    LaunchedEffect(category) {
+        if (category !in categories) category = "Browse"
+    }
     val save: (String, Any) -> Unit = { path, value ->
         if (!busy) scope.launch {
             busy = true
@@ -154,9 +183,18 @@ fun SettingsSheet(
         } catch (failure: Exception) { error = failure.message ?: context.getString(R.string.settings_load_failed)
         } finally { busy = false }
     }
-    ModalBottomSheet(onDismissRequest = onDismiss, dragHandle = { OmpSheetDragHandle() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = OmpColors.Bg, contentColor = OmpColors.Text) {
-        OmpDialogSystemBars()
-        Column(Modifier.fillMaxWidth().fillMaxHeight(0.94f)) {
+    OmpModalSheet(
+        onDismissRequest = onDismiss,
+        fullHeight = true,
+        containerColor = OmpColors.Bg,
+        contentColor = OmpColors.Text,
+    ) {
+        // Hierarchy only — Dialog owns system Back dismiss when this is inactive.
+        BackHandler(enabled = !showUsage && (query.isNotBlank() || category != "Browse")) {
+            if (query.isNotBlank()) query = ""
+            else category = "Browse"
+        }
+        Column(Modifier.fillMaxWidth().weight(1f)) {
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 IconButton(enabled = !busy, onClick = { notice = null; reload++ }, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.Refresh, stringResource(R.string.settings_refresh), modifier = Modifier.size(20.dp)) }
@@ -183,84 +221,172 @@ fun SettingsSheet(
                 )
             }
 
-            ScrollableTabRow(
-                selectedTabIndex = categories.indexOf(category),
-                edgePadding = 0.dp,
-                containerColor = OmpColors.Bg,
-                contentColor = OmpColors.Text,
-                indicator = { tabPositions ->
-                    if (tabPositions.isNotEmpty() && categories.indexOf(category) in tabPositions.indices) {
-                        TabRowDefaults.SecondaryIndicator(
-                            Modifier.tabIndicatorOffset(tabPositions[categories.indexOf(category)]),
-                            color = OmpColors.Accent,
+            val showBrowseOverview = query.isBlank() && category == "Browse"
+            if (!showBrowseOverview) {
+                val quickTabIndex = contentCategories.indexOf(category).coerceAtLeast(0)
+                ScrollableTabRow(
+                    selectedTabIndex = quickTabIndex,
+                    edgePadding = 0.dp,
+                    containerColor = OmpColors.Bg,
+                    contentColor = OmpColors.Text,
+                    modifier = Modifier.semantics { contentDescription = settingsNavAria },
+                    indicator = { tabPositions ->
+                        if (tabPositions.isNotEmpty() && quickTabIndex in tabPositions.indices) {
+                            TabRowDefaults.SecondaryIndicator(
+                                Modifier.tabIndicatorOffset(tabPositions[quickTabIndex]),
+                                color = OmpColors.Accent,
+                            )
+                        }
+                    },
+                ) {
+                    contentCategories.forEachIndexed { index, name ->
+                        val title = contentTitles[index]
+                        val description = contentDescriptions[index]
+                        Tab(
+                            selected = category == name,
+                            onClick = { category = name; query = ""; notice = null },
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .semantics { contentDescription = "$title. $description" },
+                            text = {
+                                Text(
+                                    title,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
                         )
                     }
-                },
-            ) {
-                categories.forEachIndexed { index, name ->
-                    Tab(
-                        selected = category == name,
-                        onClick = { category = name; query = ""; notice = null },
-                        modifier = Modifier.heightIn(min = 40.dp),
-                        text = { Text(categoryTitles[index], style = MaterialTheme.typography.labelMedium) },
-                    )
                 }
+                HorizontalDivider(color = OmpColors.Border)
             }
-            HorizontalDivider(color = OmpColors.Border)
 
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(
+                Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 notice?.let { Text(it, color = OmpColors.TextMuted, style = MaterialTheme.typography.bodySmall) }
+                if (query.isBlank()) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                if (showBrowseOverview) settingsBrowseTitle else categoryTitles[selectedCategoryIndex],
+                                style = MaterialTheme.typography.titleSmall,
+                                color = OmpColors.Text,
+                            )
+                            Text(
+                                if (showBrowseOverview) stringResource(R.string.settings_browse_hint) else selectedCategoryDescription,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = OmpColors.TextMuted,
+                            )
+                        }
+                        if (!showBrowseOverview) {
+                            TextButton(
+                                onClick = { category = "Browse"; query = ""; notice = null },
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            ) {
+                                Text(settingsAllSections)
+                            }
+                        }
+                    }
+                }
             }
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(contentScroll).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 sectionState.SaveableStateProvider(if (query.isBlank()) category else "search") {
                     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    var showDefaults by rememberSaveable(category) { mutableStateOf(false) }
-                    if (query.isBlank() && category in listOf("Agents", "Tools")) {
-                        val tabs = if (category == "Agents") listOf(tabAgentInventory, tabTaskDefaults) else listOf(tabExtensions, tabBuiltinTools)
-                        ScrollableTabRow(selectedTabIndex = if (showDefaults) 1 else 0, edgePadding = 0.dp, containerColor = OmpColors.Bg, contentColor = OmpColors.Text) {
+                    if (showBrowseOverview) {
+                        SettingsCategoryOverview(
+                            categories = contentCategories,
+                            titles = contentTitles,
+                            descriptions = contentDescriptions,
+                            onSelect = { selected ->
+                                category = selected
+                                query = ""
+                                notice = null
+                            },
+                        )
+                    }
+                    var showTaskDefaults by rememberSaveable(category) { mutableStateOf(false) }
+                    if (query.isBlank() && category == "Agents") {
+                        val tabs = listOf(tabAgentInventory, tabTaskDefaults)
+                        ScrollableTabRow(
+                            selectedTabIndex = if (showTaskDefaults) 1 else 0,
+                            edgePadding = 0.dp,
+                            containerColor = OmpColors.Bg,
+                            contentColor = OmpColors.Text,
+                            modifier = Modifier.semantics { contentDescription = settingsSubtabAria },
+                        ) {
                             tabs.forEachIndexed { index, title ->
-                                Tab(selected = showDefaults == (index == 1), onClick = { showDefaults = index == 1 }, modifier = Modifier.heightIn(min = 48.dp), text = { Text(title) })
+                                Tab(
+                                    selected = showTaskDefaults == (index == 1),
+                                    onClick = { showTaskDefaults = index == 1 },
+                                    modifier = Modifier.heightIn(min = 48.dp),
+                                    text = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                )
                             }
                         }
                     }
-                    val localMatches = query.isBlank() && category == "General" || query.isNotBlank() && listOf("general", "theme", "palette", "language", "completion chime", "submit", "collapse tool calls").any { it.contains(query, true) }
-                    if (localMatches) LocalPreferencesSection()
-                    val fields = settingFields.filter { if (query.isBlank()) it.category == category && (category !in listOf("Agents", "Tools") || showDefaults) else it.path.contains(query, true) || it.category.contains(query, true) }
+                    val localMatches = query.isBlank() && category == "General" || query.isNotBlank() && listOf("general", "theme", "palette", "language", "appearance", "completion chime", "submit", "collapse tool calls", "interface").any { it.contains(query, true) }
+                    if (localMatches) LocalPreferencesSection(groupAppearance = groupAppearance, groupInterface = groupInterface)
+                    val groupLabels = SettingsGroupLabels(
+                        advisor = groupAdvisor,
+                        compaction = groupCompaction,
+                        memory = groupMemory,
+                        retry = groupRetry,
+                        task = groupTask,
+                        mcp = groupMcp,
+                        models = groupModels,
+                        toolsSafety = groupToolsSafety,
+                    )
+                    val fields = settingFields.filter {
+                        if (query.isBlank()) {
+                            when (category) {
+                                "Browse" -> false
+                                "Agents" -> showTaskDefaults && it.category == "Agents"
+                                // Tools fields render inside ExtensionSettingsPanel Optional Tools.
+                                "Tools" -> false
+                                else -> it.category == category
+                            }
+                        } else {
+                            val matchedCategories = contentCategories.filterIndexed { index, _ ->
+                                contentTitles[index].contains(query, true) ||
+                                    contentDescriptions[index].contains(query, true)
+                            }
+                            it.path.contains(query, true) ||
+                                it.category.contains(query, true) ||
+                                groupLabels.forField(it).contains(query, true) ||
+                                it.category in matchedCategories
+                        }
+                    }
                     if (query.isNotBlank() && fields.isEmpty() && !localMatches) Text(stringResource(R.string.settings_no_matches), color = OmpColors.TextMuted)
-                    for ((group, groupFields) in fields.groupBy {
-                        when (it.path.substringBefore('.', it.category)) {
-                            "advisor" -> groupAdvisor
-                            "compaction" -> groupCompaction
-                            "memory", "autolearn", "mnemopi" -> groupMemory
-                            "retry" -> groupRetry
-                            "task" -> groupTask
-                            "mcp" -> groupMcp
-                            "Models" -> groupModels
-                            "tools" -> groupToolsSafety
-                            else -> it.path.substringBefore('.', it.category).replaceFirstChar { char -> char.uppercase() }
-                        }
-                    }) {
-                        Text(group, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp), style = MaterialTheme.typography.titleSmall, color = OmpColors.TextMuted)
-                        for (field in groupFields) {
-                            var node: JSONObject? = snapshot
-                            val segments = field.path.split('.')
-                            for (segment in segments.dropLast(1)) node = node?.optJSONObject(segment)
-                            val value = node?.opt(segments.last())?.takeUnless { it == JSONObject.NULL }
-                            key(field.path) {
-                                SettingEditor(field, value, !busy && snapshot != null) { newValue ->
-                                    if (field.path == "computer.enabled" && newValue == true || field.path == "tools.approvalMode" && newValue == "yolo" || field.path == "tools.approval.bash" && newValue == "allow") {
-                                        confirmation = context.getString(R.string.settings_confirm_security_grant, field.path, newValue) to { save(field.path, newValue) }
-                                    } else save(field.path, newValue)
-                                }
-                            }
-                        }
-                    }
+                    SettingFieldGroups(
+                        fields = fields,
+                        snapshot = snapshot,
+                        busy = busy,
+                        groupLabels = groupLabels,
+                        onConfirm = { message, action -> confirmation = message to action },
+                        save = save,
+                    )
                     if (query.isBlank()) when (category) {
                         "Models" -> currentModel?.let { Text(stringResource(R.string.settings_current_model, it.displayName(), it.provider), style = MaterialTheme.typography.bodySmall) }
-                        "Agents" -> if (!showDefaults) ExtensionAgentsSection(requester, settingsCwd)
-                        "Tools" -> if (!showDefaults) ExtensionSettingsPanel(requester, settingsCwd)
+                        "Agents" -> if (!showTaskDefaults) ExtensionAgentsSection(requester, settingsCwd)
+                        "Tools" -> ExtensionSettingsPanel(requester, settingsCwd) {
+                            SettingFieldGroups(
+                                fields = settingFields.filter { it.category == "Tools" },
+                                snapshot = snapshot,
+                                busy = busy,
+                                groupLabels = groupLabels,
+                                onConfirm = { message, action -> confirmation = message to action },
+                                save = save,
+                            )
+                        }
                         "System" -> {
                             Text(stringResource(R.string.settings_connection), style = MaterialTheme.typography.titleSmall)
                             for ((label, value) in listOf(
@@ -291,6 +417,99 @@ fun SettingsSheet(
     }
     confirmation?.let { pending -> AlertDialog(onDismissRequest = { confirmation = null }, title = { Text(stringResource(R.string.settings_confirm_security_title)) }, text = { OmpDialogSystemBars(); Text(pending.first) }, confirmButton = { TextButton(onClick = { confirmation = null; pending.second() }) { Text(stringResource(R.string.settings_confirm)) } }, dismissButton = { TextButton(onClick = { confirmation = null }) { Text(stringResource(R.string.settings_cancel)) } }) }
     if (showUsage) UsageSheet(requester = requester, onDismiss = { showUsage = false })
+}
+
+@Composable
+private fun SettingsCategoryOverview(
+    categories: List<String>,
+    titles: List<String>,
+    descriptions: List<String>,
+    onSelect: (String) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        categories.forEachIndexed { index, id ->
+            val categoryTitle = titles[index]
+            val categoryDescription = descriptions[index]
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 64.dp)
+                    .clickable(role = Role.Button, onClick = { onSelect(id) })
+                    .semantics { contentDescription = "$categoryTitle. $categoryDescription" },
+                color = OmpColors.BgPanel,
+                shape = MaterialTheme.shapes.small,
+                border = BorderStroke(1.dp, OmpColors.Border),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(categoryTitle, style = MaterialTheme.typography.titleSmall, color = OmpColors.Text)
+                        Text(categoryDescription, style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted)
+                    }
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = null,
+                        tint = OmpColors.TextDim,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private data class SettingsGroupLabels(
+    val advisor: String,
+    val compaction: String,
+    val memory: String,
+    val retry: String,
+    val task: String,
+    val mcp: String,
+    val models: String,
+    val toolsSafety: String,
+) {
+    fun forField(field: SettingField): String = when (field.path.substringBefore('.', field.category)) {
+        "advisor" -> advisor
+        "compaction" -> compaction
+        "memory", "autolearn", "mnemopi" -> memory
+        "retry" -> retry
+        "task" -> task
+        "mcp" -> mcp
+        "Models" -> models
+        "tools" -> toolsSafety
+        else -> field.path.substringBefore('.', field.category).replaceFirstChar { char -> char.uppercase() }
+    }
+}
+
+@Composable
+private fun SettingFieldGroups(
+    fields: List<SettingField>,
+    snapshot: JSONObject?,
+    busy: Boolean,
+    groupLabels: SettingsGroupLabels,
+    onConfirm: (String, () -> Unit) -> Unit,
+    save: (String, Any) -> Unit,
+) {
+    val context = LocalContext.current
+    for ((group, groupFields) in fields.groupBy(groupLabels::forField)) {
+        Text(group, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp), style = MaterialTheme.typography.titleSmall, color = OmpColors.TextMuted)
+        for (field in groupFields) {
+            var node: JSONObject? = snapshot
+            val segments = field.path.split('.')
+            for (segment in segments.dropLast(1)) node = node?.optJSONObject(segment)
+            val value = node?.opt(segments.last())?.takeUnless { it == JSONObject.NULL }
+            key(field.path) {
+                SettingEditor(field, value, !busy && snapshot != null) { newValue ->
+                    if (field.path == "computer.enabled" && newValue == true || field.path == "tools.approvalMode" && newValue == "yolo" || field.path == "tools.approval.bash" && newValue == "allow") {
+                        onConfirm(context.getString(R.string.settings_confirm_security_grant, field.path, newValue)) { save(field.path, newValue) }
+                    } else save(field.path, newValue)
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -407,7 +626,10 @@ private fun SettingEditor(field: SettingField, value: Any?, enabled: Boolean, sa
 }
 
 @Composable
-private fun LocalPreferencesSection() {
+private fun LocalPreferencesSection(
+    groupAppearance: String,
+    groupInterface: String,
+) {
     val context = LocalContext.current
     var theme by remember { mutableStateOf(AppPreferences.getTheme(context)) }
     var palette by remember { mutableStateOf(AppPreferences.getPalette(context)) }
@@ -415,11 +637,11 @@ private fun LocalPreferencesSection() {
     var chime by remember { mutableStateOf(AppPreferences.isSoundChime(context)) }
     var submit by remember { mutableStateOf(AppPreferences.getSubmitBehavior(context)) }
     var collapsed by remember { mutableStateOf(AppPreferences.isToolCallsCollapsed(context)) }
-    Text(stringResource(R.string.settings_appearance), style = MaterialTheme.typography.titleSmall, color = OmpColors.TextMuted)
+    Text(groupAppearance, style = MaterialTheme.typography.titleSmall, color = OmpColors.TextMuted)
     SettingEditor(SettingField("Theme", "General", "choice", listOf("system", "light", "dark")), theme, true) { theme = it.toString(); AppPreferences.setTheme(context, theme) }
     SettingEditor(SettingField("Palette", "General", "choice", listOf("warm", "omp")), palette, true) { palette = it.toString(); AppPreferences.setPalette(context, palette) }
     SettingEditor(SettingField("Language", "General", "choice", listOf("English", "한국어")), language, true) { language = it.toString(); AppPreferences.setLanguage(context, language) }
-    Text(stringResource(R.string.settings_category_general), modifier = Modifier.padding(top = 12.dp, bottom = 4.dp), style = MaterialTheme.typography.titleSmall, color = OmpColors.TextMuted)
+    Text(groupInterface, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp), style = MaterialTheme.typography.titleSmall, color = OmpColors.TextMuted)
     SettingEditor(SettingField("Completion chime", "General"), chime, true) { chime = it == true; AppPreferences.setSoundChime(context, chime) }
     SettingEditor(SettingField("Submit during run", "General", "choice", listOf("steer", "queue")), submit, true) { submit = it.toString(); AppPreferences.setSubmitBehavior(context, submit) }
     SettingEditor(SettingField("Collapse tool calls", "General"), collapsed, true) { collapsed = it == true; AppPreferences.setToolCallsCollapsed(context, collapsed) }

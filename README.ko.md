@@ -2,13 +2,13 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-> **Android APK (Android 12+)** — Kotlin 보조 앱으로 원격 ompgui 서버에 연결하고, 최신 세션의 읽기 전용 오프라인 스냅샷을 이용할 수 있습니다. [ompgui Remote v0.7.0 다운로드](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.1/ompgui-remote-v0.7.0.apk) · [릴리스 노트](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.1)
+> **Android APK (Android 12+)** — Kotlin 보조 앱으로 원격 ompgui 서버에 연결하고, 최신 세션의 읽기 전용 오프라인 스냅샷을 이용할 수 있습니다. [ompgui Remote v0.7.2 다운로드](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.2/ompgui-remote-v0.7.2.apk) · [릴리스 노트](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.2)
 
 > `android/`의 실험용 네이티브 Compose 클라이언트는 인증된 `/relay` WebSocket을 사용하며, 세션/기록 제어와 링크가 포함된 메시지, 오프라인 Mermaid 다이어그램 및 코드 구문 강조, 이미지/PDF/오디오/HTML/Markdown/DOCX 인라인 미리보기를 제공합니다. 파일 자동 새로고침은 화면에 보일 때만 동작하며 저장하지 않은 편집 내용을 보존합니다. 허용된 숨김 파일 탐색과 아카이브 검색도 지원합니다. 모델/설정에서는 공개 models.dev 카탈로그, 고급 OMP 설정, 구성 상태와 구분되는 세션별 실제 MCP 실행 상태를 확인할 수 있습니다. 첨부 파일은 휴대폰에서 하나의 거대한 JSON으로 묶지 않고 스트리밍으로 스테이징하며, 이미지는 개당 10 MiB로 최대 10개, 텍스트 첨부는 별도로 개당 256 KiB로 최대 10개까지 지원합니다. OMP 자체의 이미지 정규화와 제공자별 이미지 개수 제한은 계속 적용됩니다.
 >
 > 네이티브 인터페이스는 웹 앱의 Warm 및 OMP 색상 팔레트를 따르며, 간결한 프로젝트/세션 트리와 설정/사용량 하단 메뉴, 도구 모음을 한 줄로 정리한 메시지 입력창을 제공합니다. 기록, 세션 정보, 명령 및 런타임 제어는 세션 메뉴에 모았고, 보조 워크스페이스 작업은 더보기 메뉴에 유지했습니다. 런타임 제어는 펼칠 수 있는 트리 카테고리로 구성하고 현재 값을 일정한 열에 맞춰 표시합니다. 설정은 간결한 행 단위 선택 컨트롤을 사용하며, 드롭다운 메뉴는 해당 컨트롤에 붙어 열립니다. Android 네이티브 컨트롤, 파일 선택기, 시트 탐색 방식과 서로 겹치지 않는 최소 48dp 터치 영역을 유지합니다.
 >
-> 이 클라이언트는 배포된 v0.7.0 APK를 대체하거나 호스팅형/E2E 릴레이를 추가하지 않습니다. JDK 21을 사용하여 저장소 루트에서 `npm install`을 실행한 뒤, `android/`에서 `./gradlew :app:assembleDebug`로 빌드합니다. 오프라인 에셋은 설치된 npm 의존성에서 생성되며, 출력 경로는 `android/app/build/outputs/apk/debug/app-debug.apk`입니다. 서버에서 비활성화된 업데이트, 로그아웃, 저장된 API 키 변경 작업은 여전히 사용할 수 없습니다.
+> 이 클라이언트는 배포된 v0.7.2 APK를 대체하거나 호스팅형/E2E 릴레이를 추가하지 않습니다. JDK 21을 사용하여 저장소 루트에서 `npm install`을 실행한 뒤, `android/`에서 `./gradlew :app:assembleDebug`로 빌드합니다. 오프라인 에셋은 설치된 npm 의존성에서 생성되며, 출력 경로는 `android/app/build/outputs/apk/debug/app-debug.apk`입니다. 서버에서 비활성화된 업데이트, 로그아웃, 저장된 API 키 변경 작업은 여전히 사용할 수 없습니다.
 
 [oh-my-pi (omp) 코딩 에이전트](https://github.com/can1357/oh-my-pi)를 위한 로컬 웹 UI입니다. ompgui은 로컬 omp 세션 파일을 읽어 브라우저에서 세션 탐색, 실시간 채팅, 모델 설정, 스킬 관리, 프로젝트 파일 미리보기를 제공하는 워크스페이스를 엽니다.
 
@@ -66,6 +66,31 @@ OMP_WEB_NO_OPEN=1 ompgui        # 백그라운드 서비스로 실행할 때 유
 ```
 
 `OMP_WEB_PASSWORD`를 설정하거나 `--password`를 전달하면 테마가 적용된 비밀번호 전용 로그인 화면으로 인터페이스와 모든 API 엔드포인트를 보호합니다. 로그인에 성공하면 30일 동안 유효한 HTTP 전용 서명 세션 쿠키가 생성됩니다. 설정된 비밀번호를 변경하면 기존 세션이 무효화됩니다. 변수를 설정하지 않으면 인증이 비활성화됩니다. 원격 사용 시 비밀번호와 세션 쿠키가 가로채이지 않도록 신뢰할 수 있는 리버스 프록시나 VPN을 통해 HTTPS를 사용해야 합니다. Windows 환경 변수 문법은 `$env:OMP_WEB_PASSWORD="..."`이며, `ompgui --password "..."`는 별도 문법 없이 모든 셸에서 작동합니다.
+
+### macOS 백그라운드 서비스
+
+인수 없이 `ompgui`를 실행하면 포그라운드에서 동작합니다. macOS 사용자별 LaunchAgent로 실행하려면 Mac 터미널에서 배포된 npm 패키지를 설치하고 서비스를 설정하세요. 개발 체크아웃을 서비스로 설치하는 방식은 지원하지 않습니다.
+
+```bash
+npm install -g ompgui@latest
+ompgui service install         # 설치, 로그인 시 자동 시작 활성화, 즉시 시작
+ompgui status                  # 서비스 상태 확인
+```
+
+새 서비스 설치 시 위의 `--port`, `--hostname`, `--password` 옵션을 사용할 수 있습니다. 기존 `com.hanbinnoh.ompgui` 서비스 정의는 검증 후 재사용하며 경로, 환경 변수, 비밀 값을 보존합니다. 설정을 다시 실행해도 새로 전달한 옵션으로 기존 설정을 덮어쓰지 않습니다.
+
+아래 명령은 순서대로 실행하는 절차가 아니라 필요에 따라 선택하는 제어 명령입니다.
+
+```bash
+ompgui service enable          # 로그인 시 자동 시작 활성화
+ompgui service disable         # 자동 시작만 비활성화; 실행 중인 서버와 설정 유지
+ompgui start                   # 설치된 서비스 즉시 시작
+ompgui stop                    # 지금 중지; 로그인 자동 시작 설정은 유지
+ompgui restart                 # 지금 재시작
+ompgui service uninstall       # 중지 후 서비스 정의와 저장된 서비스 비밀 값 제거
+```
+
+macOS 브라우저 GUI의 **Settings → System & Updates → Background service**(설정 → 시스템 및 업데이트 → 백그라운드 서비스)에서도 제어할 수 있습니다. Android APK에는 데몬 제어가 없습니다. 서버를 중지하거나 제거하면 브라우저와 모바일 클라이언트 연결이 끊기므로 이 페이지에서 다시 시작할 수 없습니다. 중지 후에는 Mac 터미널에서 `ompgui start`를, 제거 후에는 `ompgui service install`을 실행하고 다시 접속하세요. 포그라운드 `ompgui`가 설정된 포트를 사용 중이면 **해당 터미널에서 Ctrl+C**로 중지한 뒤 서비스를 설치하거나 시작하세요. 서비스 명령은 포트를 점유한 임의의 프로세스를 강제로 종료하지 않습니다.
 
 ## 원격 및 모바일 접속 (Tailscale 권장)
 

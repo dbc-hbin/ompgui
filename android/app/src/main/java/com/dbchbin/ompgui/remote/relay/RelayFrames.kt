@@ -359,6 +359,11 @@ data class SubagentChip(
     val agent: String,
     val status: String,
     val task: String,
+    /**
+     * True only for live registry / progress origin (get_subagents + events).
+     * Historical sessions/subagents rows stay false even when status is started.
+     */
+    val live: Boolean = false,
 )
 
 data class RelayArchive(val key: String, val name: String? = null, val id: String? = null, val archivedAt: String? = null, val cwd: String? = null)
@@ -1344,23 +1349,130 @@ fun parseTodoPhases(array: JSONArray?): List<TodoPhase> {
     return out
 }
 
-fun parseSubagentChips(array: JSONArray?): List<SubagentChip> {
+fun normalizeSubagentStatus(raw: String): String? = when (raw.trim().lowercase()) {
+    "pending", "started", "running" -> "running"
+    "completed" -> "completed"
+    "failed" -> "failed"
+    "aborted" -> "aborted"
+    else -> null
+}
+
+fun isSubagentTerminal(status: String): Boolean = when (status) {
+    "completed", "failed", "aborted" -> true
+    else -> false
+}
+
+/** Hub "live" count: registry/progress origin only — never history started. */
+fun isSubagentLive(chip: SubagentChip): Boolean =
+    chip.live && !isSubagentTerminal(chip.status)
+
+/**
+ * Historical sessions/subagents status. Terminal only with explicit evidence
+ * (aborted / error / exitCode / terminal result.status). Otherwise "unknown"
+ * — visible, not-live, never presented as registry-running.
+ */
+fun historicalSubagentStatus(item: JSONObject, normalized: String): String {
+    if (isSubagentTerminal(normalized)) return normalized
+    val result = item.optJSONObject("result")
+    if (result != null) {
+        if (result.optBoolean("aborted")) return "aborted"
+        val error = result.optString("error").trim()
+        if (error.isNotEmpty()) return "failed"
+        if (result.has("exitCode") && !result.isNull("exitCode")) {
+            return if (result.optInt("exitCode") == 0) "completed" else "failed"
+        }
+        when (result.optString("status").trim().lowercase()) {
+            "completed", "failed", "aborted" -> return result.optString("status").trim().lowercase()
+        }
+    }
+    if (item.optBoolean("aborted")) return "aborted"
+    val error = item.optString("error").trim()
+    if (error.isNotEmpty()) return "failed"
+    if (item.has("exitCode") && !item.isNull("exitCode")) {
+        return if (item.optInt("exitCode") == 0) "completed" else "failed"
+    }
+    return "unknown"
+}
+
+/**
+ * @param live true for get_subagents / event origin; false for sessions/subagents history.
+ */
+fun parseSubagentChips(array: JSONArray?, live: Boolean = true): List<SubagentChip> {
     if (array == null) return emptyList()
     val out = ArrayList<SubagentChip>(array.length())
     for (i in 0 until array.length()) {
         val item = array.optJSONObject(i) ?: continue
         val id = item.optString("id").trim()
         if (id.isEmpty()) continue
+        val normalized = normalizeSubagentStatus(item.optString("status")) ?: continue
+        val status = if (live) normalized else historicalSubagentStatus(item, normalized)
         out.add(
             SubagentChip(
                 id = id,
                 agent = item.optString("agent").trim().ifEmpty { "agent" },
-                status = item.optString("status").trim().ifEmpty { "running" },
+                status = status,
                 task = item.optString("task").trim().ifEmpty { item.optString("description").trim() },
+                live = live && !isSubagentTerminal(status),
             ),
         )
     }
     return out
+}
+
+/**
+ * Merge live registry/events with historical rows. Mirrors web mergeSubagentRoster:
+ * live wins over non-terminal history; terminal history may settle a live started row;
+ * history-only gaps fill without claiming live.
+ */
+fun mergeSubagentChips(primary: List<SubagentChip>, secondary: List<SubagentChip>): List<SubagentChip> {
+    if (primary.isEmpty()) return secondary
+    if (secondary.isEmpty()) return primary
+    val byId = LinkedHashMap<String, SubagentChip>(primary.size + secondary.size)
+    for (chip in primary) byId[chip.id] = chip
+    for (incoming in secondary) {
+        val existing = byId[incoming.id]
+        if (existing == null) {
+            byId[incoming.id] = incoming
+            continue
+        }
+        // Delayed non-terminal must not resurrect an explicit terminal outcome.
+        if (!isSubagentTerminal(incoming.status) && isSubagentTerminal(existing.status)) continue
+
+        if (!incoming.live && existing.live) {
+            // Non-terminal disk is stale while live; terminal disk settles live started.
+            if (!isSubagentTerminal(incoming.status)) continue
+            byId[incoming.id] = existing.copy(
+                status = incoming.status,
+                agent = incoming.agent.ifBlank { existing.agent },
+                task = incoming.task.ifBlank { existing.task },
+                live = false,
+            )
+            continue
+        }
+
+        if (incoming.live && !existing.live) {
+            byId[incoming.id] = incoming
+            continue
+        }
+
+        byId[incoming.id] = incoming.copy(
+            live = incoming.live || existing.live && !isSubagentTerminal(incoming.status),
+        )
+    }
+    return byId.values.toList()
+}
+
+/**
+ * Reconcile an authoritative live get_subagents snapshot with the roster.
+ * Omitted live-running ids drop; historical / terminal rows are retained.
+ */
+fun reconcileSubagentChips(previous: List<SubagentChip>, snapshot: List<SubagentChip>): List<SubagentChip> {
+    if (previous.isEmpty()) return snapshot
+    val snapIds = snapshot.mapTo(HashSet()) { it.id }
+    val retained = previous.filter { chip ->
+        chip.id !in snapIds && (!chip.live || isSubagentTerminal(chip.status))
+    }
+    return mergeSubagentChips(snapshot, retained)
 }
 
 /**

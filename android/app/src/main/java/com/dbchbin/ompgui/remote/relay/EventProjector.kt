@@ -438,6 +438,63 @@ object EventProjector {
         }
     }
 
+    /**
+     * Apply live subagent hub frames onto the chip roster. Returns null when
+     * the payload is not a subagent roster event.
+     */
+    fun applySubagentEvent(current: List<SubagentChip>, payload: JSONObject): List<SubagentChip>? {
+        return when (payload.optString("type")) {
+            "subagent_lifecycle" -> {
+                val id = payload.optString("id").trim()
+                val status = normalizeSubagentStatus(payload.optString("status")) ?: return current
+                if (id.isEmpty()) return current
+                upsertSubagentChip(
+                    current,
+                    SubagentChip(
+                        id = id,
+                        agent = payload.optString("agent").trim().ifEmpty { "subagent" },
+                        status = status,
+                        task = payload.optString("description").trim()
+                            .ifEmpty { payload.optString("task").trim() },
+                        live = !isSubagentTerminal(status),
+                    ),
+                )
+            }
+            "subagent_progress" -> {
+                val progress = payload.optJSONObject("progress") ?: payload
+                val id = progress.optString("id").trim()
+                    .ifEmpty { payload.optString("id").trim() }
+                if (id.isEmpty()) return current
+                val status = normalizeSubagentStatus(progress.optString("status"))
+                    ?: normalizeSubagentStatus(payload.optString("status"))
+                    ?: current.find { it.id == id }?.status
+                    ?: "running"
+                upsertSubagentChip(
+                    current,
+                    SubagentChip(
+                        id = id,
+                        agent = progress.optString("agent").trim()
+                            .ifEmpty { payload.optString("agent").trim() }
+                            .ifEmpty { current.find { it.id == id }?.agent ?: "task" },
+                        status = status,
+                        task = progress.optString("task").trim()
+                            .ifEmpty { progress.optString("description").trim() }
+                            .ifEmpty { payload.optString("task").trim() }
+                            .ifEmpty { current.find { it.id == id }?.task.orEmpty() },
+                        live = !isSubagentTerminal(status),
+                    ),
+                )
+            }
+            else -> null
+        }
+    }
+
+    private fun upsertSubagentChip(current: List<SubagentChip>, chip: SubagentChip): List<SubagentChip> {
+        val index = current.indexOfFirst { it.id == chip.id }
+        if (index < 0) return current + chip
+        return current.toMutableList().also { it[index] = chip }
+    }
+
     private fun extractText(message: JSONObject): String {
         if (message.has("text") && !message.isNull("text")) {
             return message.optString("text")

@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -25,15 +24,12 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,7 +55,6 @@ import java.util.Locale
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UsageSheet(
     requester: com.dbchbin.ompgui.remote.relay.RelayRequester,
@@ -91,15 +86,13 @@ fun UsageSheet(
     val providers = remember(reports) { reports.orEmpty().map { it.provider }.distinct().sorted() }
     val selectedProvider = providerFilter.takeIf { it in providers }.orEmpty()
 
-    ModalBottomSheet(
+    OmpModalSheet(
         onDismissRequest = onDismiss,
-        dragHandle = { OmpSheetDragHandle() },
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        fullHeight = true,
         containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
     ) {
-        OmpDialogSystemBars()
-        Column(Modifier.fillMaxWidth().fillMaxHeight(0.94f)) {
+        Column(Modifier.fillMaxWidth().weight(1f)) {
             // Header
             Row(
                 Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 2.dp),
@@ -190,7 +183,9 @@ fun UsageSheet(
                         shape = MaterialTheme.shapes.small,
                     ) {
                         Text(
-                            selectedProvider.ifBlank { usageAllProviders },
+                            selectedProvider.ifBlank { usageAllProviders }.let { raw ->
+                                if (raw.isBlank()) usageAllProviders else formatProviderName(raw)
+                            },
                             Modifier.weight(1f),
                             color = OmpColors.Text,
                             style = MaterialTheme.typography.labelLarge,
@@ -200,7 +195,11 @@ fun UsageSheet(
                     DropdownMenu(expanded = filterOpen, onDismissRequest = { filterOpen = false }) {
                         (listOf("") + providers).forEach { provider ->
                             DropdownMenuItem(
-                                text = { Text(provider.ifBlank { usageAllProviders }) },
+                                text = {
+                                    Text(
+                                        if (provider.isBlank()) usageAllProviders else formatProviderName(provider),
+                                    )
+                                },
                                 onClick = { providerFilter = provider; filterOpen = false },
                             )
                         }
@@ -283,23 +282,44 @@ fun UsageSheet(
 
 // ─── Data Models ───
 
+private enum class UsageScopeKind {
+    MODEL,
+    PROVIDER_WIDE,
+    SHARED,
+    UNKNOWN,
+}
+
 private data class UsageLimitView(
+    val title: String,
     val windowLabel: String,
+    val resetLabel: String?,
     val usedFraction: Double?,
     val resetsAtMs: Long?,
     val amountUsed: String?,
     val amountLimit: String?,
     val amountRemaining: String?,
     val unit: String?,
+    val provider: String,
+    val modelId: String?,
+    val tier: String?,
+    val shared: Boolean?,
+    val scopeKind: UsageScopeKind,
+    val notes: List<String>,
 )
 
 private data class UsageReportView(
     val provider: String,
     val limits: List<UsageLimitView>,
     val account: String,
+    val resetCreditsAvailable: Int,
 )
 
 // ─── Parsing ───
+
+private fun formatProviderName(provider: String): String =
+    provider.split(Regex("[-_]"))
+        .filter { it.isNotBlank() }
+        .joinToString(" ") { part -> part.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() } }
 
 private fun formatUsageNumber(value: Any?, formatter: java.text.NumberFormat): String = when (value) {
     null, JSONObject.NULL -> "—"
@@ -324,19 +344,53 @@ private fun parseUsageReports(root: JSONObject?): List<UsageReportView>? {
             val amount = limit.optJSONObject("amount")
             val window = limit.optJSONObject("window")
             val scope = limit.optJSONObject("scope")
+            val modelId = scope?.optString("modelId")?.takeIf { it.isNotBlank() }
+            val tier = scope?.optString("tier")?.takeIf { it.isNotBlank() }
+            val shared = when {
+                scope == null || !scope.has("shared") || scope.isNull("shared") -> null
+                else -> scope.optBoolean("shared")
+            }
+            val scopeKind = when {
+                !modelId.isNullOrBlank() -> UsageScopeKind.MODEL
+                shared == true -> UsageScopeKind.SHARED
+                scope != null -> UsageScopeKind.PROVIDER_WIDE
+                else -> UsageScopeKind.UNKNOWN
+            }
             val windowLabel = window?.optString("label")?.takeIf { it.isNotBlank() }
                 ?: scope?.optString("windowId")?.takeIf { it.isNotBlank() }
-                ?: limit.optString("label").ifBlank { "Usage" }
+                ?: window?.optString("id")?.takeIf { it.isNotBlank() }
+                ?: ""
+            val limitLabel = limit.optString("label").takeIf { it.isNotBlank() }
+            var title = limitLabel ?: windowLabel.ifBlank { "Usage" }
+            if (tier != null && !title.contains(tier, ignoreCase = true)) {
+                title = "$title ($tier)"
+            }
             val resetsAt = window?.optLong("resetsAt")?.takeIf { it > 0 }
+            val resetLabel = window?.optString("resetLabel")?.takeIf { it.isNotBlank() }
+            val notes = limit.optJSONArray("notes")?.let { array ->
+                buildList {
+                    for (index in 0 until array.length()) {
+                        array.optString(index).takeIf { it.isNotBlank() }?.let(::add)
+                    }
+                }
+            }.orEmpty()
             views.add(
                 UsageLimitView(
-                    windowLabel = windowLabel,
+                    title = title,
+                    windowLabel = windowLabel.ifBlank { title },
+                    resetLabel = resetLabel,
                     usedFraction = fraction?.coerceIn(0.0, 1.0),
                     resetsAtMs = resetsAt,
                     amountUsed = amount?.opt("used")?.takeUnless { it == JSONObject.NULL }?.let { formatUsageNumber(it, numberFormat) },
                     amountLimit = amount?.opt("limit")?.takeUnless { it == JSONObject.NULL }?.let { formatUsageNumber(it, numberFormat) },
                     amountRemaining = amount?.opt("remaining")?.takeUnless { it == JSONObject.NULL }?.let { formatUsageNumber(it, numberFormat) },
                     unit = amount?.optString("unit")?.takeIf { it.isNotBlank() },
+                    provider = scope?.optString("provider")?.takeIf { it.isNotBlank() } ?: provider,
+                    modelId = modelId,
+                    tier = tier,
+                    shared = shared,
+                    scopeKind = scopeKind,
+                    notes = notes,
                 ),
             )
         }
@@ -346,11 +400,15 @@ private fun parseUsageReports(root: JSONObject?): List<UsageReportView>? {
                 .mapNotNull { metadata?.optString(it)?.takeIf { name -> name.isNotBlank() } }
                 .firstOrNull().orEmpty()
             val org = metadata?.optString("orgName").orEmpty()
-            out.add(UsageReportView(
-                provider = provider,
-                limits = views,
-                account = if (org.isNotBlank() && org != account) "$account ($org)" else account,
-            ))
+            val resetCredits = report.optJSONObject("resetCredits")?.optInt("availableCount", 0) ?: 0
+            out.add(
+                UsageReportView(
+                    provider = provider,
+                    limits = views,
+                    account = if (org.isNotBlank() && org != account) "$account ($org)" else account,
+                    resetCreditsAvailable = resetCredits,
+                ),
+            )
         }
     }
     return out
@@ -393,7 +451,7 @@ private fun UsageProviderCard(
             // Provider header with name and capacity chips
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    provider,
+                    formatProviderName(provider),
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.weight(1f),
                 )
@@ -426,6 +484,7 @@ private fun UsageProviderCard(
                 UsageAccountBlock(
                     account = report.account,
                     limits = report.limits,
+                    resetCreditsAvailable = report.resetCreditsAvailable,
                 )
             }
         }
@@ -436,6 +495,7 @@ private fun UsageProviderCard(
 private fun UsageAccountBlock(
     account: String,
     limits: List<UsageLimitView>,
+    resetCreditsAvailable: Int = 0,
 ) {
     Surface(
         color = OmpColors.Bg,
@@ -443,14 +503,28 @@ private fun UsageAccountBlock(
         border = BorderStroke(1.dp, OmpColors.Border),
     ) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (account.isNotBlank()) {
-                Text(
-                    account,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = OmpColors.Text,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            if (account.isNotBlank() || resetCreditsAvailable > 0) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    if (account.isNotBlank()) {
+                        Text(
+                            account,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = OmpColors.Text,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    } else {
+                        Spacer(Modifier.weight(1f))
+                    }
+                    if (resetCreditsAvailable > 0) {
+                        Text(
+                            stringResource(R.string.usage_reset_credits, resetCreditsAvailable),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = OmpColors.Accent,
+                        )
+                    }
+                }
             }
             for (limit in limits) {
                 UsageLimitRow(limit)
@@ -470,12 +544,18 @@ private fun UsageLimitRow(limit: UsageLimitView) {
     val percentText = if (fraction != null) {
         String.format(Locale.getDefault(), "%.1f%%", fraction * 100.0)
     } else null
+    val scopeText = when (limit.scopeKind) {
+        UsageScopeKind.MODEL -> stringResource(R.string.usage_scope_model, limit.modelId.orEmpty())
+        UsageScopeKind.SHARED -> stringResource(R.string.usage_scope_shared)
+        UsageScopeKind.PROVIDER_WIDE -> stringResource(R.string.usage_scope_provider_wide)
+        UsageScopeKind.UNKNOWN -> null
+    }
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         // Label + percent inline
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = localizedWindowLabel(limit.windowLabel),
+                text = limit.title,
                 fontSize = 13.sp,
                 color = OmpColors.Text,
                 modifier = Modifier.weight(1f),
@@ -490,7 +570,29 @@ private fun UsageLimitRow(limit: UsageLimitView) {
                     color = OmpColors.Text,
                     style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
                 )
+            } else if (limit.amountUsed == null && limit.amountLimit == null) {
+                Text(
+                    text = stringResource(R.string.usage_quota_unknown),
+                    fontSize = 12.sp,
+                    color = OmpColors.TextDim,
+                )
             }
+        }
+
+        scopeText?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.labelSmall,
+                color = OmpColors.TextMuted,
+            )
+        }
+
+        if (limit.windowLabel.isNotBlank()) {
+            Text(
+                text = stringResource(R.string.usage_window_label, localizedWindowLabel(limit.windowLabel)),
+                style = MaterialTheme.typography.bodySmall,
+                color = OmpColors.TextDim,
+            )
         }
 
         // Amounts line
@@ -526,10 +628,31 @@ private fun UsageLimitRow(limit: UsageLimitView) {
             }
         }
 
-        // Reset time
-        limit.resetsAtMs?.let { resetsAt ->
+        // Reset time — prefer payload resetLabel when present
+        when {
+            limit.resetsAtMs != null -> {
+                val duration = relativeResetDuration(limit.resetsAtMs)
+                Text(
+                    text = if (!limit.resetLabel.isNullOrBlank()) {
+                        "${limit.resetLabel} · $duration"
+                    } else {
+                        duration
+                    },
+                    fontSize = 11.sp,
+                    color = OmpColors.TextDim,
+                )
+            }
+            !limit.resetLabel.isNullOrBlank() -> {
+                Text(
+                    text = limit.resetLabel,
+                    fontSize = 11.sp,
+                    color = OmpColors.TextDim,
+                )
+            }
+        }
+        if (limit.notes.isNotEmpty()) {
             Text(
-                text = relativeResetLabel(resetsAt),
+                text = limit.notes.joinToString(" · "),
                 fontSize = 11.sp,
                 color = OmpColors.TextDim,
             )
@@ -646,7 +769,10 @@ private fun localizedWindowLabel(raw: String): String {
 }
 
 @Composable
-private fun relativeResetLabel(resetsAt: Long): String {
+private fun relativeResetLabel(resetsAt: Long): String = relativeResetDuration(resetsAt)
+
+@Composable
+private fun relativeResetDuration(resetsAt: Long): String {
     val remainingMs = maxOf(0L, resetsAt - System.currentTimeMillis())
     val minutes = remainingMs / 60_000L
     if (minutes < 1) return stringResource(R.string.usage_reset_soon)

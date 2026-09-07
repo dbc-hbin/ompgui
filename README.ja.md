@@ -2,11 +2,11 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-> **Android APK (Android 12+)** — Kotlin 製のコンパニオンアプリでリモートの ompgui サーバーに接続し、最新セッションの読み取り専用オフラインスナップショットを利用できます。[ompgui Remote v0.7.0 をダウンロード](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.1/ompgui-remote-v0.7.0.apk) · [リリースノート](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.1)
+> **Android APK (Android 12+)** — Kotlin 製のコンパニオンアプリでリモートの ompgui サーバーに接続し、最新セッションの読み取り専用オフラインスナップショットを利用できます。[ompgui Remote v0.7.2 をダウンロード](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.2/ompgui-remote-v0.7.2.apk) · [リリースノート](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.2)
 
 > `android/` の実験的なネイティブ Compose クライアントは、認証済みの `/relay` WebSocket を使用し、セッション・履歴の操作、リンク付きメッセージ、オフラインの Mermaid 図とコードの構文強調、画像/PDF/音声/HTML/Markdown/DOCX のインラインプレビューを提供します。ファイルの自動更新は表示中のみ動作し、未保存の編集を保持します。許可された隠しファイルの閲覧とアーカイブ検索にも対応します。モデル・設定には公開 models.dev カタログ、高度な OMP 設定、構成とは別に表示されるセッションごとの実際の MCP 実行状態が含まれます。添付ファイルは端末上で巨大な単一 JSON にまとめず、ストリーミングでステージングします。画像は各 10 MiB で最大 10 件、テキスト添付は独立した枠で各 256 KiB、最大 10 件です。OMP 自体の画像正規化とプロバイダーごとの画像数制限は引き続き適用されます。
 >
-> このクライアントは公開済みの v0.7.0 APK を置き換えるものではなく、ホスト型/E2E リレーを追加するものでもありません。JDK 21 を使用し、リポジトリのルートで `npm install` を実行してから、`android/` で `./gradlew :app:assembleDebug` を実行します。オフラインアセットはインストール済みの npm 依存パッケージから生成されます。出力先は `android/app/build/outputs/apk/debug/app-debug.apk` です。サーバーで無効化されている更新、ログアウト、保存済み API キーの変更操作は引き続き利用できません。
+> このクライアントは公開済みの v0.7.2 APK を置き換えるものではなく、ホスト型/E2E リレーを追加するものでもありません。JDK 21 を使用し、リポジトリのルートで `npm install` を実行してから、`android/` で `./gradlew :app:assembleDebug` を実行します。オフラインアセットはインストール済みの npm 依存パッケージから生成されます。出力先は `android/app/build/outputs/apk/debug/app-debug.apk` です。サーバーで無効化されている更新、ログアウト、保存済み API キーの変更操作は引き続き利用できません。
 
 [oh-my-pi (omp) コーディングエージェント](https://github.com/can1357/oh-my-pi)のローカル Web UI です。ompgui はローカルの omp セッションファイルを読み込み、セッションの閲覧、リアルタイムチャット、モデル設定、スキル管理、プロジェクトファイルのプレビューを行えるブラウザワークスペースを提供します。
 
@@ -61,6 +61,31 @@ OMP_WEB_NO_OPEN=1 ompgui        # バックグラウンドサービスとして�
 ```
 
 `OMP_WEB_PASSWORD` を設定すると、テーマに統合されたパスワードのみのサインイン画面で UI とすべての API エンドポイントを保護できます。サインイン後は HTTP-only の署名付きセッションクッキーが 30 日間有効です。未設定なら認証は無効です。リモート利用では、パスワードとセッションクッキーを守るため、信頼できるリバースプロキシまたは VPN 経由の HTTPS が必要です。ompgui をインターネットへ直接公開しないでください。
+
+### macOS のバックグラウンドサービス
+
+引数なしの `ompgui` はフォアグラウンドで動作します。macOS のユーザー別 LaunchAgent として動かすには、Mac のターミナルで公開済み npm パッケージをインストールします。開発用チェックアウトのサービス化はサポートしません。
+
+```bash
+npm install -g ompgui@latest
+ompgui service install         # インストール、ログイン時の自動起動を有効化、即時起動
+ompgui status                  # 状態確認
+```
+
+新規インストールでは上記の `--port`、`--hostname`、`--password` を指定できます。既存の `com.hanbinnoh.ompgui` 定義は検証して再利用し、パス・環境変数・秘密情報を保持します。再設定時の新しいオプションで既存設定を上書きしません。
+
+以下は必要に応じて個別に使うコマンドです。
+
+```bash
+ompgui service enable          # ログイン時の自動起動を有効化
+ompgui service disable         # 自動起動のみ無効化。稼働中のサーバーと設定は保持
+ompgui start                   # インストール済みサービスを今すぐ起動
+ompgui stop                    # 今すぐ停止。自動起動設定は変更しない
+ompgui restart                 # 今すぐ再起動
+ompgui service uninstall       # 停止し、保存された秘密情報を含むサービス定義を削除
+```
+
+macOS のブラウザ GUI では **Settings → System & Updates → Background service**（設定 → システムと更新 → バックグラウンドサービス）から操作できます。Android APK にデーモン操作はありません。停止・削除するとブラウザとモバイルの接続が切れ、このページからは起動できません。Mac のターミナルで停止後は `ompgui start`、削除後は `ompgui service install` を実行して再接続してください。フォアグラウンドの `ompgui` が設定ポートを使用中なら、先に**そのターミナルで Ctrl+C** を押して終了してください。サービスコマンドはポートを占有する任意のプロセスを強制終了しません。
 
 ## リモート・モバイルアクセス（Tailscale 推奨）
 

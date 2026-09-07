@@ -1171,7 +1171,7 @@ export function AppShell() {
         onExplorerRefreshDone={handleExplorerRefreshDone}
         onAtMention={handleAtMention}
         onAtMentions={handleAtMentions}
-        onOpenSettings={() => setSettingsTab("general")}
+        onOpenSettings={() => setSettingsTab("relay")}
         onOpenUsage={() => setUsageOpen(true)}
         updateAvailable={appUpdateAvailable || ompUpdateAvailable}
       />

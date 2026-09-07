@@ -2,11 +2,11 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-> **Android APK（Android 12+）** — 使用 Kotlin 配套应用连接远程 ompgui 服务器，并查看最新会话的只读离线快照。[下载 ompgui Remote v0.7.0](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.1/ompgui-remote-v0.7.0.apk) · [发行说明](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.1)
+> **Android APK（Android 12+）** — 使用 Kotlin 配套应用连接远程 ompgui 服务器，并查看最新会话的只读离线快照。[下载 ompgui Remote v0.7.2](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.2/ompgui-remote-v0.7.2.apk) · [发行说明](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.2)
 
 > `android/` 中的实验性原生 Compose 客户端使用经过身份验证的 `/relay` WebSocket，提供会话/历史记录控制、带链接的消息、离线 Mermaid 图表与代码语法高亮，以及图片/PDF/音频/HTML/Markdown/DOCX 内联预览。文件仅在界面可见时自动刷新，并保留未保存的编辑；支持浏览允许访问的隐藏文件和搜索归档。模型与设置包括公开的 models.dev 目录、高级 OMP 设置，以及与配置状态分开显示的各会话实际 MCP 运行状态。附件通过流式传输暂存，而不是在手机端打包成一个巨大的 JSON：图片最多 10 个，每个 10 MiB；文本附件独立计数，最多 10 个，每个 256 KiB。OMP 自身的图像规范化处理和各提供商的图片数量限制仍然适用。
 >
-> 此客户端不会替代已发布的 v0.7.0 APK，也不会添加托管式/E2E 中继。构建时使用 JDK 21，先在仓库根目录运行 `npm install`，再在 `android/` 中运行 `./gradlew :app:assembleDebug`；离线资源从已安装的 npm 依赖生成。输出文件为 `android/app/build/outputs/apk/debug/app-debug.apk`。服务器禁用的更新、退出登录以及已存储 API 密钥的修改操作仍不可用。
+> 此客户端不会替代已发布的 v0.7.2 APK，也不会添加托管式/E2E 中继。构建时使用 JDK 21，先在仓库根目录运行 `npm install`，再在 `android/` 中运行 `./gradlew :app:assembleDebug`；离线资源从已安装的 npm 依赖生成。输出文件为 `android/app/build/outputs/apk/debug/app-debug.apk`。服务器禁用的更新、退出登录以及已存储 API 密钥的修改操作仍不可用。
 
 [oh-my-pi (omp) 编程智能体](https://github.com/can1357/oh-my-pi)的本地 Web UI。ompgui 读取本机的 omp 会话文件，在浏览器中提供一个工作区，支持会话浏览、实时对话、模型配置、技能管理和项目文件预览。
 
@@ -61,6 +61,31 @@ OMP_WEB_NO_OPEN=1 ompgui        # 作为后台服务运行时很有用
 ```
 
 设置 `OMP_WEB_PASSWORD` 可通过与主题集成的仅密码登录页面保护界面和所有 API 端点。登录成功后，会创建有效期为 30 天的 HTTP-only 签名会话 Cookie；留空则关闭认证。远程访问仍需通过受信任反向代理或 VPN 提供 HTTPS，以保护密码和会话 Cookie。默认仅监听 `127.0.0.1`；不要将 ompgui 直接暴露到互联网。
+
+### macOS 后台服务
+
+不带参数运行 `ompgui` 仍在前台启动。要使用 macOS 用户级 LaunchAgent，请在 Mac 终端中安装已发布的 npm 包。不支持将开发检出目录安装为服务。
+
+```bash
+npm install -g ompgui@latest
+ompgui service install         # 安装、启用登录时自动启动，并立即启动
+ompgui status                  # 查看服务状态
+```
+
+新安装可使用上述 `--port`、`--hostname` 和 `--password` 选项。已有的 `com.hanbinnoh.ompgui` 服务定义经过验证后会复用，保留路径、环境变量和机密值；再次安装不会用新传入的选项覆盖已有配置。
+
+以下命令按需单独使用，并非依次执行的步骤：
+
+```bash
+ompgui service enable          # 启用登录时自动启动
+ompgui service disable         # 仅禁用自动启动，保留运行中的服务器及配置
+ompgui start                   # 立即启动已安装的服务
+ompgui stop                    # 立即停止，不改变自动启动设置
+ompgui restart                 # 立即重启
+ompgui service uninstall       # 停止并删除服务定义，包括保存的服务机密值
+```
+
+macOS 浏览器 GUI 的 **Settings → System & Updates → Background service**（设置 → 系统与更新 → 后台服务）也可控制服务。Android APK 不提供守护进程控制。停止或卸载服务器会断开浏览器和移动客户端连接，无法从此页面重新启动。停止后请在 Mac 终端运行 `ompgui start`；卸载后请运行 `ompgui service install`，然后重新连接。如果前台 `ompgui` 占用了配置的端口，请先在**其终端中按 Ctrl+C** 停止，再安装或启动服务。服务命令不会强制终止任意占用端口的进程。
 
 ## 远程与移动端访问（推荐使用 Tailscale）
 

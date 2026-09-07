@@ -23,6 +23,10 @@ import com.dbchbin.ompgui.remote.relay.model
 import com.dbchbin.ompgui.remote.relay.parseModelRef
 import com.dbchbin.ompgui.remote.relay.parsePairingUri
 import com.dbchbin.ompgui.remote.relay.parseSubagentChips
+import com.dbchbin.ompgui.remote.relay.mergeSubagentChips
+import com.dbchbin.ompgui.remote.relay.reconcileSubagentChips
+import com.dbchbin.ompgui.remote.relay.RelayUiErrorKind
+import com.dbchbin.ompgui.remote.relay.RelayUiErrors
 import com.dbchbin.ompgui.remote.relay.parseTodoPhases
 import com.dbchbin.ompgui.remote.store.DeviceStore
 import com.dbchbin.ompgui.remote.store.EncryptedDeviceStore
@@ -76,16 +80,67 @@ class RelayClient private constructor(
 
     private val requestScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    private fun scopedRequest(domain: String, action: String, args: JSONObject, apply: (JSONObject) -> Unit) {
+    private var uiErrorKind: RelayUiErrorKind? = null
+    private var uiErrorCode: String? = null
+
+    private fun setUiError(message: String?, kind: RelayUiErrorKind, code: String? = null) {
+        val text = message?.trim()?.takeIf { it.isNotEmpty() } ?: return
+        uiErrorKind = kind
+        uiErrorCode = code
+        _ui.update { it.copy(error = text) }
+    }
+
+    private fun setUiError(error: Throwable, kind: RelayUiErrorKind) {
+        val coded = error as? RelayRequestException
+        setUiError(error.message, kind, coded?.code)
+    }
+
+    private fun clearUiErrors(kinds: Set<RelayUiErrorKind>? = null) {
+        val current = uiErrorKind
+        if (current == null) {
+            if (_ui.value.error != null) _ui.update { it.copy(error = null) }
+            uiErrorCode = null
+            return
+        }
+        if (kinds == null || current in kinds) {
+            uiErrorKind = null
+            uiErrorCode = null
+            _ui.update { it.copy(error = null) }
+        }
+    }
+
+    private fun clearConnectedErrors() {
+        if (RelayUiErrors.shouldClearOnConnected(uiErrorKind, uiErrorCode)) {
+            uiErrorKind = null
+            uiErrorCode = null
+            _ui.update { it.copy(error = null) }
+        }
+    }
+
+    /**
+     * @param onError local owner; null means this request owns the global Request banner.
+     * Stale generations never apply success or paint failure.
+     */
+    private fun scopedRequest(
+        domain: String,
+        action: String,
+        args: JSONObject,
+        onError: ((Exception) -> Unit)? = null,
+        apply: (JSONObject) -> Unit,
+    ) {
         val generation = sessionGeneration
         requestScope.launch {
             try {
                 val result = request(domain, action, args)
-                if (generation == sessionGeneration) apply(result)
+                if (!RelayUiErrors.isCurrentGeneration(generation, sessionGeneration)) return@launch
+                apply(result)
+                if (onError == null) clearUiErrors(setOf(RelayUiErrorKind.Request))
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                if (generation == sessionGeneration) _ui.update { it.copy(error = error.message) }
+                if (!RelayUiErrors.isCurrentGeneration(generation, sessionGeneration)) return@launch
+                if (onError != null) onError(error)
+                else setUiError(error, RelayUiErrorKind.Request)
             }
         }
     }
@@ -165,7 +220,7 @@ class RelayClient private constructor(
             currentModel = null, pickerOpen = false, todos = emptyList(), subagents = emptyList(),
             contextFraction = null, sessionThinkingLevel = null, sessionCwd = null,
             filesPath = "", branches = emptyList(), branchLeafId = null,
-            worktrees = emptyList(), worktreesGit = false,
+            worktrees = emptyList(), worktreesGit = false, worktreesError = null,
             fileMatches = emptyList(), creatingSession = false,
             extensionDialogs = emptyList(), chatNotices = emptyList(),
             extensionStatus = emptyMap(), extensionWidgets = emptyMap(), queue = EventProjector.ChatQueue(),
@@ -195,6 +250,7 @@ class RelayClient private constructor(
                 _ui.update { it.copy(connection = state) }
                 when (state) {
                     ConnectionState.Connected -> {
+                        clearConnectedErrors()
                         RelayForegroundService.start(app)
                         flushPendingSession()
                     }
@@ -208,7 +264,7 @@ class RelayClient private constructor(
             override fun onFrame(frame: ServerFrame) = handleFrame(frame)
 
             override fun onProtocolError(message: String) {
-                _ui.update { it.copy(error = message) }
+                setUiError(message, RelayUiErrorKind.Protocol)
             }
         })
         val device = store.load()
@@ -216,6 +272,8 @@ class RelayClient private constructor(
             _ui.update { it.copy(screen = RemoteScreen.Sessions, paired = true) }
             connection.connectToken(device.relayUrl, device.deviceId, device.token, deviceLabel)
         } else if (!store.isAvailable()) {
+            uiErrorKind = RelayUiErrorKind.Pairing
+            uiErrorCode = null
             _ui.update {
                 it.copy(
                     screen = RemoteScreen.Pairing,
@@ -227,6 +285,7 @@ class RelayClient private constructor(
     }
 
     fun setPairingUri(value: String) {
+        clearUiErrors()
         _ui.update { it.copy(pairingUri = value, error = null) }
     }
 
@@ -269,13 +328,14 @@ class RelayClient private constructor(
     fun pair() {
         val offer = parsePairingUri(_ui.value.pairingUri)
         if (offer == null) {
-            _ui.update { it.copy(error = "Invalid pairing link") }
+            setUiError("Invalid pairing link", RelayUiErrorKind.Pairing)
             return
         }
         pairingOfferUrl = offer.url
         pairingServerId = offer.serverId
         pairingAttempt = true
         val password = _ui.value.password.takeIf { it.isNotEmpty() }
+        clearUiErrors()
         _ui.update { it.copy(error = null) }
         connection.connectPairing(offer.url, offer.secret, deviceLabel, password)
     }
@@ -312,6 +372,7 @@ class RelayClient private constructor(
         openedSessionId = id
         pendingSessionId = null
         pendingCmds.clear()
+        clearUiErrors()
         _ui.update {
             it.copy(
                 screen = RemoteScreen.Chat(id),
@@ -343,6 +404,7 @@ class RelayClient private constructor(
         connection.send(ClientFrame.SessionClose)
         openedSessionId = null
         pendingSessionId = null
+        clearUiErrors(RelayUiErrors.clearKindsOnLeaveChat())
         _ui.update { it.copy(screen = RemoteScreen.Sessions, messages = emptyList(), draft = "") }
         connection.send(ClientFrame.SessionsList)
     }
@@ -388,17 +450,21 @@ class RelayClient private constructor(
                     }, ::checkSession, staged::add)
                 }
                 checkSession()
+                clearUiErrors(setOf(RelayUiErrorKind.Request, RelayUiErrorKind.Session))
                 _ui.update { it.copy(error = null) }
                 request("sessions", "command", JSONObject().put("id", session).put("command",
                     JSONObject().put("type", "prompt").put("message", outgoing).put("attachmentIds", org.json.JSONArray(staged))))
                 checkSession()
                 accepted = true
+                clearUiErrors(setOf(RelayUiErrorKind.Request, RelayUiErrorKind.Session))
                 _ui.update { it.copy(draft = if (it.draft == originalDraft) "" else it.draft, error = null) }
                 true
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
-                if (sessionGeneration == generation) _ui.update { it.copy(error = failure.message ?: "Prompt was not accepted") }
+                if (sessionGeneration == generation) {
+                    setUiError(failure, RelayUiErrorKind.Session)
+                }
                 false
             } finally {
                 if (!accepted) {
@@ -451,7 +517,22 @@ class RelayClient private constructor(
     fun fetchWorktrees(cwd: String) {
         val directory = cwd.trim()
         if (directory.isEmpty()) return
-        scopedRequest("sessions", "worktrees.list", JSONObject().put("cwd", directory)) { result ->
+        _ui.update { it.copy(worktreesError = null) }
+        scopedRequest(
+            "sessions",
+            "worktrees.list",
+            JSONObject().put("cwd", directory),
+            onError = { error ->
+                _ui.update {
+                    it.copy(
+                        worktrees = emptyList(),
+                        worktreesGit = false,
+                        worktreesError = error.message?.trim()?.takeIf { msg -> msg.isNotEmpty() }
+                            ?: "Relay request failed",
+                    )
+                }
+            },
+        ) { result ->
             val entries = result.getJSONArray("worktrees")
             val worktrees = buildList {
                 for (index in 0 until entries.length()) {
@@ -460,7 +541,13 @@ class RelayClient private constructor(
                         entry.optString("branch").takeIf(String::isNotBlank), entry.optBoolean("isMain")))
                 }
             }
-            _ui.update { it.copy(worktrees = worktrees, worktreesGit = result.getBoolean("isGit")) }
+            _ui.update {
+                it.copy(
+                    worktrees = worktrees,
+                    worktreesGit = result.optBoolean("isGit"),
+                    worktreesError = null,
+                )
+            }
         }
     }
 
@@ -468,7 +555,20 @@ class RelayClient private constructor(
         val directory = cwd.trim()
         val branchName = branch.trim()
         if (directory.isEmpty() || branchName.isEmpty()) return
-        scopedRequest("sessions", "worktrees.add", JSONObject().put("cwd", directory).put("branch", branchName)) {
+        _ui.update { it.copy(worktreesError = null) }
+        scopedRequest(
+            "sessions",
+            "worktrees.add",
+            JSONObject().put("cwd", directory).put("branch", branchName),
+            onError = { error ->
+                _ui.update {
+                    it.copy(
+                        worktreesError = error.message?.trim()?.takeIf { msg -> msg.isNotEmpty() }
+                            ?: "Relay request failed",
+                    )
+                }
+            },
+        ) {
             fetchWorktrees(directory)
         }
     }
@@ -514,7 +614,7 @@ class RelayClient private constructor(
                     add(com.dbchbin.ompgui.remote.relay.RelayFileMatch(entry.getString("path"), entry.optBoolean("isDir")))
                 }
             }
-            _ui.update { it.copy(fileMatches = matches, error = null) }
+            _ui.update { it.copy(fileMatches = matches) }
         }
     }
 
@@ -561,6 +661,8 @@ class RelayClient private constructor(
         pairingServerId = null
         pairingAttempt = false
         pendingCmds.clear()
+        uiErrorKind = null
+        uiErrorCode = null
         if (opened != null) RelayNotifications.cancelAgentDone(app, opened)
         if (pending != null && pending != opened) RelayNotifications.cancelAgentDone(app, pending)
         RelayForegroundService.stop(app)
@@ -578,14 +680,23 @@ class RelayClient private constructor(
         when (frame) {
             is ServerFrame.Result -> {
                 val pending = pendingRequests.remove(frame.req) ?: return
-                if (pending.generation != sessionGeneration || !pending.continuation.isActive) return
+                if (pending.generation != sessionGeneration) {
+                    // Old connection epoch — never apply success or paint its failure.
+                    if (pending.continuation.isActive) {
+                        pending.continuation.resumeWithException(
+                            RelayRequestException("request_cancelled", "Relay request failed (request_cancelled)"),
+                        )
+                    }
+                    return
+                }
+                if (!pending.continuation.isActive) return
                 if (frame.success) {
                     pending.continuation.resume(frame.data ?: JSONObject())
                 } else {
                     val error = frame.error
                     pending.continuation.resumeWithException(RelayRequestException(
-                        error?.optString("code") ?: "request_failed",
-                        error?.optString("message") ?: "Relay request failed",
+                        error?.optString("code")?.takeIf { it.isNotBlank() } ?: "request_failed",
+                        error?.optString("message")?.takeIf { it.isNotBlank() } ?: "Relay request failed",
                         error?.optJSONObject("details"),
                     ))
                 }
@@ -612,6 +723,11 @@ class RelayClient private constructor(
                 if (url != null && token != null) {
                     connection.promoteToToken(url, frame.deviceId, token, deviceLabel)
                 }
+                if (saveFailed) {
+                    uiErrorKind = RelayUiErrorKind.Pairing
+                } else {
+                    uiErrorKind = null
+                }
                 _ui.update {
                     it.copy(
                         screen = if (it.screen is RemoteScreen.Chat) it.screen else RemoteScreen.Sessions,
@@ -637,6 +753,7 @@ class RelayClient private constructor(
                     PairingPolicy.shouldClearCredentials(frame.code, hasSavedDevice, attempt) -> {
                         store.clear()
                         RelayForegroundService.stop(app)
+                        setUiError(frame.message, RelayUiErrorKind.Pairing, frame.code)
                         _ui.update {
                             it.copy(
                                 screen = RemoteScreen.Pairing,
@@ -647,6 +764,7 @@ class RelayClient private constructor(
                     }
                     PairingPolicy.shouldReconnectWithSavedDevice(frame.code, hasSavedDevice, attempt) -> {
                         val device = saved!!
+                        setUiError(frame.message, RelayUiErrorKind.Connection, frame.code)
                         _ui.update {
                             it.copy(
                                 screen = if (it.screen is RemoteScreen.Chat) it.screen else RemoteScreen.Sessions,
@@ -661,6 +779,7 @@ class RelayClient private constructor(
                         if (!hasSavedDevice && pairingOfferUrl != null) {
                             store.clear()
                         }
+                        setUiError(frame.message, RelayUiErrorKind.Pairing, frame.code)
                         _ui.update {
                             it.copy(
                                 screen = RemoteScreen.Pairing,
@@ -670,7 +789,7 @@ class RelayClient private constructor(
                         }
                     }
                     else -> {
-                        _ui.update { it.copy(error = frame.message) }
+                        setUiError(frame.message, RelayUiErrorKind.Connection, frame.code)
                     }
                 }
             }
@@ -712,6 +831,7 @@ class RelayClient private constructor(
                 pendingSessionId = null
                 pendingCmds.clear()
                 connection.send(ClientFrame.SessionsList)
+                clearUiErrors()
                 _ui.update {
                     it.copy(
                         screen = RemoteScreen.Chat(frame.id),
@@ -754,6 +874,7 @@ class RelayClient private constructor(
             is ServerFrame.AuthProvidersResult -> Unit // Panels own their correlated requests.
             is ServerFrame.FilesIndexResult -> Unit // Correlated searches also discard superseded queries.
             is ServerFrame.ProjectAdded, is ServerFrame.ProjectRemoved -> {
+                clearUiErrors(setOf(RelayUiErrorKind.Request, RelayUiErrorKind.Session))
                 _ui.update { it.copy(error = null) }
             }
             is ServerFrame.SessionDeleted, is ServerFrame.SessionArchived -> {
@@ -775,11 +896,13 @@ class RelayClient private constructor(
                 }
             }
             is ServerFrame.SessionRestored -> {
+                clearUiErrors(setOf(RelayUiErrorKind.Request, RelayUiErrorKind.Session))
                 _ui.update { it.copy(error = null) }
             }
             is ServerFrame.SessionErr -> {
                 if (frame.id != null && frame.id != openedSessionId) return
-                _ui.update { it.copy(error = frame.message, creatingSession = false) }
+                setUiError(frame.message, RelayUiErrorKind.Session, frame.code)
+                _ui.update { it.copy(creatingSession = false) }
             }
             is ServerFrame.Event -> {
                 if (frame.id != openedSessionId || awaitingSnapshot || historicalView) return
@@ -792,6 +915,7 @@ class RelayClient private constructor(
                 val widget = EventProjector.parseExtensionWidget(frame.payload)
                 val editorText = EventProjector.parseEditorTextInsert(frame.payload)
                 val title = EventProjector.parseExtensionTitle(frame.payload)
+                val subagentUpdate = EventProjector.applySubagentEvent(_ui.value.subagents, frame.payload)
                 _ui.update { state ->
                     val messages = EventProjector.applyMessages(state.messages, frame.payload)
                     var dialogs = state.extensionDialogs
@@ -817,10 +941,12 @@ class RelayClient private constructor(
                         draft = editorText ?: state.draft,
                         chatTitle = title ?: state.chatTitle,
                         queue = if (deliveredUser) EventProjector.queueAfterDelivered(state.queue, messages.lastOrNull()?.text.orEmpty()) else state.queue,
+                        subagents = subagentUpdate ?: state.subagents,
                     )
                 }
                 if (terminal) {
                     requestSessionState()
+                    refreshHistoricalSubagents()
                     if (!AppForeground.isForeground()) {
                         RelayNotifications.showAgentDone(
                             app,
@@ -832,18 +958,26 @@ class RelayClient private constructor(
             }
             is ServerFrame.CmdErr -> {
                 pendingCmds.remove(frame.req) ?: return
-                _ui.update { it.copy(error = frame.message) }
+                setUiError(frame.message, RelayUiErrorKind.Command, frame.code)
             }
             is ServerFrame.CmdOk -> {
                 when (pendingCmds.remove(frame.req)) {
-                    "get_state", "set_model" -> applySessionState(frame)
+                    "get_state", "set_model" -> {
+                        clearUiErrors(setOf(RelayUiErrorKind.Command))
+                        applySessionState(frame)
+                    }
                     "get_subagents" -> {
+                        clearUiErrors(setOf(RelayUiErrorKind.Command))
                         val items = frame.data?.optJSONArray("items")
                             ?: frame.data?.optJSONArray("subagents")
-                        val chips = parseSubagentChips(items)
-                        _ui.update { it.copy(subagents = chips) }
+                        val snapshot = parseSubagentChips(items, live = true)
+                        _ui.update { state ->
+                            state.copy(subagents = reconcileSubagentChips(state.subagents, snapshot))
+                        }
+                        refreshHistoricalSubagents()
                     }
                     "set_thinking_level" -> {
+                        clearUiErrors(setOf(RelayUiErrorKind.Command))
                         val level = frame.data?.optString("thinkingLevel")
                             ?.takeIf { it.isNotBlank() }
                             ?: frame.data?.optString("level")?.takeIf { it.isNotBlank() }
@@ -851,11 +985,12 @@ class RelayClient private constructor(
                             _ui.update { it.copy(sessionThinkingLevel = level) }
                         }
                     }
+                    "abort" -> clearUiErrors(setOf(RelayUiErrorKind.Command))
                     else -> Unit
                 }
             }
             is ServerFrame.Error -> {
-                _ui.update { it.copy(error = frame.message) }
+                setUiError(frame.message, RelayUiErrorKind.Protocol, frame.code)
             }
             is ServerFrame.Usage -> {
                 usageData.value = frame.data
@@ -865,6 +1000,25 @@ class RelayClient private constructor(
             }
             is ServerFrame.SettingsUpdated -> Unit // Settings panel owns its correlated update.
 
+        }
+    }
+
+    private fun refreshHistoricalSubagents() {
+        val session = openedSessionId ?: return
+        // Best-effort enrichment onto an already-owned live roster; failures must
+        // not steal the global banner or erase chips from get_subagents.
+        scopedRequest(
+            "sessions",
+            "subagents",
+            JSONObject().put("id", session),
+            onError = { /* live roster remains authoritative */ },
+        ) { result ->
+            if (openedSessionId != session) return@scopedRequest
+            val historical = parseSubagentChips(result.optJSONArray("subagents"), live = false)
+            if (historical.isEmpty()) return@scopedRequest
+            _ui.update { state ->
+                state.copy(subagents = mergeSubagentChips(state.subagents, historical))
+            }
         }
     }
 

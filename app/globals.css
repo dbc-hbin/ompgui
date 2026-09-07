@@ -3757,3 +3757,26 @@ html.dark .dropdown-surface :is(select, option) {
   }
 }
 
+/* Relay pairing QR: keep modules black on a white quiet zone in every theme. */
+.relay-pair-qr {
+  background: #fff !important;
+  color: #000 !important;
+  filter: none !important;
+  opacity: 1 !important;
+}
+
+.relay-pair-qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  color: #000;
+}
+
+.relay-pair-qr svg path {
+  fill: #000 !important;
+}
+
+.relay-pair-qr svg rect {
+  fill: #fff !important;
+}
+

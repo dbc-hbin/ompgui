@@ -1,10 +1,11 @@
 "use client";
 
-import { Bot, Cable, Cpu, KeyRound, RefreshCw, Settings2, ShieldCheck, Sparkles } from "lucide-react";
+import { Bot, Cable, Cpu, KeyRound, RefreshCw, Settings2, ShieldCheck, Smartphone, Sparkles } from "lucide-react";
 import type { ComponentType, CSSProperties } from "react";
 import { useI18n } from "@/lib/i18n";
 
 export type SettingsTab =
+  | "relay"
   | "general"
   | "safety"
   | "models"
@@ -26,6 +27,7 @@ export interface TabItem {
 }
 
 export const SETTINGS_CATEGORIES: TabItem[] = [
+  { id: "relay", label: "Connect Phone", description: "Pair ompgui Remote over Relay with a QR or link", Icon: Smartphone },
   { id: "general", label: "Interface & Behavior", description: "UI preferences, completion sound, submission mode", Icon: Settings2 },
   { id: "safety", label: "Safety & Approvals", description: "Tool safety rules, YOLO mode, terminal permissions", Icon: ShieldCheck },
   { id: "models", label: "AI Model Defaults", description: "Reasoning budget, verbosity, personality, scratchpad", Icon: Cpu },

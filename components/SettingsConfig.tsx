@@ -10,6 +10,7 @@ import { ConfirmDialog, Select, Switch } from "@/components/ui/field";
 import { ExtensionsTabs, type ExtensionsTab, SettingsTabs, type SettingsTab, SETTINGS_CATEGORIES, getNormalizedActive } from "./SettingsTabs";
 import { useI18n } from "@/lib/i18n";
 import { copyText } from "@/lib/clipboard";
+import { parseDaemonStatus, type DaemonAction, type DaemonStatus } from "@/lib/daemon-types";
 import { useTheme } from "@/hooks/useTheme";
 import { getSoundEnabled, setSoundEnabled as persistSoundEnabled } from "@/lib/sound-prefs";
 import { loadClientModels } from "@/lib/client-model-store";
@@ -22,6 +23,7 @@ const SkillsConfig = dynamic(() => import("./SkillsConfig").then((module) => mod
 const PluginsConfig = dynamic(() => import("./PluginsConfig").then((module) => module.PluginsConfig), { loading: SettingsTabLoading });
 const McpConfig = dynamic(() => import("./McpConfig").then((module) => module.McpConfig), { loading: SettingsTabLoading });
 const AgentsConfig = dynamic(() => import("./AgentsConfig").then((m) => m.AgentsConfig), { ssr: false });
+const RelayPairPanel = dynamic(() => import("./RelayPairPanel").then((module) => module.RelayPairPanel), { loading: SettingsTabLoading });
 
 type UpdateState = {
   currentVersion: string | null;
@@ -125,6 +127,7 @@ type SettingIndexEntry = {
 // so keep labels/descriptions in sync when editing the settings UI.
 const SETTING_INDEX: SettingIndexEntry[] = [
   // Appearance
+  { tab: "relay", section: "Connect Phone", label: "Pair phone via Relay", description: "Create a QR or link so ompgui Remote can connect over Tailscale Funnel.", scope: "UI", labelKey: "relayPair.title", descriptionKey: "relayPair.description", sectionKey: "settingsTabs.relay" },
   { tab: "general", section: "Appearance", label: "Color mode", description: "Choose between light, dark, or system color mode.", scope: "UI" },
   { tab: "general", section: "Appearance", label: "Theme palette", description: "Select warm paper/ember or canonical OMP birch/graphite palette.", scope: "UI" },
   // Interface & Behavior
@@ -167,6 +170,7 @@ const SETTING_INDEX: SettingIndexEntry[] = [
   { tab: "mcp", section: "Extensions & Tools", label: "Load Project MCP Servers", description: "Allow project-root MCP configuration to be discovered.", scope: "New sessions" },
   { tab: "mcp", section: "Extensions & Tools", label: "Render MCP Markdown", description: "Render non-JSON MCP results as Markdown in transcript.", scope: "New sessions" },
   { tab: "mcp", section: "Extensions & Tools", label: "MCP Resource Updates", description: "Inject server resource updates into conversation.", scope: "New sessions" },
+  { tab: "system", section: "System & Updates", label: "Background service", description: "Manage the macOS background service and automatic start at login.", labelKey: "daemon.title", descriptionKey: "daemon.description", sectionKey: "settingsConfig.systemUpdates" },
   // System & Updates — active session diagnostics
   { tab: "system", section: "System & Updates", label: "Active session system prompt", description: "Inspect the system prompt used by the active session.", labelKey: "settingsConfig.sessionSystemPrompt", descriptionKey: "settingsConfig.sessionSystemPromptDescription", sectionKey: "settingsConfig.systemUpdates" },
 ];
@@ -293,6 +297,11 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
   const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
   const [modelsEditorKey, setModelsEditorKey] = useState(0);
 
+  const [daemon, setDaemon] = useState<DaemonStatus | null>(null);
+  const [daemonBusy, setDaemonBusy] = useState(false);
+  const [daemonError, setDaemonError] = useState<string | null>(null);
+  const [daemonPending, setDaemonPending] = useState<{ action: DaemonAction; pid: number | null; deadline: number } | null>(null);
+  const [daemonConfirm, setDaemonConfirm] = useState<DaemonAction | null>(null);
   const [update, setUpdate] = useState<UpdateState | null>(null);
   const [checking, setChecking] = useState(false);
   const [appUpdate, setAppUpdate] = useState<UpdateState | null>(null);
@@ -606,6 +615,91 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
     }
   }, [currentTab, checkForUpdate, checkForAppUpdate]);
 
+  const refreshDaemon = useCallback(async () => {
+    setDaemonBusy(true);
+    setDaemonError(null);
+    try {
+      const response = await fetch("/api/daemon", { cache: "no-store", signal: AbortSignal.timeout(5000) });
+      if (!response.ok) throw new Error(t("daemon.unavailable"));
+      const status = parseDaemonStatus(await response.json());
+      if (mountedRef.current) setDaemon(status);
+    } catch (error) {
+      if (mountedRef.current) setDaemonError(error instanceof Error ? error.message : t("daemon.unavailable"));
+    } finally {
+      if (mountedRef.current) setDaemonBusy(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    if (currentTab === "system") void refreshDaemon();
+  }, [currentTab, refreshDaemon]);
+
+  useEffect(() => {
+    if (!daemonPending) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const response = await fetch("/api/daemon", { cache: "no-store", signal: AbortSignal.timeout(4000) });
+        if (response.ok) {
+          const status = parseDaemonStatus(await response.json());
+          if (cancelled) return;
+          setDaemon(status);
+          const complete = daemonPending.action === "restart"
+            ? status.running && status.pid !== daemonPending.pid
+            : daemonPending.action === "uninstall" ? !status.installed : !status.running;
+          if (complete) { setDaemonPending(null); setDaemonError(status.error ?? null); return; }
+        }
+      } catch { /* The managed server may be offline while launchd restarts it. */ }
+      if (cancelled) return;
+      if (Date.now() >= daemonPending.deadline) {
+        setDaemonPending(null);
+        setDaemon(null);
+        setDaemonError(t("daemon.readbackFailed"));
+        return;
+      }
+      timer = window.setTimeout(() => void poll(), 2000);
+    };
+    timer = window.setTimeout(() => void poll(), 2000);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [daemonPending, t]);
+
+  const runDaemonAction = useCallback(async (action: DaemonAction) => {
+    setDaemonBusy(true);
+    setDaemonError(null);
+    setDaemonConfirm(null);
+    const mayDisconnect = action === "restart" || action === "stop" || action === "uninstall";
+    let rejected = false;
+    try {
+      const response = await fetch("/api/daemon", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }), signal: AbortSignal.timeout(20_000),
+      });
+      // An HTTP rejection is definitive even when its body is interrupted or invalid.
+      rejected = !response.ok;
+      const body: unknown = await response.json();
+      if (!response.ok) {
+        throw new Error(typeof body === "object" && body !== null && "error" in body && typeof body.error === "string" ? body.error : t("daemon.actionFailed"));
+      }
+      if (typeof body === "object" && body !== null && "error" in body && typeof body.error === "string" && body.error) {
+        rejected = true;
+        throw new Error(body.error);
+      }
+      const status = parseDaemonStatus(body);
+      if (!mountedRef.current) return;
+      setDaemon(status);
+      if (status.accepted) setDaemonPending({ action, pid: daemon?.pid ?? null, deadline: Date.now() + 60_000 });
+      else await refreshDaemon();
+    } catch (error) {
+      if (!mountedRef.current) return;
+      setDaemonError(error instanceof Error ? error.message : t("daemon.actionFailed"));
+      // Only an uncertain transport response warrants readback; explicit rejection stays actionable.
+      if (mayDisconnect && !rejected) setDaemonPending({ action, pid: daemon?.pid ?? null, deadline: Date.now() + 60_000 });
+    } finally {
+      if (mountedRef.current) setDaemonBusy(false);
+    }
+  }, [daemon?.pid, refreshDaemon, t]);
+
   const restartSessions = useCallback(async () => {
     setRestarting(true);
     setMessage(null);
@@ -743,6 +837,12 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
               <SettingsHighlightContext.Provider value={highlightSettingId}>
                 <SettingsTabs active={currentTab} onSelect={requestTabChange} layout={isMobile ? "horizontal" : "vertical"} />
                 <div style={{ flex: 1, minWidth: 0, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+            {/* RELAY / CONNECT PHONE TAB */}
+            {currentTab === "relay" && (
+              <div role="tabpanel" id="settings-panel-relay" aria-labelledby="settings-tab-relay" style={{ padding: isMobile ? "12px 14px" : 20, display: "flex", flexDirection: "column", gap: 16 }}>
+                <RelayPairPanel embedded />
+              </div>
+            )}
             {/* GENERAL TAB */}
             {currentTab === "general" && (
               <div role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general" style={{ padding: isMobile ? "12px 14px" : 20, display: "flex", flexDirection: "column", gap: 16 }}>
@@ -1340,6 +1440,38 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
                   <p style={{ margin: "4px 0 0", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>{t("settingsConfig.systemUpdatesDescription")}</p>
                 </div>
 
+                <section data-search-id={slugify("Background service")} aria-label={t("daemon.title")} style={{ padding: 14, border: "1px solid var(--border)", borderRadius: "var(--radius-card)", background: "var(--bg-panel)", display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                    <h4 style={{ margin: 0, fontSize: "var(--text-md)", fontWeight: 600 }}>{t("daemon.title")}</h4>
+                    <button type="button" className="ui-focus-ring" disabled={daemonBusy || !!daemonPending} onClick={() => void refreshDaemon()} style={{ padding: "6px 10px", minHeight: 32, border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "transparent", color: "var(--text)", fontSize: "var(--text-sm)", cursor: daemonBusy || daemonPending ? "wait" : "pointer" }}>{t("settingsConfig.refresh")}</button>
+                  </div>
+                  <div role="status" aria-live="polite" style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
+                    {daemonPending ? t(daemonPending.action === "restart" ? "daemon.reconnecting" : "daemon.stopping") : daemonBusy ? t("daemon.loading") : !daemon ? t("daemon.unknown") : !daemon.supported ? t("daemon.unsupported") : !daemon.cliAvailable ? t("daemon.cliMissing") : !daemon.installed ? t("daemon.notInstalled") : daemon.running ? t("daemon.running", { pid: daemon.pid ?? "—" }) : t("daemon.stopped")}
+                  </div>
+                  <p style={{ margin: 0, fontSize: "var(--text-sm)", color: "var(--text-muted)", lineHeight: 1.5 }}>{t("daemon.description")}</p>
+                  {daemon?.supported && (
+                    <>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                        <span style={{ fontSize: "var(--text-sm)" }}>{t("daemon.autoStart")}</span>
+                        <Switch aria-label={t("daemon.autoStart")} checked={daemon.autoStart} disabled={daemonBusy || !!daemonPending || !daemon.cliAvailable} onChange={(checked: boolean) => {
+                          if (!checked) setDaemonConfirm("disable");
+                          else void runDaemonAction(daemon.installed ? "enable" : "install");
+                        }} />
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {(["start", "stop", "restart", "uninstall"] as const).map((action) => (
+                          <button key={action} type="button" className="ui-focus-ring" style={{ padding: "6px 10px", minHeight: 32, border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "transparent", color: "var(--text)", fontSize: "var(--text-sm)" }} disabled={daemonBusy || !!daemonPending || !daemon.cliAvailable || !daemon.installed || (action === "start" ? daemon.running : (action === "stop" || action === "restart") && !daemon.running)} onClick={() => action === "start" ? void runDaemonAction(action) : setDaemonConfirm(action)}>{t(`daemon.${action}`)}</button>
+                        ))}
+                      </div>
+                      {daemon.logPath && <div style={{ fontSize: "var(--text-sm)", overflowWrap: "anywhere" }}>{t("daemon.logs")}: <code>{daemon.logPath}</code></div>}
+                      {!daemon.cliAvailable && <code style={{ fontSize: "var(--text-sm)", overflowWrap: "anywhere" }}>npm install -g ompgui@latest</code>}
+                      {!daemon.installed && daemon.cliAvailable && <code style={{ fontSize: "var(--text-sm)", overflowWrap: "anywhere" }}>ompgui service install</code>}
+                    </>
+                  )}
+                  {(daemonError || daemon?.error) && <div role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--danger)", overflowWrap: "anywhere" }}>{daemonError || daemon?.error}</div>}
+                  <p style={{ margin: 0, fontSize: "var(--text-sm)", color: "var(--text-muted)", lineHeight: 1.5 }}>{t("daemon.disconnectWarning")} <code>ompgui start</code></p>
+                </section>
+
                 {/* Active session system prompt */}
                 <section
                   data-search-id={slugify("Active session system prompt")}
@@ -1507,6 +1639,16 @@ export function SettingsConfig({ activeTab, advisorEnabled, onAdvisorChange, too
         </div>
         </DialogContent>
       </Dialog>
+      <ConfirmDialog
+        open={daemonConfirm !== null}
+        onOpenChange={(open) => { if (!open) setDaemonConfirm(null); }}
+        title={daemonConfirm ? t(`daemon.${daemonConfirm}`) : t("daemon.title")}
+        description={t(daemonConfirm === "disable" ? "daemon.disableConfirm" : "daemon.disconnectConfirm")}
+        confirmLabel={daemonConfirm ? t(`daemon.${daemonConfirm}`) : t("daemon.title")}
+        cancelLabel={t("settingsConfig.cancel")}
+        danger
+        onConfirm={() => { if (daemonConfirm) void runDaemonAction(daemonConfirm); }}
+      />
       <ConfirmDialog
         open={discardDialogOpen}
         onOpenChange={(open) => {

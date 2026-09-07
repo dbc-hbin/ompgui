@@ -1,6 +1,6 @@
 {
   "name": "ompgui",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Web UI & Browser GUI for the oh-my-pi (omp) coding agent",
   "homepage": "https://github.com/dbc-hbin/ompgui#readme",
   "repository": {
@@ -22,6 +22,7 @@
   "files": [
     "bin/ompgui.js",
     "bin/ompgui-update.js",
+    "bin/ompgui-service.js",
     "bin/ompgui-pair.js",
     "bin/omp-web.js",
     "bin/ompgui-options.js",

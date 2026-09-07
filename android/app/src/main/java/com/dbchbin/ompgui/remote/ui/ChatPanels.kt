@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -45,18 +46,18 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.FileUpload
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -71,12 +72,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dbchbin.ompgui.remote.R
 import com.dbchbin.ompgui.remote.relay.ChatRequests
 import com.dbchbin.ompgui.remote.relay.EventProjector
 import com.dbchbin.ompgui.remote.relay.RelayRequester
@@ -94,78 +97,101 @@ private fun panelShape() = RoundedCornerShape(10.dp)
 // ---------------------------------------------------------------------------
 
 @Composable
-fun TodoPanel(todos: List<com.dbchbin.ompgui.remote.relay.TodoPhase>) {
+fun TodoPanel(todos: List<com.dbchbin.ompgui.remote.relay.TodoPhase>, bodyMaxHeight: Dp) {
     if (todos.isEmpty()) return
     var expanded by remember { mutableStateOf(false) }
     val tasks = remember(todos) { todos.flatMap { it.tasks } }
     val done = remember(tasks) { tasks.count { it.status == "completed" } }
-    val korean = remember { Locale.getDefault().language == "ko" }
+    val headerDesc = if (expanded) {
+        stringResource(R.string.chat_todo_collapse)
+    } else {
+        stringResource(R.string.chat_todo_expand)
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(panelShape())
             .background(OmpColors.BgPanel)
-            .border(1.dp, OmpColors.Border, panelShape())
-            .padding(horizontal = 12.dp, vertical = 0.dp),
+            .border(1.5.dp, OmpColors.Border, panelShape())
+            .padding(horizontal = 10.dp, vertical = 0.dp),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(6.dp))
                 .clickable { expanded = !expanded }
+                .semantics { contentDescription = headerDesc }
                 .heightIn(min = 48.dp)
-                .padding(vertical = 4.dp),
+                .padding(horizontal = 2.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            Icon(
+                Icons.Filled.Checklist,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = OmpColors.TextMuted,
+            )
             Text(
-                if (korean) "할 일 $done/${tasks.size}" else "Todos $done/${tasks.size}",
+                stringResource(R.string.todo_title),
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = OmpColors.Text,
-                modifier = Modifier.weight(1f),
             )
+            Spacer(modifier = Modifier.weight(1f))
             Text(
-                if (expanded) "▾" else "▸",
-                fontSize = 13.sp,
+                stringResource(R.string.chat_activity_todos, done, tasks.size),
+                fontSize = 12.sp,
                 color = OmpColors.TextMuted,
+            )
+            Icon(
+                if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = OmpColors.TextDim,
             )
         }
         if (expanded) {
-            Column(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
-            todos.forEach { phase ->
-                Text(
-                    phase.name,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = OmpColors.TextMuted,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-                phase.tasks.forEach { task ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            when (task.status) {
-                                "completed" -> "✓"
-                                "in_progress" -> "◐"
-                                "blocked" -> "!"
-                                "abandoned" -> "–"
-                                else -> "○"
-                            },
-                            fontSize = 12.sp,
-                            color = if (task.status == "completed") OmpColors.Accent else OmpColors.TextDim,
-                            modifier = Modifier.width(20.dp),
-                        )
-                        Text(
-                            task.content,
-                            fontSize = 13.sp,
-                            color = OmpColors.Text,
-
-                        )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = bodyMaxHeight)
+                    .verticalScroll(rememberScrollState())
+                    .padding(top = 2.dp, bottom = 8.dp),
+            ) {
+                todos.forEach { phase ->
+                    Text(
+                        phase.name,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = OmpColors.TextMuted,
+                        modifier = Modifier.padding(top = 6.dp, start = 4.dp),
+                    )
+                    phase.tasks.forEach { task ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                when (task.status) {
+                                    "completed" -> "✓"
+                                    "in_progress" -> "◐"
+                                    "blocked" -> "!"
+                                    "abandoned" -> "–"
+                                    else -> "○"
+                                },
+                                fontSize = 12.sp,
+                                color = if (task.status == "completed") OmpColors.Accent else OmpColors.TextDim,
+                                modifier = Modifier.width(20.dp),
+                            )
+                            Text(
+                                task.content,
+                                fontSize = 13.sp,
+                                color = OmpColors.Text,
+                            )
+                        }
                     }
                 }
-            }
             }
         }
     }
@@ -176,103 +202,174 @@ fun TodoPanel(todos: List<com.dbchbin.ompgui.remote.relay.TodoPhase>) {
 // ---------------------------------------------------------------------------
 
 @Composable
+private fun subagentStatusLabel(chip: com.dbchbin.ompgui.remote.relay.SubagentChip): String {
+    val status = chip.status.lowercase(Locale.US)
+    return when {
+        status == "completed" -> stringResource(R.string.chat_subagent_status_completed)
+        status == "failed" -> stringResource(R.string.chat_subagent_status_failed)
+        status == "aborted" -> stringResource(R.string.chat_subagent_status_aborted)
+        // Bare historical started → "unknown"; never show as Running.
+        status == "unknown" -> stringResource(R.string.chat_subagent_status_unknown)
+        // History/non-live non-terminal rows stay visible with Historical badge.
+        !chip.live -> stringResource(R.string.chat_subagent_status_historical)
+        status == "started" || status == "running" || status == "pending" ->
+            stringResource(R.string.chat_subagent_status_running)
+        else -> status.ifBlank { stringResource(R.string.chat_subagent_status_unknown) }
+    }
+}
+
+private fun subagentIsLive(chip: com.dbchbin.ompgui.remote.relay.SubagentChip): Boolean {
+    return com.dbchbin.ompgui.remote.relay.isSubagentLive(chip)
+}
+
+@Composable
 fun SubagentPanel(
     requester: RelayRequester,
     sessionId: String,
     subagents: List<com.dbchbin.ompgui.remote.relay.SubagentChip>,
+    bodyMaxHeight: Dp,
 ) {
     if (subagents.isEmpty()) return
     var expanded by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<com.dbchbin.ompgui.remote.relay.SubagentChip?>(null) }
-    val korean = remember { Locale.getDefault().language == "ko" }
-    val live = remember(subagents) { subagents.count { it.status == "started" || it.status == "running" } }
+    val live = remember(subagents) { subagents.count(::subagentIsLive) }
+    val headerDesc = if (expanded) {
+        stringResource(R.string.chat_subagent_collapse)
+    } else {
+        stringResource(R.string.chat_subagent_expand)
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(panelShape())
             .background(OmpColors.BgPanel)
-            .border(1.dp, OmpColors.Border, panelShape())
-            .padding(horizontal = 12.dp, vertical = 0.dp),
+            .border(1.5.dp, OmpColors.Border, panelShape())
+            .padding(horizontal = 10.dp, vertical = 0.dp),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(6.dp))
                 .clickable { expanded = !expanded }
+                .semantics { contentDescription = headerDesc }
                 .heightIn(min = 48.dp)
-                .padding(vertical = 4.dp),
+                .padding(horizontal = 2.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            Icon(
+                Icons.Filled.AccountTree,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = OmpColors.TextMuted,
+            )
             Text(
-                if (korean) "서브에이전트 ${subagents.size}" else "Subagents ${subagents.size}",
+                stringResource(R.string.chat_subagent_hub_summary, subagents.size),
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = OmpColors.Text,
                 modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (live > 0) {
                 Text(
-                    if (korean) "$live 실행 중" else "$live live",
+                    stringResource(R.string.chat_subagent_hub_live, live),
                     fontSize = 12.sp,
                     color = OmpColors.Accent,
                 )
-                Spacer(modifier = Modifier.width(8.dp))
             }
-            Text(if (expanded) "▾" else "▸", fontSize = 13.sp, color = OmpColors.TextMuted)
+            Icon(
+                if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = OmpColors.TextDim,
+            )
         }
         if (expanded) {
-            Column(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
-            subagents.forEach { chip ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(6.dp))
-                        .clickable { selected = chip }
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = bodyMaxHeight)
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                subagents.forEach { chip ->
+                    val statusLabel = subagentStatusLabel(chip)
+                    val liveChip = subagentIsLive(chip)
+                    val openDesc = stringResource(R.string.chat_subagent_open_transcript)
+                    val title = chip.id.ifBlank { chip.agent }.ifBlank { "agent" }
+                    val agentType = chip.agent.trim().takeIf { it.isNotEmpty() && !it.equals(title, ignoreCase = true) }
+                    Row(
                         modifier = Modifier
-                            .width(88.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(OmpColors.BgHover)
-                            .border(1.dp, OmpColors.Border, RoundedCornerShape(8.dp))
-                            .padding(horizontal = 6.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center,
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { selected = chip }
+                            .semantics {
+                                contentDescription = buildString {
+                                    append(title)
+                                    if (agentType != null) append(", ").append(agentType)
+                                    append(", ").append(statusLabel)
+                                    append(". ").append(openDesc)
+                                }
+                            }
+                            .padding(horizontal = 6.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            chip.status,
-                            fontSize = 12.sp,
-                            color = if (chip.status == "started" || chip.status == "running") {
-                                OmpColors.Accent
-                            } else {
-                                OmpColors.TextMuted
-                            },
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            chip.agent.ifBlank { chip.id },
-                            fontSize = 13.sp,
-                            color = OmpColors.Text,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        if (chip.task.isNotBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .width(92.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(OmpColors.BgHover)
+                                .border(1.dp, OmpColors.Border, RoundedCornerShape(8.dp))
+                                .padding(horizontal = 6.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
                             Text(
-                                chip.task,
-                                fontSize = 12.sp,
-                                color = OmpColors.TextMuted,
-                                maxLines = 2,
+                                statusLabel,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (liveChip) OmpColors.Accent else OmpColors.TextMuted,
+                                maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                title,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = OmpColors.Text,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            val activity = chip.task.trim()
+                            val preview = buildList {
+                                if (agentType != null) add(agentType)
+                                if (activity.isNotEmpty()) add(activity)
+                            }.joinToString(" · ")
+                            if (preview.isNotEmpty()) {
+                                Text(
+                                    preview,
+                                    fontSize = 12.sp,
+                                    color = OmpColors.TextMuted,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        Text(
+                            stringResource(R.string.chat_subagent_view_result),
+                            fontSize = 11.sp,
+                            color = OmpColors.Accent,
+                            modifier = Modifier.padding(start = 4.dp),
+                        )
                     }
                 }
             }
         }
-    }
     }
     if (selected != null) {
         SubagentTranscriptDialog(
@@ -284,7 +381,6 @@ fun SubagentPanel(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SubagentTranscriptDialog(
     requester: RelayRequester,
@@ -301,12 +397,13 @@ private fun SubagentTranscriptDialog(
     var nextByte by remember { mutableStateOf(0L) }
     var exhausted by remember { mutableStateOf(false) }
     var transcriptOpen by remember { mutableStateOf(false) }
-    val korean = remember { Locale.getDefault().language == "ko" }
+    val noSession = stringResource(R.string.chat_subagent_no_session)
+    val statusLabel = subagentStatusLabel(subagent)
 
     LaunchedEffect(sessionId, subagent.id) {
         if (sessionId.isBlank()) {
             loading = false
-            error = if (korean) "세션이 없습니다" else "No session"
+            error = noSession
             return@LaunchedEffect
         }
         loading = true
@@ -368,94 +465,108 @@ private fun SubagentTranscriptDialog(
         }
     }
 
-    ModalBottomSheet(
-        dragHandle = { OmpSheetDragHandle() },
+    OmpModalSheet(
         onDismissRequest = onDismiss,
         containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
     ) {
-        OmpDialogSystemBars()
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 560.dp)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(subagent.agent.ifBlank { subagent.id }, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-                    color = OmpColors.Text, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, "Close", tint = OmpColors.TextMuted) }
-            }
-            Text(
-                "${subagent.status} · ${subagent.id}",
-                fontSize = 12.sp,
-                color = OmpColors.TextMuted,
-            )
-            if (loading) {
-                Text(if (korean) "불러오는 중…" else "Loading…", fontSize = 14.sp, color = OmpColors.TextMuted)
-            }
-            if (!error.isNullOrBlank()) {
-                Text(error!!, fontSize = 13.sp, color = OmpColors.StatusError)
-            }
-            if (!completion.isNullOrBlank()) {
-                Text(
-                    if (korean) "완료 출력" else "Completion",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = OmpColors.Text,
-                )
-                MessageText(completion!!, Modifier.fillMaxWidth())
-                if (completionTruncated) {
-                    Text(
-                        if (korean) "(잘림)" else "(truncated)",
-                        fontSize = 12.sp,
-                        color = OmpColors.StatusWarning,
-                    )
+        Column(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 560.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            subagent.id.ifBlank { subagent.agent }.ifBlank { "agent" },
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = OmpColors.Text,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        val agentType = subagent.agent.trim()
+                        if (agentType.isNotEmpty() && !agentType.equals(subagent.id, ignoreCase = true)) {
+                            Text(agentType, fontSize = 12.sp, color = OmpColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.extension_close), tint = OmpColors.TextMuted)
+                    }
                 }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (transcriptOpen) {
-                        if (korean) "대화 닫기" else "Hide transcript"
-                    } else {
-                        if (korean) "대화 보기" else "Show transcript"
-                    },
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = OmpColors.Accent,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .clickable {
-                            transcriptOpen = !transcriptOpen
-                            if (transcriptOpen && transcript.isEmpty() && !exhausted) loadPage()
-                        }.heightIn(min = 48.dp)
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    "$statusLabel · ${subagent.id}",
+                    fontSize = 12.sp,
+                    color = OmpColors.TextMuted,
                 )
-            }
-            if (transcriptOpen) {
-                if (transcript.isNotBlank()) {
+                if (loading) {
+                    Text(stringResource(R.string.chat_subagent_loading), fontSize = 14.sp, color = OmpColors.TextMuted)
+                }
+                if (!error.isNullOrBlank()) {
+                    Text(error!!, fontSize = 13.sp, color = OmpColors.StatusError)
+                }
+                if (!completion.isNullOrBlank()) {
                     Text(
-                        transcript,
-                        fontSize = 12.sp,
-                        fontFamily = FontFamily.Monospace,
+                        stringResource(R.string.chat_subagent_completion),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
                         color = OmpColors.Text,
-                        lineHeight = 18.sp,
                     )
+                    MessageText(completion!!, Modifier.fillMaxWidth())
+                    if (completionTruncated) {
+                        Text(
+                            stringResource(R.string.chat_subagent_truncated),
+                            fontSize = 12.sp,
+                            color = OmpColors.StatusWarning,
+                        )
+                    }
                 }
-                if (!exhausted) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        if (korean) "더 보기" else "Load more",
+                        if (transcriptOpen) {
+                            stringResource(R.string.chat_subagent_hide_transcript)
+                        } else {
+                            stringResource(R.string.chat_subagent_show_transcript)
+                        },
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = OmpColors.Accent,
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .clickable(enabled = !loading) { loadPage() }.heightIn(min = 48.dp)
+                            .clickable {
+                                transcriptOpen = !transcriptOpen
+                                if (transcriptOpen && transcript.isEmpty() && !exhausted) loadPage()
+                            }.heightIn(min = 48.dp)
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                     )
+                }
+                if (transcriptOpen) {
+                    if (transcript.isNotBlank()) {
+                        Text(
+                            transcript,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = OmpColors.Text,
+                            lineHeight = 18.sp,
+                        )
+                    }
+                    if (!exhausted) {
+                        Text(
+                            stringResource(R.string.chat_subagent_load_more),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = OmpColors.Accent,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable(enabled = !loading) { loadPage() }.heightIn(min = 48.dp)
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
+                    }
                 }
             }
         }
@@ -544,7 +655,6 @@ private fun QueueAction(label: String, enabled: Boolean, onClick: () -> Unit) {
 // Runtime controls: modes, bash, handoff, reload, compact, fork, export.
 // ---------------------------------------------------------------------------
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RuntimePanel(
     requester: RelayRequester,
@@ -603,144 +713,143 @@ fun RuntimePanel(
     }
     val scrollState = rememberScrollState()
     if (expanded) {
-        ModalBottomSheet(
+        OmpModalSheet(
             onDismissRequest = { onExpandedChange(false) },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            dragHandle = { OmpSheetDragHandle() },
             containerColor = OmpColors.Bg,
             contentColor = OmpColors.Text,
         ) {
-            OmpDialogSystemBars()
-            Column(
-                modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-                    .heightIn(max = 560.dp)
-                    .border(1.dp, OmpColors.Border, RoundedCornerShape(16.dp))
-                    .clip(RoundedCornerShape(16.dp)).background(OmpColors.BgPanel),
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().height(48.dp).padding(start = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Column(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+                Column(
+                    modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+                        .heightIn(max = 560.dp)
+                        .border(1.dp, OmpColors.Border, RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(16.dp)).background(OmpColors.BgPanel),
                 ) {
-                    Icon(Icons.Filled.Tune, null, Modifier.size(20.dp), tint = OmpColors.TextMuted)
-                    Text(if (korean) "세션 실행 제어" else "Session controls",
-                        Modifier.weight(1f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-                        color = OmpColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    IconButton(onClick = { onExpandedChange(false) }, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Filled.Close, if (korean) "세션 실행 제어 닫기" else "Close session controls", tint = OmpColors.TextMuted)
+                    Row(
+                        Modifier.fillMaxWidth().height(48.dp).padding(start = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(Icons.Filled.Tune, null, Modifier.size(20.dp), tint = OmpColors.TextMuted)
+                        Text(if (korean) "세션 실행 제어" else "Session controls",
+                            Modifier.weight(1f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                            color = OmpColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        IconButton(onClick = { onExpandedChange(false) }, modifier = Modifier.size(48.dp)) {
+                            Icon(Icons.Filled.Close, if (korean) "세션 실행 제어 닫기" else "Close session controls", tint = OmpColors.TextMuted)
+                        }
                     }
-                }
-                Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(scrollState)) {
-            RuntimeTreeRow(
-                label = if (korean) "실행" else "Execution",
-                expanded = category == "execution", heading = true, icon = Icons.Filled.PlayArrow,
-                onClick = { toggleCategory("execution") },
-            )
-            if (category == "execution") {
-                RuntimeSettingBranch(
-                    if (korean) "빠른 모드" else "Fast mode", fastMode?.toString(), boolChoices,
-                    branch == "fast", { toggleBranch("fast") }, { onFastModeChange(it == "true") },
-                )
-                RuntimeSettingBranch(
-                    if (korean) "자동 재시도" else "Auto retry", autoRetry?.toString(), boolChoices,
-                    branch == "retry", { toggleBranch("retry") }, { onAutoRetryChange(it == "true") },
-                )
-                RuntimeSettingBranch(
-                    if (korean) "인터럽트 모드" else "Interrupt mode", interruptMode, interruptChoices,
-                    branch == "interrupt", { toggleBranch("interrupt") }, onInterruptModeChange,
-                )
-                RuntimeTreeRow(if (korean) "모델 순환" else "Cycle model", depth = 1, icon = Icons.Filled.SwapHoriz, onClick = onCycleModel)
-                RuntimeTreeRow(if (korean) "핸드오프" else "Handoff", depth = 1, icon = Icons.Filled.AccountTree, onClick = onHandoff)
-                RuntimeTreeRow(if (korean) "리로드" else "Reload", depth = 1, icon = Icons.Filled.Refresh, onClick = onReload)
-                RuntimeTreeRow(if (korean) "재시도 중단" else "Abort retry", depth = 1, icon = Icons.Filled.Stop, onClick = onRetryAbort)
-                if (running) RuntimeTreeRow(if (korean) "에이전트 중단" else "Abort agent", depth = 1, icon = Icons.Filled.Stop, onClick = onAbort)
-            }
-            RuntimeTreeRow(
-                label = if (korean) "메시지 대기열" else "Message queue",
-                expanded = category == "queue", heading = true, icon = Icons.Filled.Queue,
-                onClick = { toggleCategory("queue") },
-            )
-            if (category == "queue") {
-                RuntimeSettingBranch(
-                    if (korean) "스티어링 모드" else "Steering", steeringMode, queueChoices,
-                    branch == "steering", { toggleBranch("steering") }, onSteeringModeChange,
-                )
-                RuntimeSettingBranch(
-                    if (korean) "후속 메시지 모드" else "Follow-up", followUpMode, queueChoices,
-                    branch == "followUp", { toggleBranch("followUp") }, onFollowUpModeChange,
-                )
-            }
-            RuntimeTreeRow(
-                label = if (korean) "컨텍스트" else "Context",
-                expanded = category == "context", heading = true, icon = Icons.Filled.Compress,
-                onClick = { toggleCategory("context") },
-            )
-            if (category == "context") {
-                RuntimeSettingBranch(
-                    if (korean) "자동 압축" else "Auto compaction", autoCompaction?.toString(), boolChoices,
-                    branch == "autoCompact", { toggleBranch("autoCompact") }, { onAutoCompactionChange(it == "true") },
-                )
-                RuntimeTreeRow(if (korean) "지금 압축" else "Compact now", depth = 1, icon = Icons.Filled.Compress, onClick = onCompact)
+                    Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(scrollState)) {
                 RuntimeTreeRow(
-                    if (korean) "사용자 지정 압축" else "Custom compaction", depth = 1, icon = Icons.Filled.Edit,
-                    expanded = branch == "compact", onClick = { toggleBranch("compact") },
+                    label = if (korean) "실행" else "Execution",
+                    expanded = category == "execution", heading = true, icon = Icons.Filled.PlayArrow,
+                    onClick = { toggleCategory("execution") },
                 )
-                if (branch == "compact") {
+                if (category == "execution") {
+                    RuntimeSettingBranch(
+                        if (korean) "빠른 모드" else "Fast mode", fastMode?.toString(), boolChoices,
+                        branch == "fast", { toggleBranch("fast") }, { onFastModeChange(it == "true") },
+                    )
+                    RuntimeSettingBranch(
+                        if (korean) "자동 재시도" else "Auto retry", autoRetry?.toString(), boolChoices,
+                        branch == "retry", { toggleBranch("retry") }, { onAutoRetryChange(it == "true") },
+                    )
+                    RuntimeSettingBranch(
+                        if (korean) "인터럽트 모드" else "Interrupt mode", interruptMode, interruptChoices,
+                        branch == "interrupt", { toggleBranch("interrupt") }, onInterruptModeChange,
+                    )
+                    RuntimeTreeRow(if (korean) "모델 순환" else "Cycle model", depth = 1, icon = Icons.Filled.SwapHoriz, onClick = onCycleModel)
+                    RuntimeTreeRow(if (korean) "핸드오프" else "Handoff", depth = 1, icon = Icons.Filled.AccountTree, onClick = onHandoff)
+                    RuntimeTreeRow(if (korean) "리로드" else "Reload", depth = 1, icon = Icons.Filled.Refresh, onClick = onReload)
+                    RuntimeTreeRow(if (korean) "재시도 중단" else "Abort retry", depth = 1, icon = Icons.Filled.Stop, onClick = onRetryAbort)
+                    if (running) RuntimeTreeRow(if (korean) "에이전트 중단" else "Abort agent", depth = 1, icon = Icons.Filled.Stop, onClick = onAbort)
+                }
+                RuntimeTreeRow(
+                    label = if (korean) "메시지 대기열" else "Message queue",
+                    expanded = category == "queue", heading = true, icon = Icons.Filled.Queue,
+                    onClick = { toggleCategory("queue") },
+                )
+                if (category == "queue") {
+                    RuntimeSettingBranch(
+                        if (korean) "스티어링 모드" else "Steering", steeringMode, queueChoices,
+                        branch == "steering", { toggleBranch("steering") }, onSteeringModeChange,
+                    )
+                    RuntimeSettingBranch(
+                        if (korean) "후속 메시지 모드" else "Follow-up", followUpMode, queueChoices,
+                        branch == "followUp", { toggleBranch("followUp") }, onFollowUpModeChange,
+                    )
+                }
+                RuntimeTreeRow(
+                    label = if (korean) "컨텍스트" else "Context",
+                    expanded = category == "context", heading = true, icon = Icons.Filled.Compress,
+                    onClick = { toggleCategory("context") },
+                )
+                if (category == "context") {
+                    RuntimeSettingBranch(
+                        if (korean) "자동 압축" else "Auto compaction", autoCompaction?.toString(), boolChoices,
+                        branch == "autoCompact", { toggleBranch("autoCompact") }, { onAutoCompactionChange(it == "true") },
+                    )
+                    RuntimeTreeRow(if (korean) "지금 압축" else "Compact now", depth = 1, icon = Icons.Filled.Compress, onClick = onCompact)
+                    RuntimeTreeRow(
+                        if (korean) "사용자 지정 압축" else "Custom compaction", depth = 1, icon = Icons.Filled.Edit,
+                        expanded = branch == "compact", onClick = { toggleBranch("compact") },
+                    )
+                    if (branch == "compact") {
+                        RuntimeDraftEditor(
+                            label = if (korean) "압축 지시 (선택)" else "Compaction instructions (optional)",
+                            value = compactDraft, onValueChange = { compactDraft = it },
+                        )
+                        RuntimeTreeRow(if (korean) "지시 적용 및 압축" else "Apply instructions and compact", depth = 2, icon = Icons.Filled.Compress) {
+                            onCustomCompact(compactDraft.trim())
+                            compactDraft = ""
+                        }
+                    }
+                }
+                RuntimeTreeRow(
+                    label = if (korean) "셸" else "Shell",
+                    expanded = category == "shell", heading = true, icon = Icons.Filled.Terminal,
+                    onClick = { toggleCategory("shell") },
+                )
+                if (category == "shell") {
                     RuntimeDraftEditor(
-                        label = if (korean) "압축 지시 (선택)" else "Compaction instructions (optional)",
-                        value = compactDraft, onValueChange = { compactDraft = it },
+                        label = if (korean) "셸 명령 (단일 !만 지원)" else "Shell command (single ! only)",
+                        value = bashDraft, monospace = true, depth = 1,
+                        onValueChange = { bashDraft = it; bashError = null },
                     )
-                    RuntimeTreeRow(if (korean) "지시 적용 및 압축" else "Apply instructions and compact", depth = 2, icon = Icons.Filled.Compress) {
-                        onCustomCompact(compactDraft.trim())
-                        compactDraft = ""
+                    if (bashDraft.startsWith("!!")) {
+                        Text(
+                            if (korean) "!! 제외 실행은 지원되지 않습니다. 서버 오류가 표시됩니다."
+                            else "!! excluded output is unsupported and fails server-side.",
+                            modifier = Modifier.padding(start = 28.dp, end = 12.dp),
+                            fontSize = 12.sp, color = OmpColors.StatusWarning,
+                        )
                     }
+                    bashError?.let {
+                        Text(it, modifier = Modifier.padding(start = 28.dp, end = 12.dp), fontSize = 12.sp, color = OmpColors.StatusError)
+                    }
+                    RuntimeTreeRow(if (korean) "실행" else "Run", depth = 1, icon = Icons.Filled.PlayArrow) {
+                        val cmd = bashDraft.trim().removePrefix("!").trim()
+                        if (cmd.isEmpty()) {
+                            bashError = if (korean) "명령을 입력하세요" else "Enter a command"
+                        } else {
+                            // Preserve !! submission: the server's coded error remains authoritative.
+                            bashError = null
+                            onBash(bashDraft.trim())
+                            bashDraft = ""
+                        }
+                    }
+                    RuntimeTreeRow(if (korean) "bash 중단" else "Abort bash", depth = 1, icon = Icons.Filled.Stop, onClick = onAbortBash)
                 }
-            }
-            RuntimeTreeRow(
-                label = if (korean) "셸" else "Shell",
-                expanded = category == "shell", heading = true, icon = Icons.Filled.Terminal,
-                onClick = { toggleCategory("shell") },
-            )
-            if (category == "shell") {
-                RuntimeDraftEditor(
-                    label = if (korean) "셸 명령 (단일 !만 지원)" else "Shell command (single ! only)",
-                    value = bashDraft, monospace = true, depth = 1,
-                    onValueChange = { bashDraft = it; bashError = null },
+                RuntimeTreeRow(
+                    label = if (korean) "출력" else "Output",
+                    expanded = category == "output", heading = true, icon = Icons.Filled.Description,
+                    onClick = { toggleCategory("output") },
                 )
-                if (bashDraft.startsWith("!!")) {
-                    Text(
-                        if (korean) "!! 제외 실행은 지원되지 않습니다. 서버 오류가 표시됩니다."
-                        else "!! excluded output is unsupported and fails server-side.",
-                        modifier = Modifier.padding(start = 28.dp, end = 12.dp),
-                        fontSize = 12.sp, color = OmpColors.StatusWarning,
-                    )
+                if (category == "output") {
+                    RuntimeTreeRow(if (korean) "마지막 복사" else "Copy last", depth = 1, icon = Icons.Filled.ContentCopy, onClick = onCopyLast)
+                    RuntimeTreeRow(if (korean) "내보내기" else "Export", depth = 1, icon = Icons.Filled.FileUpload, onClick = onExport)
+                    RuntimeTreeRow(if (korean) "명령 팔레트" else "Command palette", depth = 1, icon = Icons.Filled.Terminal, onClick = onOpenPalette)
                 }
-                bashError?.let {
-                    Text(it, modifier = Modifier.padding(start = 28.dp, end = 12.dp), fontSize = 12.sp, color = OmpColors.StatusError)
-                }
-                RuntimeTreeRow(if (korean) "실행" else "Run", depth = 1, icon = Icons.Filled.PlayArrow) {
-                    val cmd = bashDraft.trim().removePrefix("!").trim()
-                    if (cmd.isEmpty()) {
-                        bashError = if (korean) "명령을 입력하세요" else "Enter a command"
-                    } else {
-                        // Preserve !! submission: the server's coded error remains authoritative.
-                        bashError = null
-                        onBash(bashDraft.trim())
-                        bashDraft = ""
                     }
-                }
-                RuntimeTreeRow(if (korean) "bash 중단" else "Abort bash", depth = 1, icon = Icons.Filled.Stop, onClick = onAbortBash)
-            }
-            RuntimeTreeRow(
-                label = if (korean) "출력" else "Output",
-                expanded = category == "output", heading = true, icon = Icons.Filled.Description,
-                onClick = { toggleCategory("output") },
-            )
-            if (category == "output") {
-                RuntimeTreeRow(if (korean) "마지막 복사" else "Copy last", depth = 1, icon = Icons.Filled.ContentCopy, onClick = onCopyLast)
-                RuntimeTreeRow(if (korean) "내보내기" else "Export", depth = 1, icon = Icons.Filled.FileUpload, onClick = onExport)
-                RuntimeTreeRow(if (korean) "명령 팔레트" else "Command palette", depth = 1, icon = Icons.Filled.Terminal, onClick = onOpenPalette)
-            }
                 }
             }
         }
@@ -991,7 +1100,7 @@ fun ChatHistoryHost(requester: RelayRequester, sessionId: String, leafId: String
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChatHistoryContent(requester: RelayRequester, sessionId: String, leafId: String?, onOpenSession: (String) -> Unit, onEditMessage: (String) -> Unit, expanded: Boolean, onDismiss: () -> Unit) {
     var page by remember(sessionId) { mutableStateOf<ChatRequests.HistoryPage?>(null) }
@@ -1009,31 +1118,38 @@ private fun ChatHistoryContent(requester: RelayRequester, sessionId: String, lea
     }
     Box {
         LaunchedEffect(expanded) { if (expanded && page == null) load(0) }
-        if (expanded) ModalBottomSheet(dragHandle = { OmpSheetDragHandle() }, onDismissRequest = onDismiss, containerColor = OmpColors.Bg, contentColor = OmpColors.Text) {
-            OmpDialogSystemBars()
-        Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("History", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, "Close", tint = OmpColors.TextMuted) }
-            }
-            if (busy) Text("Loading…", color = OmpColors.TextMuted)
-            error?.let { Text(it, color = OmpColors.StatusError) }
-            page?.let { current ->
-                Text("${current.offset} / ${current.total}", color = OmpColors.TextMuted)
-                for (i in 0 until current.messages.length()) {
-                    val message = current.messages.optJSONObject(i) ?: continue
-                    val entryId = current.entryIds.optString(i)
-                    androidx.compose.runtime.key(sessionId, entryId, current.offset + i) {
-                        HistoryEntry(requester, sessionId, entryId, message, onOpenSession, onEditMessage)
+        if (expanded) {
+            OmpModalSheet(
+                onDismissRequest = onDismiss,
+                containerColor = OmpColors.Bg,
+                contentColor = OmpColors.Text,
+            ) {
+                Column(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+            Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("History", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, "Close", tint = OmpColors.TextMuted) }
+                }
+                if (busy) Text("Loading…", color = OmpColors.TextMuted)
+                error?.let { Text(it, color = OmpColors.StatusError) }
+                page?.let { current ->
+                    Text("${current.offset} / ${current.total}", color = OmpColors.TextMuted)
+                    for (i in 0 until current.messages.length()) {
+                        val message = current.messages.optJSONObject(i) ?: continue
+                        val entryId = current.entryIds.optString(i)
+                        androidx.compose.runtime.key(sessionId, entryId, current.offset + i) {
+                            HistoryEntry(requester, sessionId, entryId, message, onOpenSession, onEditMessage)
+                        }
+                    }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        RuntimeChip("Previous", enabled = !busy && current.offset > 0, onClick = { load((current.offset - 25).coerceAtLeast(0)) })
+                        RuntimeChip("Next", enabled = !busy && current.hasMore, onClick = { load(current.offset + current.messages.length()) })
                     }
                 }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    RuntimeChip("Previous", enabled = !busy && current.offset > 0, onClick = { load((current.offset - 25).coerceAtLeast(0)) })
-                    RuntimeChip("Next", enabled = !busy && current.hasMore, onClick = { load(current.offset + current.messages.length()) })
+                RuntimeChip("Refresh", enabled = !busy, onClick = { load(page?.offset ?: 0) })
+            }
                 }
             }
-            RuntimeChip("Refresh", enabled = !busy, onClick = { load(page?.offset ?: 0) })
-        }
         }
     }
 }
@@ -1137,7 +1253,7 @@ private fun HistoryImage(block: JSONObject) {
     else Text("Image data unavailable", color = OmpColors.TextMuted)
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ChatStatsHost(requester: RelayRequester, sessionId: String, open: Boolean, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
@@ -1145,43 +1261,49 @@ fun ChatStatsHost(requester: RelayRequester, sessionId: String, open: Boolean, o
     var output by remember(sessionId) { mutableStateOf("") }
     var busy by remember(sessionId) { mutableStateOf(false) }
     Box {
-        if (open) ModalBottomSheet(dragHandle = { OmpSheetDragHandle() }, onDismissRequest = onDismiss, containerColor = OmpColors.Bg, contentColor = OmpColors.Text) {
-            OmpDialogSystemBars()
-        Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Session info", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, "Close", tint = OmpColors.TextMuted) }
-        }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            listOf("State", "Stats", "System prompt").forEach { name ->
-                RuntimeChip(name, enabled = !busy, onClick = {
-                    selected = name; busy = true
-                    scope.launch {
-                        try {
-                            val data = when (name) {
-                                "State" -> ChatRequests.sessionState(requester, sessionId)
-                                "Stats" -> ChatRequests.stats(requester, sessionId)
-                                else -> ChatRequests.systemPrompt(requester, sessionId)
-                            }
-                            output = if (name == "System prompt") {
-                                if (data.isNull("systemPrompt")) "System prompt unavailable" else data.optString("systemPrompt")
-                            } else data.toString(2)
-                        } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; output = e.message ?: "Request failed" }
-                        finally { busy = false }
-                    }
-                })
+        if (open) {
+            OmpModalSheet(
+                onDismissRequest = onDismiss,
+                containerColor = OmpColors.Bg,
+                contentColor = OmpColors.Text,
+            ) {
+                Column(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+            Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Session info", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, "Close", tint = OmpColors.TextMuted) }
             }
-        }
-        if (selected != null) Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-            if (busy) Text("Loading…", color = OmpColors.TextMuted)
-            androidx.compose.foundation.text.selection.SelectionContainer { Text(output, color = OmpColors.Text) }
-        }
-        }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf("State", "Stats", "System prompt").forEach { name ->
+                    RuntimeChip(name, enabled = !busy, onClick = {
+                        selected = name; busy = true
+                        scope.launch {
+                            try {
+                                val data = when (name) {
+                                    "State" -> ChatRequests.sessionState(requester, sessionId)
+                                    "Stats" -> ChatRequests.stats(requester, sessionId)
+                                    else -> ChatRequests.systemPrompt(requester, sessionId)
+                                }
+                                output = if (name == "System prompt") {
+                                    if (data.isNull("systemPrompt")) "System prompt unavailable" else data.optString("systemPrompt")
+                                } else data.toString(2)
+                            } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; output = e.message ?: "Request failed" }
+                            finally { busy = false }
+                        }
+                    })
+                }
+            }
+            if (selected != null) Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+                if (busy) Text("Loading…", color = OmpColors.TextMuted)
+                androidx.compose.foundation.text.selection.SelectionContainer { Text(output, color = OmpColors.Text) }
+            }
+            }
+                }
+            }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatSlashHost(
     requester: RelayRequester,
@@ -1208,26 +1330,33 @@ fun ChatSlashHost(
         }
     }
     Box {
-        if (expanded) ModalBottomSheet(dragHandle = { OmpSheetDragHandle() }, onDismissRequest = onDismiss, containerColor = OmpColors.Bg, contentColor = OmpColors.Text) {
-            OmpDialogSystemBars()
-        Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Commands & files", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, "Close", tint = OmpColors.TextMuted) }
+        if (expanded) {
+            OmpModalSheet(
+                onDismissRequest = onDismiss,
+                containerColor = OmpColors.Bg,
+                contentColor = OmpColors.Text,
+            ) {
+                Column(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+            Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Commands & files", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, "Close", tint = OmpColors.TextMuted) }
+                }
+                val commands = if (draft.startsWith("/")) slashCommands.filter { it.name.contains(draft.removePrefix("/").substringBefore(' '), ignoreCase = true) } else slashCommands
+                commands.forEach { command -> RuntimeChip("/${command.name}", onClick = { onInsertSlash("/${command.name} "); onDismiss() }) }
+                if (commands.isEmpty()) Text("No matching slash commands", color = OmpColors.TextMuted)
+            if (atQuery != null) Column(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
+                searchError?.let { Text(it, color = OmpColors.StatusError) }
+                matches.forEach { path -> RuntimeChip(path, onClick = {
+                    val token = if (path.any { it.isWhitespace() }) "@\"${path.replace("\"", "\\\"")}\" " else "@$path "
+                    onInsertSlash(draft.dropLast(atQuery.length + 1) + token)
+                    onDismiss()
+                }) }
+                if (hasMore) Text("More matches available; refine the file query.", color = OmpColors.TextMuted)
             }
-            val commands = if (draft.startsWith("/")) slashCommands.filter { it.name.contains(draft.removePrefix("/").substringBefore(' '), ignoreCase = true) } else slashCommands
-            commands.forEach { command -> RuntimeChip("/${command.name}", onClick = { onInsertSlash("/${command.name} "); onDismiss() }) }
-            if (commands.isEmpty()) Text("No matching slash commands", color = OmpColors.TextMuted)
-        if (atQuery != null) Column(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
-            searchError?.let { Text(it, color = OmpColors.StatusError) }
-            matches.forEach { path -> RuntimeChip(path, onClick = {
-                val token = if (path.any { it.isWhitespace() }) "@\"${path.replace("\"", "\\\"")}\" " else "@$path "
-                onInsertSlash(draft.dropLast(atQuery.length + 1) + token)
-                onDismiss()
-            }) }
-            if (hasMore) Text("More matches available; refine the file query.", color = OmpColors.TextMuted)
-        }
-        }
+            }
+                }
+            }
         }
     }
     if (!expanded && (draft.startsWith("/") || atQuery != null)) {
@@ -1290,7 +1419,6 @@ fun ApprovalBanner(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExtensionNoticeList(notices: List<EventProjector.ChatNotice>, onDismiss: (String) -> Unit) {
     val informational = remember(notices) { notices.filter { it.type == "info" } }
@@ -1313,16 +1441,21 @@ fun ExtensionNoticeList(notices: List<EventProjector.ChatNotice>, onDismiss: (St
         }
     }
     if (detailsOpen && informational.isNotEmpty()) {
-        ModalBottomSheet(dragHandle = { OmpSheetDragHandle() }, onDismissRequest = { detailsOpen = false }, containerColor = OmpColors.Bg, contentColor = OmpColors.Text) {
-            OmpDialogSystemBars()
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Extension notices · ${informational.size}", modifier = Modifier.weight(1f), fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                IconButton(onClick = { detailsOpen = false }, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, "Close notices", tint = OmpColors.TextMuted) }
-            }
-            Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()).padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                informational.forEach { notice -> ExtensionNoticeRow(notice, onDismiss) }
+        OmpModalSheet(
+            onDismissRequest = { detailsOpen = false },
+            containerColor = OmpColors.Bg,
+            contentColor = OmpColors.Text,
+        ) {
+            Column(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Extension notices · ${informational.size}", modifier = Modifier.weight(1f), fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    IconButton(onClick = { detailsOpen = false }, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, "Close notices", tint = OmpColors.TextMuted) }
+                }
+                Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()).padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    informational.forEach { notice -> ExtensionNoticeRow(notice, onDismiss) }
+                }
             }
         }
     }

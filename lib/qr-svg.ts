@@ -21,7 +21,8 @@ export function pairingQrMatrix(text: string): boolean[][] | null {
 
 /**
  * Render a pairing URI as an inline SVG (no third-party image URL).
- * Dark modules are filled with `currentColor` so the panel theme applies.
+ * Modules are always `#000` on a `#fff` quiet zone so scanners stay reliable
+ * under light and dark UI themes (never inherit `currentColor` / `--text`).
  */
 export function pairingQrSvg(text: string): string | null {
   const matrix = pairingQrMatrix(text);
@@ -36,5 +37,5 @@ export function pairingQrSvg(text: string): string | null {
     }
   }
   const path = parts.join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges" role="img"><rect width="${size}" height="${size}" fill="#fff"/><path fill="currentColor" d="${path}"/></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="100%" height="100%" shape-rendering="crispEdges" role="img"><rect width="${size}" height="${size}" fill="#fff"/><path fill="#000" d="${path}"/></svg>`;
 }
