@@ -179,6 +179,7 @@ fun CommandPaletteSheet(
                                     )
                                     onDismiss()
                                 } catch (e: Exception) {
+                                    if (e is kotlinx.coroutines.CancellationException) throw e
                                     actionError = e.message ?: autonameFailed
                                 } finally {
                                     pendingAction = null

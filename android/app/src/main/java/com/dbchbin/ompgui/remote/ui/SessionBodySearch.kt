@@ -57,6 +57,7 @@ internal fun SessionBodySearch(
     onOpen: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val retryLabel = stringResource(R.string.extension_mcp_guide_disconnected)
     var from by rememberSaveable { mutableStateOf("") }
     var to by rememberSaveable { mutableStateOf("") }
     // A new identity immediately hides the previous query's results, even before effects run.
@@ -81,8 +82,9 @@ internal fun SessionBodySearch(
             val result = searchSessionBodies(requester, query, projectRoot, from.ifBlank { null }, to.ifBlank { null }, null)
             currentCoroutineContext().ensureActive()
             if (currentGeneration === generation) page = result
-        } catch (e: CancellationException) {
-            throw e
+        } catch (_: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            if (currentGeneration === generation) error = retryLabel
         } catch (e: Exception) {
             if (currentGeneration === generation) error = e.message ?: e.javaClass.simpleName
         } finally {
@@ -129,7 +131,10 @@ internal fun SessionBodySearch(
                             val result = searchSessionBodies(requester, query, projectRoot, from.ifBlank { null }, to.ifBlank { null }, cursor)
                             currentCoroutineContext().ensureActive()
                             if (currentGeneration === generation) page = result.copy(matches = (page?.matches.orEmpty() + result.matches).distinctBy { it.sessionId to it.entryId })
-                        } catch (e: CancellationException) { throw e }
+                        } catch (_: CancellationException) {
+                            currentCoroutineContext().ensureActive()
+                            if (currentGeneration === generation) error = retryLabel
+                        }
                         catch (e: Exception) { if (currentGeneration === generation) error = e.message ?: e.javaClass.simpleName }
                         finally { if (currentGeneration === generation) loading = false }
                     }
@@ -144,6 +149,7 @@ internal fun SessionBodySearch(
 
 @Composable
 private fun BodySearchContextSheet(requester: RelayRequester, match: BodySearchMatch, onDismiss: () -> Unit, onOpen: () -> Unit) {
+    val retryLabel = stringResource(R.string.extension_mcp_guide_disconnected)
     var context by remember(match) { mutableStateOf<BodySearchContext?>(null) }
     var error by remember(match) { mutableStateOf<String?>(null) }
     var retry by remember(match) { mutableStateOf(0) }
@@ -154,7 +160,10 @@ private fun BodySearchContextSheet(requester: RelayRequester, match: BodySearchM
             val result = loadSessionSearchContext(requester, match.sessionId, match.entryId)
             currentCoroutineContext().ensureActive()
             context = result
-        } catch (e: CancellationException) { throw e }
+        } catch (_: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            error = retryLabel
+        }
         catch (e: Exception) { error = e.message ?: e.javaClass.simpleName }
     }
     LaunchedEffect(context) { context?.let { listState.scrollToItem(it.matchIndex + 1) } }

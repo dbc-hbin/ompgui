@@ -131,7 +131,6 @@
     <string name="chat_subagent_open_transcript">打开 transcript</string>
     <string name="chat_subagent_show_transcript">显示 transcript</string>
     <string name="chat_subagent_hide_transcript">隐藏 transcript</string>
-    <string name="chat_subagent_view_result">查看结果</string>
     <string name="chat_subagent_completion">Completion</string>
     <string name="chat_subagent_truncated">(truncated)</string>
     <string name="chat_subagent_loading">加载中…</string>
@@ -871,4 +870,7 @@ This removes the project server and its saved environment variables and headers.
     <string name="body_search_close">关闭</string>
     <string name="body_search_open">打开会话</string>
     <string name="body_search_context_bound">仅显示此匹配消息前后的部分对话。</string>
+    <string name="chat_edit_input">编辑输入</string>
+    <string name="chat_message_replace_draft">此操作将替换当前输入和附件，或打开新会话。不会自动发送。</string>
+    <string name="chat_message_images_unavailable">无法恢复消息中的所有图片。输入内容未被替换。</string>
 </resources>

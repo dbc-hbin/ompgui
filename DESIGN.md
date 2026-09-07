@@ -117,8 +117,9 @@ Item IDs are unique across wrapper lifetimes. This is an in-memory queue:
 browser reloads recover pending work, but a server-process restart does not
 persist it to disk. Image bytes stay in private wrapper storage; public queue
 snapshots carry attachment metadata, not image payloads. Image count, byte, and
-aggregate queue-memory limits are enforced before mutation. Recall restores the
-text and attachments to the composer and removes the item only after preflight;
+aggregate queue-memory limits (100 MiB total private payload storage) are enforced
+before mutation. Recall returns image payloads only in its one-shot response,
+restores text and attachments to the composer, and removes the item only after preflight;
 a Relay recall exceeding 15 MiB is refused without changing the queue and directs
 the user to the web client.
 
@@ -152,18 +153,21 @@ items with a notice.
 ### Session search and provider checks
 
 Metadata search and indexed body search are distinct modes. Body search uses a
-private, derived Node/SQLite index of visible conversation text, not credentials,
-hidden reasoning, or opaque payloads. Date filters use an inclusive `from` and
-exclusive `to`. Match context is a read-only preview: search does not rewrite
-session history or turn a result into a full-history mutation API. The index and
-snippets contain private conversation data and stay within authenticated access.
+private, derived Node/SQLite index scoped to the current OMP profile. It covers
+visible conversation text, not session metadata, images, credentials, hidden
+reasoning, or opaque payloads. Date filters use an inclusive `from` and exclusive
+`to`. Results include snippets and read-only match context; opening historical
+context neither switches the active agent nor rewrites session history. The index
+and snippets contain private conversation data and stay within authenticated access.
 
-Model configuration checks validate configuration without contacting a provider.
-A real connectivity test requires explicit cost approval and makes at most one
-provider request using a fixed prompt and a 32-token output limit. Only OpenAI
-Chat Completions, OpenAI Responses, and Anthropic Messages API shapes with literal
-candidate credentials are supported; stored OAuth credentials are not used.
-Passing a configuration check does not prove connectivity or account access.
+Model configuration checks validate structure only: they neither start a native
+OMP process nor contact a provider. A real connectivity test requires explicit
+cost approval and makes at most one provider request using a fixed prompt and a
+32-token output limit. Only OpenAI Chat Completions, OpenAI Responses, and Anthropic
+Messages API shapes are supported, using submitted literal candidate credentials
+or explicit no-auth mode—not stored OAuth credentials. It does not run tools or
+make other upstream requests. Passing a configuration check does not prove
+connectivity or account access.
 
 ## Security contract
 
@@ -217,14 +221,22 @@ Passing a configuration check does not prove connectivity or account access.
 
 - The session sidebar is the durable navigation model: projects, sessions,
   branches, worktrees, and files must agree about the selected workspace.
+- Native chat uses one compact message-action row: copy, plus user-message
+  edit and new-session actions. Editing prefills the composer without sending;
+  replacing a draft requires confirmation, and a fork retains its selected
+  prompt and images in the new session's draft.
+- Native task and subagent sheets keep headers outside their scrolling bodies.
+  Subagents use compact selectable rows instead of separate result buttons;
+  list and detail dialogs are mutually exclusive, and Back restores list position.
 - Pre-dispatch prompts are owned by ompgui until they are forwarded. Web and
   current Android clients use the canonical server queue (stable ids, monotonic
   revision, compare-and-mutate). OMP receives a message at most once through
   `prompt` (active steering uses `streamingBehavior: "steer"`), only after the
   wrapper marks it sending. Legacy `prompt` / `steer` / `follow_up` entry points
   remain for deployed older clients.
-- Android opens the queue explicitly through **Session controls → Queue**;
-  typing does not insert an automatic Execution/Queue bar into the composer.
+- Android keeps primary Steer/Queue actions in the compact composer and opens
+  queue management explicitly through **Session controls → Queue**, with a native
+  queue count; typing does not insert an automatic Execution/Queue bar.
   Eligible queued items can be recalled with their images, deleted, or promoted
   from follow-up to steering. Sending entries cannot be edited; promotion still
   observes the scheduler's tool-execution safety boundary. Role-specific menus
@@ -241,6 +253,8 @@ Passing a configuration check does not prove connectivity or account access.
   shared design tokens and UI primitives rather than one-off colors or controls.
 - Expensive rendering is deferred until needed; responsiveness and initial
   bundle size are part of the product contract.
+- Web HTTP usage, Relay snapshots, and Relay usage requests share the same
+  server-side usage service; transports do not maintain separate provider logic.
 - Internally, `useAgentSession` composes `useSessionMessageQueue` and
   `useSessionSubagents` rather than owning both feature implementations inline.
   The feature hooks receive session context and mutation eligibility explicitly;

@@ -2239,6 +2239,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       case "subagent_event":
         handleSubagentEvent(event);
         break;
+      case "extension_ui_pending": {
+        if (!Array.isArray(event.ids) || !event.ids.every((id: unknown) => typeof id === "string")) break;
+        const pendingIds = new Set(event.ids);
+        setExtensionDialog((current) => current && !pendingIds.has(current.id) ? null : current);
+        break;
+      }
       case "extension_ui_request":
         handleExtensionUiRequest(event as unknown as IncomingExtensionUiRequest);
         break;

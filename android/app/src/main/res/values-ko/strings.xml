@@ -301,7 +301,6 @@
     <string name="chat_subagent_open_transcript">트랜스크립트 열기</string>
     <string name="chat_subagent_show_transcript">트랜스크립트 보기</string>
     <string name="chat_subagent_hide_transcript">트랜스크립트 숨기기</string>
-    <string name="chat_subagent_view_result">결과 보기</string>
     <string name="chat_subagent_completion">Completion</string>
     <string name="chat_subagent_truncated">(잘림)</string>
     <string name="chat_subagent_loading">불러오는 중…</string>
@@ -871,4 +870,7 @@
     <string name="body_search_close">닫기</string>
     <string name="body_search_open">세션 열기</string>
     <string name="body_search_context_bound">일치하는 메시지 전후의 대화 일부를 표시합니다.</string>
+    <string name="chat_edit_input">입력 내용 편집</string>
+    <string name="chat_message_replace_draft">현재 입력과 첨부 파일을 바꾸거나 새 세션을 엽니다. 자동으로 전송하지 않습니다.</string>
+    <string name="chat_message_images_unavailable">메시지의 모든 이미지를 복원할 수 없습니다. 입력 내용은 변경되지 않았습니다.</string>
 </resources>

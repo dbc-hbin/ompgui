@@ -340,12 +340,16 @@ function onlineEntryIndex(entryId: string | undefined, entryIds: readonly string
   if (index >= 0) return index;
   if (!entryId.startsWith("live:")) return -1;
   const byId = new Map(entries.map(entry => [entry.id, entry]));
+  let match = -1;
   for (let i = 0; i < entryIds.length; i++) {
     const entry = byId.get(entryIds[i]);
     const message = entry && "message" in entry ? entry.message : messages[i];
-    if (onlineMessage(message)?.entryId === entryId) return i;
+    if (onlineMessage(message)?.entryId !== entryId) continue;
+    // Content references identify full messages, not occurrences. Never pick a duplicate.
+    if (match >= 0) return -1;
+    match = i;
   }
-  return -1;
+  return match;
 }
 
 async function handleContent(args: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -707,9 +711,38 @@ async function handleCommand(args: Record<string, unknown>, context: RelayReques
     if (complaint) fail("invalid_images", complaint);
     command.images = normalized;
   }
+  let prepareFork: (() => string) | undefined;
   if (type === "fork") {
+    if (context.sessionId !== id) fail("invalid_session", "Open the target session before creating a fork");
+    context.assertActive?.();
     const entryId = asString(command.entryId)?.trim();
-    if (!entryId) fail("invalid_entry", "fork requires entryId");
+    if (!entryId || entryId.length > 200) fail("invalid_entry", "fork requires a valid entryId");
+    const leafId = command.leafId == null ? undefined : asString(command.leafId)?.trim();
+    if (command.leafId != null && (!leafId || leafId.length > 200)) fail("invalid_leaf", "leafId is invalid");
+    const filePath = await resolveSessionPath(id);
+    if (!filePath) fail("entry_not_found", "Wait for this user message to be saved, then refresh before creating a fork");
+    prepareFork = () => {
+      const document = getSessionDocument(filePath);
+      if (!document.header || document.header.id !== id || document.error) fail("entry_not_found", "The saved conversation is unavailable; refresh before creating a fork");
+      if (leafId && !document.entries.some(entry => entry.id === leafId)) fail("unknown_leaf", "Unknown conversation branch");
+      // Existing callers can fork a known saved user on another branch without
+      // a leaf. Opaque references must remain scoped to the selected branch.
+      let targetId: string | undefined = entryId;
+      if (leafId || entryId.startsWith("live:")) {
+        const branch = buildSessionContext(document.entries, leafId ?? getLeafEntryId(document.entries), { deferThinking: false, deferToolResultImages: false });
+        const index = onlineEntryIndex(entryId, branch.entryIds, branch.messages, document.entries);
+        targetId = index < 0 ? undefined : branch.entryIds[index];
+      }
+      const target = document.entries.find(entry => entry.id === targetId);
+      if (!target || target.type !== "message" || target.message.role !== "user") {
+        fail("entry_not_found", "Select a uniquely identifiable saved user message on this branch; refresh before creating a fork");
+      }
+      return target.id;
+    };
+    // Native fork accepts persisted user IDs only. Reuse the online full-message
+    // reference contract, and resolve again after any awaited runtime startup.
+    command.entryId = prepareFork();
+    delete command.leafId;
   }
   if (type === "bash" && command.excludeFromContext === true) {
     fail(
@@ -745,6 +778,7 @@ async function handleCommand(args: Record<string, unknown>, context: RelayReques
   try {
     const result = await sendRelayCommand(id, command, () => {
       context.assertActive?.();
+      if (prepareFork) command.entryId = prepareFork();
       return claimed ? { ...command, images: claimed.materialize() } : command;
     });
     if (result === null || result === undefined) return { result: null };

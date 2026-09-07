@@ -38,6 +38,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.PlayArrow
@@ -245,7 +246,7 @@ fun TodoPanel(todos: List<com.dbchbin.ompgui.remote.relay.TodoPhase>) {
     }
     if (expanded) {
         OmpModalSheet(onDismissRequest = { expanded = false }, fullHeight = true) {
-            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(R.string.todo_title), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = OmpColors.Text)
                     Text(stringResource(R.string.chat_activity_todos, done, tasks.size), fontSize = 13.sp, color = OmpColors.TextMuted)
@@ -273,7 +274,7 @@ fun TodoPanel(todos: List<com.dbchbin.ompgui.remote.relay.TodoPhase>) {
                     phase.tasks.forEach { task ->
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                            verticalAlignment = Alignment.Top,
                         ) {
                             Text(
                                 when (task.status) {
@@ -289,6 +290,7 @@ fun TodoPanel(todos: List<com.dbchbin.ompgui.remote.relay.TodoPhase>) {
                             )
                             Text(
                                 task.content,
+                                modifier = Modifier.weight(1f),
                                 fontSize = 15.sp,
                                 lineHeight = 22.sp,
                                 color = OmpColors.Text,
@@ -337,6 +339,8 @@ fun SubagentPanel(
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     var selected by remember(sessionId) { mutableStateOf<com.dbchbin.ompgui.remote.relay.SubagentChip?>(null) }
+    val hubScrollState = rememberScrollState()
+    val selectedSubagent = selected?.let { selection -> subagents.firstOrNull { it.id == selection.id } ?: selection }
     val live = remember(subagents) { subagents.count(::subagentIsLive) }
     val headerDesc = if (expanded) {
         stringResource(R.string.chat_subagent_collapse)
@@ -396,9 +400,9 @@ fun SubagentPanel(
             )
         }
     }
-    if (expanded) {
+    if (expanded && selectedSubagent == null) {
         OmpModalSheet(onDismissRequest = { expanded = false }, fullHeight = true) {
-            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(R.string.chat_subagent_hub_summary, subagents.size), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = OmpColors.Text)
                     Text(stringResource(R.string.chat_subagent_hub_live, live), fontSize = 13.sp, color = if (live > 0) OmpColors.Accent else OmpColors.TextMuted)
@@ -411,9 +415,9 @@ fun SubagentPanel(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                    .verticalScroll(hubScrollState)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 subagents.forEach { chip ->
                     val statusLabel = subagentStatusLabel(chip)
@@ -424,45 +428,29 @@ fun SubagentPanel(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(panelShape())
-                            .background(OmpColors.BgPanel)
-                            .border(1.dp, OmpColors.Border, panelShape())
+                            .clip(RoundedCornerShape(6.dp))
                             .clickable(role = Role.Button, onClickLabel = openDesc) { selected = chip }
                             .heightIn(min = 48.dp)
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Groups, null, Modifier.size(20.dp), tint = OmpColors.TextMuted)
-                            Text(title, modifier = Modifier.weight(1f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = OmpColors.Text)
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                statusLabel,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = if (liveChip) OmpColors.Accent else OmpColors.TextMuted,
-                                modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(OmpColors.BgHover)
-                                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                            )
-                            if (agentType != null) {
-                                Text(agentType, fontSize = 13.sp, color = OmpColors.TextMuted, modifier = Modifier.weight(1f))
-                            }
-                        }
-                        if (chip.task.isNotBlank()) {
-                            Text(chip.task.trim(), fontSize = 14.sp, lineHeight = 20.sp, color = OmpColors.TextMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        }
-                        Text(stringResource(R.string.chat_subagent_view_result), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = OmpColors.Accent)
+                        Text(title, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, color = OmpColors.Text)
+                        Text(
+                            if (agentType == null) statusLabel else "$statusLabel · $agentType",
+                            fontSize = 12.sp,
+                            lineHeight = 18.sp,
+                            color = if (liveChip) OmpColors.Accent else OmpColors.TextMuted,
+                        )
                     }
                 }
             }
         }
     }
-    if (selected != null) {
+    if (selectedSubagent != null) {
         SubagentTranscriptDialog(
             requester = requester,
             sessionId = sessionId,
-            subagent = selected!!,
+            subagent = selectedSubagent,
             onDismiss = { selected = null },
             onClose = { selected = null; expanded = false },
         )
@@ -492,7 +480,7 @@ private fun SubagentTranscriptDialog(
     val noSession = stringResource(R.string.chat_subagent_no_session)
     val statusLabel = subagentStatusLabel(subagent)
 
-    LaunchedEffect(sessionId, subagent.id, refresh) {
+    LaunchedEffect(sessionId, subagent.id, subagent.status, refresh) {
         if (sessionId.isBlank()) {
             loading = false
             error = noSession
@@ -565,14 +553,10 @@ private fun SubagentTranscriptDialog(
         containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
     ) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                stringResource(R.string.chat_back),
-                color = OmpColors.Accent,
-                fontSize = 14.sp,
-                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button, onClick = onDismiss)
-                    .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 14.dp),
-            )
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onDismiss) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.chat_back), Modifier.size(12.dp), tint = OmpColors.TextMuted)
+            }
             Spacer(Modifier.weight(1f))
             IconButton(onClick = { refresh++ }, enabled = !loading && sessionId.isNotBlank()) {
                 Icon(Icons.Filled.Refresh, stringResource(R.string.extension_refresh), tint = OmpColors.TextMuted)
@@ -598,12 +582,10 @@ private fun SubagentTranscriptDialog(
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = OmpColors.Text,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
                         )
                         val agentType = subagent.agent.trim()
                         if (agentType.isNotEmpty() && !agentType.equals(subagent.id, ignoreCase = true)) {
-                            Text(agentType, fontSize = 12.sp, color = OmpColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(agentType, fontSize = 12.sp, color = OmpColors.TextMuted)
                         }
                     }
                 }
@@ -1052,6 +1034,7 @@ fun LongMessageText(
     requester: RelayRequester,
     sessionId: String,
     message: com.dbchbin.ompgui.remote.relay.DisplayMessage,
+    showCopy: Boolean = true,
 ) {
     var expanded by remember(sessionId, message.entryId, message.timestamp, message.role) { mutableStateOf(false) }
     val context = LocalContext.current
@@ -1061,10 +1044,10 @@ fun LongMessageText(
         androidx.compose.foundation.text.selection.SelectionContainer {
             MessageText(visible, modifier, plainText = message.role == "user")
         }
-        IconButton(onClick = {
+        if (showCopy) IconButton(onClick = {
             val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", message.text))
-        }) { Icon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy_content), tint = OmpColors.TextMuted) }
+        }) { Icon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy_content), modifier = Modifier.size(12.dp), tint = OmpColors.TextMuted) }
         if (message.text.length > 4_000) RuntimeChip(
             if (expanded) stringResource(R.string.chat_show_less) else stringResource(R.string.chat_show_full, message.text.length),
             onClick = { expanded = !expanded },
@@ -1079,6 +1062,9 @@ fun TranscriptContent(
     leafId: String?,
     message: com.dbchbin.ompgui.remote.relay.DisplayMessage,
     results: Map<String, com.dbchbin.ompgui.remote.relay.DisplayMessage> = emptyMap(),
+    actionsEnabled: Boolean = true,
+    onEdit: ((JSONObject) -> Unit)? = null,
+    onFork: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1099,12 +1085,12 @@ fun TranscriptContent(
     val content = full?.optJSONArray("content") ?: message.content
     val truncated = message.truncated && full == null
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (content == null) LongMessageText(requester, sessionId, message.copy(text = full?.optString("text", message.text) ?: message.text))
+        if (content == null) LongMessageText(requester, sessionId, message.copy(text = full?.optString("text", message.text) ?: message.text), showCopy = false)
         else for (index in 0 until content.length()) {
             val block = content.optJSONObject(index) ?: continue
             androidx.compose.runtime.key(sessionId, leafId, message.entryId, index, block.optString("toolCallId")) {
                 when (block.optString("type")) {
-                    "text" -> LongMessageText(requester, sessionId, message.copy(text = block.optString("text")))
+                    "text" -> LongMessageText(requester, sessionId, message.copy(text = block.optString("text")), showCopy = false)
                     "toolCall" -> TranscriptTool(requester, sessionId, leafId, block, results[block.optString("toolCallId")], truncated)
                     "image" -> if (block.optString("data").isNotEmpty()) HistoryImage(block)
                     "thinking" -> {
@@ -1126,25 +1112,39 @@ fun TranscriptContent(
                 }
             }
         }
+        if (message.role == "user" || message.role == "assistant") {
+            suspend fun actionMessage(): JSONObject {
+                if (truncated) full = ChatRequests.fullEntry(requester, sessionId, requireNotNull(message.entryId), leafId)
+                return full ?: JSONObject().put("content", content ?: message.text)
+            }
+            val hasText = if (content == null) {
+                (full?.optString("text", message.text) ?: message.text).isNotEmpty()
+            } else (0 until content.length()).any { index ->
+                content.optJSONObject(index)?.let { block ->
+                    block.optString("type") == "text" && block.optString("text").isNotEmpty()
+                } == true
+            }
+            Row {
+                IconButton(enabled = !busy && (hasText || truncated) && (!truncated || !message.entryId.isNullOrBlank()), modifier = Modifier.size(48.dp), onClick = {
+                    perform {
+                        val text = ChatRequests.messageText(actionMessage())
+                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", text))
+                    }
+                }) { Icon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy_content), Modifier.size(12.dp), tint = OmpColors.TextMuted) }
+                if (message.role == "user" && onEdit != null) IconButton(enabled = actionsEnabled && !busy, modifier = Modifier.size(48.dp), onClick = {
+                    perform { onEdit(actionMessage()) }
+                }) { Icon(Icons.Filled.Edit, stringResource(R.string.chat_edit_input), Modifier.size(12.dp), tint = OmpColors.TextMuted) }
+                if (message.role == "user" && onFork != null) IconButton(enabled = actionsEnabled && !busy && !message.entryId.isNullOrBlank(), modifier = Modifier.size(48.dp), onClick = onFork) {
+                    Icon(Icons.Filled.AccountTree, stringResource(R.string.chat_fork_here), Modifier.size(12.dp), tint = OmpColors.TextMuted)
+                }
+            }
+        }
         val details = full?.optJSONObject("details") ?: message.details
         if (details != null) TranscriptJson(details.toString(2))
         if (truncated) RuntimeChip(stringResource(R.string.chat_load_full_entry), enabled = !busy && !message.entryId.isNullOrBlank(), onClick = {
             perform {
-                val json = StringBuilder()
-                var offset = 0
-                do {
-                    val args = JSONObject().put("id", sessionId).put("entryId", message.entryId).put("offset", offset).put("limit", 32_768)
-                    if (!leafId.isNullOrBlank()) args.put("leafId", leafId)
-                    val page = requester.request("sessions", "content", args)
-                    check(page.optString("encoding") == "json") { context.getString(R.string.chat_history_unavailable) }
-                    json.append(page.getString("text"))
-                    val more = page.getBoolean("hasMore")
-                    if (!more) break
-                    val next = page.getInt("nextOffset")
-                    check(next > offset) { context.getString(R.string.chat_history_unavailable) }
-                    offset = next
-                } while (true)
-                full = JSONObject(json.toString())
+                full = ChatRequests.fullEntry(requester, sessionId, requireNotNull(message.entryId), leafId)
             }
         })
         val deferred = message.deferredImages != null || (content != null && (0 until content.length()).any {
@@ -1188,7 +1188,7 @@ private fun TranscriptJson(value: String, initiallyExpanded: Boolean = false) {
         IconButton(onClick = {
             val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", value))
-        }) { Icon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy_content), tint = OmpColors.TextMuted) }
+        }) { Icon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy_content), modifier = Modifier.size(12.dp), tint = OmpColors.TextMuted) }
     }
     if (expanded) androidx.compose.foundation.text.selection.SelectionContainer {
         Text(value, Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()), color = OmpColors.Text, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
@@ -1324,7 +1324,7 @@ private fun ChatHistoryContent(requester: RelayRequester, sessionId: String, lea
                         val message = current.messages.optJSONObject(i) ?: continue
                         val entryId = current.entryIds.optString(i)
                         androidx.compose.runtime.key(sessionId, entryId, current.offset + i) {
-                            HistoryEntry(requester, sessionId, entryId, message, onOpenSession, onEditMessage)
+                            HistoryEntry(requester, sessionId, leafId, entryId, message, onOpenSession, onEditMessage)
                         }
                     }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1341,7 +1341,7 @@ private fun ChatHistoryContent(requester: RelayRequester, sessionId: String, lea
 }
 
 @Composable
-private fun HistoryEntry(requester: RelayRequester, sessionId: String, entryId: String, message: JSONObject, onOpenSession: (String) -> Unit, onEditMessage: (String) -> Unit) {
+private fun HistoryEntry(requester: RelayRequester, sessionId: String, leafId: String?, entryId: String, message: JSONObject, onOpenSession: (String) -> Unit, onEditMessage: (String) -> Unit) {
     val context = LocalContext.current
     var details by remember { mutableStateOf<String?>(null) }
     var media by remember { mutableStateOf<org.json.JSONArray?>(null) }
@@ -1427,7 +1427,9 @@ private fun HistoryEntry(requester: RelayRequester, sessionId: String, entryId: 
         })
         if (message.optString("role") == "user") RuntimeChip(stringResource(R.string.chat_fork_here), enabled = !busy, onClick = {
             perform {
-                val result = ChatRequests.command(requester, sessionId, JSONObject().put("type", "fork").put("entryId", entryId)).getJSONObject("result")
+                val command = JSONObject().put("type", "fork").put("entryId", entryId)
+                if (!leafId.isNullOrBlank()) command.put("leafId", leafId)
+                val result = ChatRequests.command(requester, sessionId, command).getJSONObject("result")
                 if (result.optBoolean("cancelled")) details = context.getString(R.string.chat_fork_cancelled)
                 else onOpenSession(result.getString("newSessionId"))
             }

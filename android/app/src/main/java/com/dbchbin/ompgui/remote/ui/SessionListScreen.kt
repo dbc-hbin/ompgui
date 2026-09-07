@@ -217,6 +217,7 @@ fun SessionListScreen(
         mutationPending = true
         scope.launch {
             listActionError = null
+            try {
             val failures = mutableListOf<String>()
             for (id in ids) {
                 try {
@@ -227,11 +228,13 @@ fun SessionListScreen(
                     if (result.optJSONArray("skippedChildren")?.length()?.let { it > 0 } == true) {
                         failures.add("$id: some child links could not be updated: ${result.getJSONArray("skippedChildren")}")
                     }
-                } catch (e: Exception) { failures.add("$id: ${e.message}") }
+                } catch (e: Exception) { if (e is CancellationException) throw e; failures.add("$id: ${e.message}") }
             }
             listActionError = failures.takeIf { it.isNotEmpty() }?.joinToString("\n")
-            mutationPending = false
             onRefresh()
+            } finally {
+                mutationPending = false
+            }
         }
     }
 
@@ -829,6 +832,7 @@ fun SessionListScreen(
                             worktreeRemoveTarget = null
                             worktreeForceConfirm = false
                         } catch (e: Exception) {
+                            if (e is CancellationException) throw e
                             val message = e.message ?: ""
                             if (!force && e is com.dbchbin.ompgui.remote.relay.RelayRequestException && e.code == "worktree_dirty" && e.details?.optBoolean("dirty") == true) {
                                 worktreeForceConfirm = true
@@ -869,6 +873,7 @@ fun SessionListScreen(
                                 )
                                 listActionError = null
                             } catch (e: Exception) {
+                                if (e is CancellationException) throw e
                                 listActionError = e.message ?: context.getString(R.string.session_list_export_failed)
                             } finally {
                                 exportPending = null
@@ -890,6 +895,7 @@ fun SessionListScreen(
                                 onRefresh()
                                 listActionError = null
                             } catch (e: Exception) {
+                                if (e is CancellationException) throw e
                                 listActionError = e.message ?: context.getString(R.string.session_list_autoname_failed)
                             } finally {
                                 autonamePending = null

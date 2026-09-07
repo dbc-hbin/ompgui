@@ -143,6 +143,30 @@ object ChatRequests {
         )
     }
 
+    suspend fun fullEntry(requester: RelayRequester, id: String, entryId: String, leafId: String? = null): JSONObject {
+        val json = StringBuilder()
+        var offset = 0
+        do {
+            val args = JSONObject().put("id", id).put("entryId", entryId).put("offset", offset).put("limit", 32_768)
+            if (!leafId.isNullOrBlank()) args.put("leafId", leafId)
+            val page = requester.request(DOMAIN_SESSIONS, "content", args)
+            check(page.optString("encoding") == "json") { "Message content unavailable" }
+            json.append(page.getString("text"))
+            if (!page.getBoolean("hasMore")) break
+            val next = page.getInt("nextOffset")
+            check(next > offset) { "Message content unavailable" }
+            offset = next
+        } while (true)
+        return JSONObject(json.toString())
+    }
+
+    fun messageText(message: JSONObject): String {
+        val content = message.optJSONArray("content") ?: return message.optString("content", message.optString("text"))
+        return (0 until content.length()).mapNotNull { index ->
+            content.optJSONObject(index)?.takeIf { it.optString("type") == "text" }?.optString("text")
+        }.joinToString("\n\n")
+    }
+
     suspend fun command(
         requester: RelayRequester,
         id: String,

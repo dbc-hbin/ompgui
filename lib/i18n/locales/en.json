@@ -704,7 +704,7 @@
   "modelsConfig.submit": "Submit",
   "modelsConfig.subscription": "Subscription",
   "modelsConfig.subscriptions": "Subscriptions",
-  "modelsConfig.test": "Test",
+  "modelsConfig.test": "Configuration check",
   "modelsConfig.testTitle": "Validate the provider/model config (no test prompt is sent)",
   "modelsConfig.testing": "Testing…",
   "modelsConfig.tokenLimits": "Token limits",

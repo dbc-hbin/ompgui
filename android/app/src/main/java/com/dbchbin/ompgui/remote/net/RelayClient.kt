@@ -187,7 +187,10 @@ class RelayClient private constructor(
                     }
                 }
             }.also { result ->
-                if (requestGeneration == sessionGeneration && domain == "sessions" && action == "command" &&
+                if (requestGeneration != sessionGeneration) {
+                    throw CancellationException("Relay request belongs to an obsolete session")
+                }
+                if (domain == "sessions" && action == "command" &&
                     args.optString("id") == openedSessionId) {
                     applyMessageQueue(result.optJSONObject("result") ?: result)
                 }
@@ -266,7 +269,7 @@ class RelayClient private constructor(
         }
     }
 
-    private fun invalidateRequests(code: String, message: String) {
+    private fun invalidateRequests(message: String) {
         sessionGeneration++
         queueBaselinePending = true
         _ui.update { it.copy(queueOperationPending = false) }
@@ -276,7 +279,7 @@ class RelayClient private constructor(
         pendingSubagentRosters.clear()
         for (request in pending) {
             if (request.continuation.isActive) {
-                request.continuation.resumeWithException(RelayRequestException(code, message))
+                request.continuation.cancel(CancellationException(message))
             }
         }
     }
@@ -284,7 +287,7 @@ class RelayClient private constructor(
     private fun resetSessionState() {
         historicalView = false
         requestedLeafId = null
-        invalidateRequests("session_changed", "The selected session changed")
+        invalidateRequests("The selected session changed")
         _ui.update { it.copy(
             messages = emptyList(), running = false, draft = "", chatTitle = "",
             currentModel = null, pickerOpen = false, todos = emptyList(), subagents = emptyList(),
@@ -315,7 +318,7 @@ class RelayClient private constructor(
         connection.setListener(object : RelayConnection.Listener {
             override fun onState(state: ConnectionState) {
                 if (state != ConnectionState.Connected) {
-                    invalidateRequests("disconnected", "Relay connection changed")
+                    invalidateRequests("Relay connection changed")
                     pendingSessionId = openedSessionId
                     awaitingSnapshot = openedSessionId != null
                     _ui.update { it.copy(extensionStatus = emptyMap(), extensionWidgets = emptyMap()) }
@@ -433,6 +436,7 @@ class RelayClient private constructor(
     }
 
     fun openSession(id: String) {
+        if (_ui.value.queueOperationPending || _ui.value.recalledDraft != null) return
         resetSessionState()
         awaitingSnapshot = true
         openedSessionId = id
@@ -466,7 +470,18 @@ class RelayClient private constructor(
         }
     }
 
+    fun openFork(id: String, text: String, images: List<com.dbchbin.ompgui.remote.relay.AttachedImage>) {
+        if (_ui.value.queueOperationPending || _ui.value.recalledDraft != null) return
+        openSession(id)
+        _ui.update { state ->
+            if ((state.screen as? RemoteScreen.Chat)?.sessionId == id) {
+                state.copy(draft = text, recalledDraft = com.dbchbin.ompgui.remote.relay.RelayRecalledDraft("fork:$id", text, images))
+            } else state
+        }
+    }
+
     fun closeSession() {
+        if (_ui.value.queueOperationPending || _ui.value.recalledDraft != null) return
         resetSessionState()
         connection.send(ClientFrame.SessionClose)
         openedSessionId = null
@@ -499,9 +514,10 @@ class RelayClient private constructor(
             val staged = mutableListOf<String>()
             var accepted = false
             fun checkSession() {
-                check(sessionGeneration == generation && openedSessionId == session && connection.state == ConnectionState.Connected) {
-                    "Session or connection changed; prompt was not sent"
+                if (sessionGeneration != generation || openedSessionId != session) {
+                    throw CancellationException("Session or connection changed; prompt was not sent")
                 }
+                check(connection.state == ConnectionState.Connected) { "Relay is not connected" }
             }
             promptSending = true
             try {
@@ -669,11 +685,12 @@ class RelayClient private constructor(
     }
 
     fun setLeaf(id: String, leafId: String) {
+        if (_ui.value.queueOperationPending || _ui.value.recalledDraft != null) return
         val sessionId = id.trim()
         val leaf = leafId.trim()
         if (sessionId.isEmpty() || leaf.isEmpty()) return
         if (sessionId == openedSessionId && connection.send(ClientFrame.SessionLeaf(sessionId, leaf))) {
-            invalidateRequests("session_changed", "The selected branch changed")
+            invalidateRequests("The selected branch changed")
             requestedLeafId = leaf
             historicalView = true
             awaitingSnapshot = true
@@ -768,9 +785,7 @@ class RelayClient private constructor(
                 if (pending.generation != sessionGeneration) {
                     // Old connection epoch — never apply success or paint its failure.
                     if (pending.continuation.isActive) {
-                        pending.continuation.resumeWithException(
-                            RelayRequestException("request_cancelled", "Relay request failed (request_cancelled)"),
-                        )
+                        pending.continuation.cancel(CancellationException("Relay request belongs to an obsolete session"))
                     }
                     return
                 }
@@ -992,6 +1007,19 @@ class RelayClient private constructor(
                 _ui.update { it.copy(creatingSession = false) }
             }
             is ServerFrame.Event -> {
+                // Wrapper teardown resets the server queue even when the relay socket
+                // stays connected. Handle this lifecycle boundary before transcript
+                // filtering, including historical views, and fence its pending acks.
+                if (frame.id == openedSessionId && frame.payload.optString("type") == "session_closed") {
+                    val wasRunning = _ui.value.running
+                    invalidateRequests("The session runtime closed")
+                    _ui.update { it.copy(messageQueue = RelayMessageQueue(), running = false) }
+                    if (wasRunning && !AppForeground.isForeground()) {
+                        RelayNotifications.showAgentDone(app, sessionId = frame.id,
+                            title = _ui.value.chatTitle.ifBlank { frame.id })
+                    }
+                    return
+                }
                 // Pending UI replay may precede the opening snapshot. Unlike transcript
                 // deltas it is independent of that snapshot and must not be discarded.
                 if (!EventProjector.acceptsSessionEvent(frame.id, openedSessionId, awaitingSnapshot, historicalView, frame.payload)) return

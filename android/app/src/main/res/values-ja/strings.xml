@@ -131,7 +131,6 @@
     <string name="chat_subagent_open_transcript">トランスクリプトを開く</string>
     <string name="chat_subagent_show_transcript">トランスクリプトを表示</string>
     <string name="chat_subagent_hide_transcript">トランスクリプトを隠す</string>
-    <string name="chat_subagent_view_result">結果を表示</string>
     <string name="chat_subagent_completion">Completion</string>
     <string name="chat_subagent_truncated">(truncated)</string>
     <string name="chat_subagent_loading">読み込み中…</string>
@@ -871,4 +870,7 @@ This removes the project server and its saved environment variables and headers.
     <string name="body_search_close">閉じる</string>
     <string name="body_search_open">セッションを開く</string>
     <string name="body_search_context_bound">一致するメッセージの前後の会話を一部表示しています。</string>
+    <string name="chat_edit_input">入力を編集</string>
+    <string name="chat_message_replace_draft">現在の入力と添付ファイルを置き換えるか、新しいセッションを開きます。自動送信はしません。</string>
+    <string name="chat_message_images_unavailable">メッセージの画像をすべて復元できませんでした。入力は変更されていません。</string>
 </resources>

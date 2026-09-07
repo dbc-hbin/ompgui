@@ -8,7 +8,6 @@ import {
   type ModelsConfigIssue,
   type ModelsFileConfig,
 } from "./models-config";
-import { runIsolatedUtilityCommand } from "./rpc-utility";
 
 export type ModelVerificationErrorCode =
   | "provider_name_required"
@@ -16,8 +15,6 @@ export type ModelVerificationErrorCode =
   | "model_required"
   | "model_id_required"
   | "models_config_invalid"
-  | "model_test_unresolved"
-  | "model_test_failed"
   | "connectivity_confirmation_required"
   | "connectivity_auth_required"
   | "connectivity_unsupported"
@@ -83,38 +80,18 @@ export function writePrivateModelCandidate(candidate: ModelsFileConfig): string 
   }
 }
 
-/** Network-free registry resolution. The isolated runner disposes before private-file cleanup. */
+/** Structural validation only: native startup performs background discovery and
+ * endpoint preconnect even without a prompt, so it cannot prove an offline check.
+ * No process, credential resolution, private files, or network access occurs here.
+ * Real registry/endpoint verification belongs to the explicitly confirmed
+ * connectivity operation and must not be inferred from this result.
+ */
 export async function verifyModelConfiguration(input: unknown): Promise<ModelConfigurationVerificationResult> {
-  const { providerName, modelId, candidate } = validateModelVerificationCandidate(input);
-  let tempDir: string | undefined;
-  let startedAt: number | undefined;
-  try {
-    try {
-      tempDir = writePrivateModelCandidate(candidate);
-      startedAt = Date.now();
-      const response = await runIsolatedUtilityCommand<unknown>(
-        { type: "get_available_models" },
-        {
-          env: { PI_CODING_AGENT_DIR: tempDir, OMP_PROFILE: "", PI_PROFILE: "", XDG_DATA_HOME: "" },
-          timeoutMs: 60_000,
-        },
-      );
-      const latencyMs = Date.now() - startedAt;
-      const models = typeof response === "object" && response !== null && "models" in response && Array.isArray(response.models) ? response.models : [];
-      const found = models.some((model: unknown) => typeof model === "object" && model !== null && "provider" in model && model.provider === providerName && "id" in model && model.id === modelId);
-      if (!found) {
-        throw new ModelVerificationError("model_test_unresolved", `Model ${providerName}/${modelId} did not resolve — check the API key and provider config`, latencyMs);
-      }
-      return {
-        ok: true,
-        latencyMs,
-        responseText: `${providerName}/${modelId} resolved (configuration only; credentials were not contacted)`,
-      };
-    } finally {
-      if (tempDir) rmSync(tempDir, { recursive: true, force: true });
-    }
-  } catch (error) {
-    if (error instanceof ModelVerificationError) throw error;
-    throw new ModelVerificationError("model_test_failed", "Model configuration verification failed", startedAt === undefined ? undefined : Date.now() - startedAt);
-  }
+  const startedAt = Date.now();
+  const { providerName, modelId } = validateModelVerificationCandidate(input);
+  return {
+    ok: true,
+    latencyMs: Date.now() - startedAt,
+    responseText: `${providerName}/${modelId} has valid configuration (configuration only; no provider connection attempted)`,
+  };
 }

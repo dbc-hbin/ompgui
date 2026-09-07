@@ -109,7 +109,14 @@ test "$(gh release view "v$VERSION" --repo dbc-hbin/ompgui --json isDraft --jq .
   gh release upload "v$VERSION" "$APK" "$APK.sha256" --repo dbc-hbin/ompgui --clobber
 ```
 
-Then rerun the failed tag workflow in GitHub Actions. CI downloads both assets,
+Then rerun the failed tag workflow in GitHub Actions, or dispatch it explicitly
+against that same tag (not a branch):
+
+```bash
+gh workflow run publish.yml --repo dbc-hbin/ompgui --ref "v$VERSION"
+```
+
+CI downloads both assets,
 checks their SHA-256, actual package/version/code, signature, optional certificate
 pin and preview assets before npm publication. It uses npm OIDC provenance (the
 npm prepack hook builds the web package), then makes the draft public only after

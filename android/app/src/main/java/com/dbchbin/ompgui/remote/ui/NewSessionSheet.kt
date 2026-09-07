@@ -382,6 +382,7 @@ fun NewSessionSheet(
                                 val result = requester.request("sessions", "create", args)
                                 onCreated(result.getString("sessionId"))
                             } catch (e: Exception) {
+                                if (e is kotlinx.coroutines.CancellationException) throw e
                                 createError = e.message ?: createFailedMessage
                             } finally { pending = false }
                         }

@@ -572,10 +572,6 @@ async function testProviderModel(args: Record<string, unknown>): Promise<Record<
       throw new ModelsRequestError(MODELS_CONFIG_INVALID_CODE, "Invalid models configuration",
         error.issues ? { issues: error.issues } : undefined);
     }
-    if (error.code === "model_test_unresolved" || error.code === "model_test_failed") {
-      throw new ModelsRequestError(error.code, error.message,
-        error.code === "model_test_unresolved" ? { latencyMs: error.latencyMs } : undefined);
-    }
     throw new ModelsRequestError("invalid_args", error.code === "model_id_required" ? "model.id is required" : error.message);
   }
 }

@@ -301,7 +301,6 @@
     <string name="chat_subagent_open_transcript">Open transcript</string>
     <string name="chat_subagent_show_transcript">Show transcript</string>
     <string name="chat_subagent_hide_transcript">Hide transcript</string>
-    <string name="chat_subagent_view_result">View result</string>
     <string name="chat_subagent_completion">Completion</string>
     <string name="chat_subagent_truncated">(truncated)</string>
     <string name="chat_subagent_loading">Loading…</string>
@@ -871,4 +870,7 @@ This removes the project server and its saved environment variables and headers.
     <string name="body_search_close">Close</string>
     <string name="body_search_open">Open session</string>
     <string name="body_search_context_bound">Showing bounded context around this match.</string>
+    <string name="chat_edit_input">Edit input</string>
+    <string name="chat_message_replace_draft">This action replaces the current input and attachments, or opens a new session. Nothing is sent automatically.</string>
+    <string name="chat_message_images_unavailable">Could not restore all message images. Your input has not been replaced.</string>
 </resources>

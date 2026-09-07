@@ -69,6 +69,7 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
     var newSessionOpen by remember { mutableStateOf(false) }
     var archivesOpen by remember { mutableStateOf(false) }
     fun openSession(id: String) {
+        if (state.queueOperationPending || state.recalledDraft != null) return
         (state.screen as? RemoteScreen.Chat)?.let { drafts[it.sessionId] = state.draft }
         newSessionDraft = ""
         filePreview = null
@@ -105,8 +106,10 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
                 !chatSettingsOpen && !chatUsageOpen && !chatPaletteOpen &&
                 !newSessionOpen && !archivesOpen && filePreview == null,
         ) {
-            (state.screen as? RemoteScreen.Chat)?.let { drafts[it.sessionId] = state.draft }
-            viewModel.closeSession()
+            if (!state.queueOperationPending && state.recalledDraft == null) {
+                (state.screen as? RemoteScreen.Chat)?.let { drafts[it.sessionId] = state.draft }
+                viewModel.closeSession()
+            }
         }
         Surface {
             when (val screen = state.screen) {
@@ -172,6 +175,11 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
                     ChatScreen(
                         requester = viewModel.requester,
                         onOpenSession = ::openSession,
+                        onOpenFork = { id, text, images ->
+                            drafts[screen.sessionId] = state.draft
+                            drafts[id] = text
+                            viewModel.openFork(id, text, images)
+                        },
                         messageQueue = state.messageQueue,
                         queueOperationPending = state.queueOperationPending,
                         recalledDraft = state.recalledDraft,
@@ -200,10 +208,12 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
                         onSend = viewModel::sendPrompt,
                         onAbort = viewModel::abort,
                         onBack = {
-                            drafts[screen.sessionId] = state.draft
-                            chatSettingsOpen = false
-                            chatUsageOpen = false
-                            viewModel.closeSession()
+                            if (!state.queueOperationPending && state.recalledDraft == null) {
+                                drafts[screen.sessionId] = state.draft
+                                chatSettingsOpen = false
+                                chatUsageOpen = false
+                                viewModel.closeSession()
+                            }
                         },
                         onOpenPicker = viewModel::openModelPicker,
                         onClosePicker = viewModel::closeModelPicker,
@@ -241,9 +251,11 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
                             settings = settings,
                             settingsCwd = settingsCwd,
                             onUnpair = {
-                                chatSettingsOpen = false
-                                drafts.clear()
-                                viewModel.unpair()
+                                if (!state.queueOperationPending && state.recalledDraft == null) {
+                                    chatSettingsOpen = false
+                                    drafts.clear()
+                                    viewModel.unpair()
+                                }
                             },
                             onDismiss = { chatSettingsOpen = false },
                         )

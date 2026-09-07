@@ -88,7 +88,9 @@ fun ImportSessionSheet(
                 }
                 fileName = loaded.first
                 content = loaded.second
-            } catch (e: Exception) { error = e.message ?: "Unable to read document" }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                error = e.message ?: "Unable to read document" }
             finally { pending = false }
         }
     }
@@ -108,6 +110,7 @@ fun ImportSessionSheet(
             onImported(result.optString("id"), result.optString("cwd"))
             true
         } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
             error = e.message ?: "Import failed"
             false
         } finally {

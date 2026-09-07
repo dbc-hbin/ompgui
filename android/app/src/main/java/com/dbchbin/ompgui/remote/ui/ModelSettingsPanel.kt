@@ -111,6 +111,7 @@ fun ModelSettingsPanel(
                 val data = requester.request("models", "catalog.get", JSONObject())
                 catalog = parseModelCatalog(data)
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 catalogError = modelRequestErrorNote(e, "catalog.get")
             } finally {
                 catalogLoading = false
@@ -493,6 +494,7 @@ private fun ModelRolesSection(
                 roles = parseRoleMap(data)
                 loaded = true
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 error = modelRequestErrorNote(e, "roles.get")
             } finally {
                 pending = false
@@ -513,6 +515,7 @@ private fun ModelRolesSection(
                 roles = parseRoleMap(data)
                 savedNote = if (korean) "저장됨" else "Saved"
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 // Inputs are kept on failure so nothing the user typed is lost.
                 error = modelRequestErrorNote(e, "roles.set")
             } finally {
@@ -666,6 +669,7 @@ private fun ModelRegistrySection(
                 providerOrder = optStringList(settings, "modelProviderOrder")
                 scopedEntries = settings.optBoolean("registryHasScopedEntries", false)
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 error = modelRequestErrorNote(e, "registry.get")
             } finally {
                 pending = false
@@ -689,6 +693,7 @@ private fun ModelRegistrySection(
                 providerOrder = optStringList(settings, "modelProviderOrder")
                 savedNote = if (korean) "저장됨" else "Saved"
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 error = modelRequestErrorNote(e, "registry.set")
             } finally {
                 pending = false
@@ -902,6 +907,7 @@ private fun ModelProvidersSection(
                 loaded = true
                 if (selected != null && selected !in next) selected = null
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 error = modelRequestErrorNote(e, "providers.get")
             } finally {
                 pending = false
@@ -926,6 +932,7 @@ private fun ModelProvidersSection(
                 note = if (korean) "저장됨" else "Saved"
                 load()
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 error = modelRequestErrorNote(e, "providers.update")
             } finally {
                 pending = false
@@ -947,6 +954,7 @@ private fun ModelProvidersSection(
                 requester.request("models", "providers.validate", JSONObject().put("config", config))
                 note = if (korean) "유효합니다" else "Valid"
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 error = modelRequestErrorNote(e, "providers.validate")
             } finally {
                 validating = false
@@ -1081,6 +1089,7 @@ private fun ModelProvidersSection(
                                             if (korean) "테스트 성공" else "Test passed"
                                         }
                                     } catch (e: Exception) {
+                                        if (e is CancellationException) throw e
                                         error = modelRequestErrorNote(e, "providers.test")
                                     } finally {
                                         pending = false
@@ -1583,6 +1592,7 @@ private fun ModelFallbackSection(
                 if (data.has("modelFallback")) modelFallback = data.optBoolean("modelFallback")
                 if (data.has("revertPolicy")) revertPolicy = data.optString("revertPolicy")
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 error = modelRequestErrorNote(e, "fallback.get")
             } finally {
                 pending = false
@@ -1602,6 +1612,7 @@ private fun ModelFallbackSection(
                 note = if (korean) "저장됨" else "Saved"
                 load()
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 error = modelRequestErrorNote(e, "fallback.set")
             } finally {
                 pending = false
@@ -1804,6 +1815,7 @@ private fun ModelAuthSection(korean: Boolean, requester: RelayRequester) {
                 }
                 providers = next
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 error = modelRequestErrorNote(e, "auth.providers")
             } finally {
                 pending = false
@@ -1842,6 +1854,9 @@ private fun ModelAuthSection(korean: Boolean, requester: RelayRequester) {
                         if (logins[provider]?.phase == "success") load()
                         return@launch
                     }
+                } catch (cancelled: CancellationException) {
+                    loginBusy = loginBusy - provider
+                    throw cancelled
                 } catch (_: Exception) {
                     // A single poll failure must not kill the flow; the next
                     // tick retries until the bound above is reached.
@@ -1865,6 +1880,9 @@ private fun ModelAuthSection(korean: Boolean, requester: RelayRequester) {
                 logins = logins + (provider to LoginUiState(token = token))
                 codes = codes - provider
                 pollLogin(provider, token)
+            } catch (cancelled: CancellationException) {
+                loginBusy = loginBusy - provider
+                throw cancelled
             } catch (e: Exception) {
                 loginBusy = loginBusy - provider
                 capabilityNotes = capabilityNotes + (provider to modelRequestErrorNote(e, "auth.login.start"))
@@ -1888,6 +1906,10 @@ private fun ModelAuthSection(korean: Boolean, requester: RelayRequester) {
                 // never include it in any message or log.
                 codes = codes - provider
                 pollLogin(provider, login.token)
+            } catch (cancelled: CancellationException) {
+                codes = codes - provider
+                loginBusy = loginBusy - provider
+                throw cancelled
             } catch (e: Exception) {
                 codes = codes - provider
                 loginBusy = loginBusy - provider
@@ -1905,6 +1927,8 @@ private fun ModelAuthSection(korean: Boolean, requester: RelayRequester) {
                     "auth.login.cancel",
                     JSONObject().put("provider", provider).put("token", login.token),
                 )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (_: Exception) {
                 // Cancel is best-effort: the registry entry is dropped below.
             } finally {

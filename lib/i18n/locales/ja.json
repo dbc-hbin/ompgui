@@ -703,7 +703,7 @@
   "modelsConfig.submit": "送信",
   "modelsConfig.subscription": "サブスクリプション",
   "modelsConfig.subscriptions": "サブスクリプション",
-  "modelsConfig.test": "テスト",
+  "modelsConfig.test": "設定を検証",
   "modelsConfig.testTitle": "プロバイダー/モデル設定を検証します（テストプロンプトは送信されません）",
   "modelsConfig.testing": "テスト中…",
   "modelsConfig.tokenLimits": "トークン上限",

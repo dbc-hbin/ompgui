@@ -143,6 +143,8 @@ class RemoteViewModel(
 
     fun openSession(id: String) = client().openSession(id)
 
+    fun openFork(id: String, text: String, images: List<com.dbchbin.ompgui.remote.relay.AttachedImage>) = client().openFork(id, text, images)
+
     fun closeSession() = client().closeSession()
 
     fun refreshMessageQueue() = client().refreshMessageQueue()

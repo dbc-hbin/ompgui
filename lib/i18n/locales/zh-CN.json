@@ -704,7 +704,7 @@
   "modelsConfig.submit": "提交",
   "modelsConfig.subscription": "订阅",
   "modelsConfig.subscriptions": "订阅",
-  "modelsConfig.test": "测试",
+  "modelsConfig.test": "检查配置",
   "modelsConfig.testTitle": "验证提供商/模型配置（不会发送测试提示词）",
   "modelsConfig.testing": "测试中…",
   "modelsConfig.tokenLimits": "Token 限制",

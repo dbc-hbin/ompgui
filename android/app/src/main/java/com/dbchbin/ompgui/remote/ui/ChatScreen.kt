@@ -296,6 +296,7 @@ private fun trimFileName(name: String, max: Int = 16): String {
 fun ChatScreen(
     requester: RelayRequester,
     onOpenSession: (String) -> Unit,
+    onOpenFork: (String, String, List<com.dbchbin.ompgui.remote.relay.AttachedImage>) -> Unit,
     extensionDialogs: List<com.dbchbin.ompgui.remote.relay.EventProjector.ChatExtensionRequest>,
     chatNotices: List<com.dbchbin.ompgui.remote.relay.EventProjector.ChatNotice>,
     extensionStatus: Map<String, String>,
@@ -392,6 +393,97 @@ fun ChatScreen(
     var commandError by remember(sessionId) { mutableStateOf<String?>(null) }
     var runtimeState by remember(sessionId) { mutableStateOf(JSONObject()) }
     val commandScope = androidx.compose.runtime.key(sessionId) { rememberCoroutineScope() }
+    var messageActionPending by remember(sessionId) { mutableStateOf(false) }
+    var messageActionConfirmation by remember(sessionId) { mutableStateOf<(() -> Unit)?>(null) }
+    val latestRunning by androidx.compose.runtime.rememberUpdatedState(running)
+    val latestSending by androidx.compose.runtime.rememberUpdatedState(sending)
+    val latestQueuePending by androidx.compose.runtime.rememberUpdatedState(queueOperationPending || recalledDraft != null)
+    val latestSessionId by androidx.compose.runtime.rememberUpdatedState(sessionId)
+    val messageActionsEnabled = sessionId.isNotBlank() && !running && !sending && !messageActionPending && !queueOperationPending && recalledDraft == null && connection == ConnectionState.Connected
+    suspend fun messageImages(message: DisplayMessage, entry: JSONObject): List<com.dbchbin.ompgui.remote.relay.AttachedImage> {
+        val content = entry.optJSONArray("content")
+        val images = mutableListOf<JSONObject>()
+        if (content != null) for (index in 0 until content.length()) {
+            content.optJSONObject(index)?.takeIf { it.optString("type") == "image" }?.let { images.add(it) }
+        }
+        if (message.deferredImages != null || images.any { it.optString("data").isBlank() }) {
+            images.clear()
+            var offset = 0
+            do {
+                val args = JSONObject().put("id", sessionId).put("entryId", requireNotNull(message.entryId)).put("offset", offset).put("limit", 1)
+                if (!branchLeafId.isNullOrBlank()) args.put("leafId", branchLeafId)
+                val page = requester.request("sessions", "media", args)
+                check(page.optInt("missingCount") == 0) { context.getString(R.string.chat_message_images_unavailable) }
+                val found = page.getJSONArray("images")
+                for (index in 0 until found.length()) images.add(found.getJSONObject(index))
+                if (!page.optBoolean("hasMore")) break
+                val next = page.getInt("nextOffset")
+                check(next > offset) { context.getString(R.string.chat_message_images_unavailable) }
+                offset = next
+            } while (true)
+        }
+        return images.map { image ->
+            val data = image.getString("data")
+            check(data.isNotEmpty()) { context.getString(R.string.chat_message_images_unavailable) }
+            com.dbchbin.ompgui.remote.relay.AttachedImage(data, image.getString("mimeType"))
+        }
+    }
+
+    fun messageAction(message: DisplayMessage, entry: JSONObject?, fork: Boolean) {
+        if (!messageActionsEnabled || messageActionPending || latestRunning) return
+        messageActionPending = true
+        val sourceSession = sessionId
+        val originalDraft = latestDraft
+        val originalFiles = attachedFiles
+        commandScope.launch {
+            var forkStarted = false
+            try {
+                val complete = entry ?: if (message.truncated) com.dbchbin.ompgui.remote.relay.ChatRequests.fullEntry(requester, sessionId, requireNotNull(message.entryId), branchLeafId)
+                    else JSONObject().put("content", message.content ?: message.text)
+                val text = com.dbchbin.ompgui.remote.relay.ChatRequests.messageText(complete)
+                val images = messageImages(message, complete)
+                val restored = withContext(Dispatchers.IO) {
+                    images.mapIndexed { index, image ->
+                        val bytes = android.util.Base64.decode(image.data, android.util.Base64.DEFAULT)
+                        check(bytes.isNotEmpty()) { context.getString(R.string.chat_message_images_unavailable) }
+                        AttachmentItem(context.getString(R.string.chat_queue_image_name, index + 1), true, image.mimeType, bytes.size.toLong(),
+                            source = AttachmentSource(image.mimeType, bytes.size.toLong()) { bytes.inputStream() }, bitmap = previewBitmap { bytes.inputStream() })
+                    }
+                }
+                if (latestSessionId != sourceSession || latestRunning) return@launch
+                val apply: () -> Unit = {
+                    if (!forkStarted && latestSessionId == sourceSession && !latestRunning && !latestSending && !latestQueuePending) {
+                        if (fork) {
+                            messageActionPending = true
+                            forkStarted = true
+                            commandScope.launch {
+                                try {
+                                    val command = JSONObject().put("type", "fork").put("entryId", requireNotNull(message.entryId))
+                                    if (!branchLeafId.isNullOrBlank()) command.put("leafId", branchLeafId)
+                                    val response = com.dbchbin.ompgui.remote.relay.ChatRequests.command(requester, sourceSession, command)
+                                    val result = response.optJSONObject("result") ?: response
+                                    if (!result.optBoolean("cancelled") && latestSessionId == sourceSession) {
+                                        onOpenFork(result.getString("newSessionId"), result.optString("text", text), images)
+                                    }
+                                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                                catch (failure: Exception) { commandError = failure.message ?: context.getString(R.string.chat_error_command_failed) }
+                                finally { messageActionPending = false }
+                            }
+                        } else {
+                            attachedFiles = restored
+                            onDraftChange(text)
+                            attachWarning = null
+                        }
+                    }
+                }
+                if (latestDraft.isNotEmpty() || attachedFiles.isNotEmpty() || latestDraft != originalDraft || attachedFiles != originalFiles) {
+                    messageActionConfirmation = apply
+                } else apply()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) { commandError = failure.message ?: context.getString(R.string.chat_error_command_failed) }
+            finally { if (!forkStarted) messageActionPending = false }
+        }
+    }
     fun execute(command: JSONObject, completed: (JSONObject) -> Unit = {}) {
         commandScope.launch {
             commandError = null
@@ -450,6 +542,16 @@ fun ChatScreen(
             attachWarning = context.getString(R.string.chat_queue_restore_failed)
         }
     }
+    messageActionConfirmation?.let { action ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { messageActionConfirmation = null },
+            containerColor = OmpColors.BgPanel,
+            title = { Text(stringResource(R.string.chat_queue_replace_title)) },
+            text = { Text(stringResource(R.string.chat_message_replace_draft)) },
+            confirmButton = { androidx.compose.material3.TextButton(enabled = messageActionsEnabled, onClick = { messageActionConfirmation = null; action() }) { Text(stringResource(R.string.extension_confirm)) } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { messageActionConfirmation = null }) { Text(stringResource(R.string.chat_queue_cancel)) } },
+        )
+    }
     val pickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetMultipleContents(),
     ) { uris ->
@@ -469,7 +571,7 @@ fun ChatScreen(
         }
     }
     val sendWithComposer: () -> Unit = {
-        if (!sending && !queueOperationPending && recalledDraft == null) {
+        if (!sending && !messageActionPending && !queueOperationPending && recalledDraft == null) {
             val commandType = when {
                 !running -> "prompt"
                 submitBehavior == com.dbchbin.ompgui.remote.store.AppPreferences.SUBMIT_QUEUE -> "follow_up"
@@ -498,7 +600,6 @@ fun ChatScreen(
                         attachWarning = context.getString(R.string.chat_error_prompt_rejected)
                     }
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                    attachWarning = context.getString(R.string.chat_error_send_cancelled)
                     throw cancelled
                 } catch (failure: Exception) {
                     attachWarning = failure.message ?: context.getString(R.string.chat_error_send_failed)
@@ -562,6 +663,7 @@ fun ChatScreen(
             onOpenStats = { statsOpen = true },
             onOpenCommands = { commandsOpen = true },
             runtimeEnabled = !historicalView,
+            navigationEnabled = !queueOperationPending && recalledDraft == null,
             onOpenRuntime = { runtimeExpanded = true },
             onOpenQueue = ::openQueue,
             onOpenBranches = {
@@ -585,7 +687,10 @@ fun ChatScreen(
                     color = OmpColors.TextDim,
                     modifier = Modifier.weight(1f).padding(12.dp),
                 )
-                IconButton(onClick = { sendJob?.cancel() }) {
+                IconButton(onClick = {
+                    attachWarning = context.getString(R.string.chat_error_send_cancelled)
+                    sendJob?.cancel()
+                }) {
                     Icon(Icons.Default.Close, contentDescription = stringResource(R.string.chat_status_cancel_send), tint = OmpColors.TextDim)
                 }
             }
@@ -615,7 +720,7 @@ fun ChatScreen(
                 key = { index, message -> message.entryId ?: "${message.role}_${message.toolCallId ?: message.timestamp ?: index}_$index" },
             ) { _, message ->
                 if (message.role == "user") {
-                    UserMessage(message, requester, sessionId, branchLeafId)
+                    UserMessage(message, requester, sessionId, branchLeafId, messageActionsEnabled, onEdit = { messageAction(message, it, false) }, onFork = { messageAction(message, null, true) })
                 } else {
                     AssistantMessage(message, requester, sessionId, branchLeafId, results)
                 }
@@ -734,13 +839,13 @@ fun ChatScreen(
                 attachedFiles = attachedFiles,
                 thinkingLevel = thinkingLevel,
                 usageFraction = usageFraction,
-                onDraftChange = { if (!sending && !queueOperationPending && recalledDraft == null) onDraftChange(it) },
-                sending = sending || queueOperationPending || recalledDraft != null,
+                onDraftChange = { if (!sending && !messageActionPending && !queueOperationPending && recalledDraft == null) onDraftChange(it) },
+                sending = sending || messageActionPending || queueOperationPending || recalledDraft != null,
                 onSend = sendWithComposer,
                 onAbort = onAbort,
                 onOpenPicker = onOpenPicker,
-                onPickFiles = { if (!sending && !queueOperationPending && recalledDraft == null) pickerLauncher.launch("*/*") },
-                onRemoveAttachment = { item -> if (!sending && !queueOperationPending && recalledDraft == null) attachedFiles = attachedFiles - item },
+                onPickFiles = { if (!sending && !messageActionPending && !queueOperationPending && recalledDraft == null) pickerLauncher.launch("*/*") },
+                onRemoveAttachment = { item -> if (!sending && !messageActionPending && !queueOperationPending && recalledDraft == null) attachedFiles = attachedFiles - item },
                 onOpenUsage = onOpenUsage,
                 onOpenThinkingPicker = { thinkingPickerOpen = true },
                 onCompact = { execute(JSONObject().put("type", "compact")) },
@@ -819,7 +924,7 @@ fun ChatScreen(
             branches = branches,
             leafId = branchLeafId,
             onPick = { branch ->
-                if (sessionId.isNotBlank()) {
+                if (sessionId.isNotBlank() && !queueOperationPending && recalledDraft == null) {
                     onSetLeaf(sessionId, branch.id)
                     historicalView = true
                 }
@@ -849,11 +954,12 @@ private fun ChatTopBar(
     onOpenRuntime: () -> Unit,
     onOpenQueue: () -> Unit,
     runtimeEnabled: Boolean,
+    navigationEnabled: Boolean,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().background(OmpColors.Bg)) {
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+            IconButton(onClick = onBack, enabled = navigationEnabled, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.chat_back), tint = OmpColors.Text)
             }
             Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
@@ -868,7 +974,7 @@ private fun ChatTopBar(
                 Icon(Icons.Filled.Tune, stringResource(R.string.chat_menu_session_controls),
                     tint = if (runtimeEnabled) OmpColors.TextMuted else OmpColors.TextDim)
             }
-            IconButton(onClick = onOpenBranches, modifier = Modifier.size(48.dp)) {
+            IconButton(onClick = onOpenBranches, enabled = navigationEnabled, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Filled.AccountTree, stringResource(R.string.chat_menu_branches), tint = OmpColors.TextMuted)
             }
             Box {
@@ -930,7 +1036,7 @@ private fun AssistantMessage(
 }
 
 @Composable
-private fun UserMessage(message: DisplayMessage, requester: RelayRequester, sessionId: String, leafId: String?) {
+private fun UserMessage(message: DisplayMessage, requester: RelayRequester, sessionId: String, leafId: String?, actionsEnabled: Boolean, onEdit: (JSONObject) -> Unit, onFork: () -> Unit) {
     val stamp = remember(message.timestamp) { formatTimestamp(message.timestamp) }
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val bubbleMax = maxWidth * 0.85f
@@ -946,7 +1052,7 @@ private fun UserMessage(message: DisplayMessage, requester: RelayRequester, sess
                     .border(1.dp, OmpColors.Border, RoundedCornerShape(12.dp))
                     .padding(horizontal = 14.dp, vertical = 10.dp),
             ) {
-                TranscriptContent(requester, sessionId, leafId, message)
+                TranscriptContent(requester, sessionId, leafId, message, actionsEnabled = actionsEnabled, onEdit = onEdit, onFork = onFork)
             }
             if (stamp.isNotEmpty()) {
                 Text(

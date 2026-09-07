@@ -703,7 +703,7 @@
   "modelsConfig.submit": "제출",
   "modelsConfig.subscription": "구독",
   "modelsConfig.subscriptions": "구독",
-  "modelsConfig.test": "테스트",
+  "modelsConfig.test": "설정 확인",
   "modelsConfig.testTitle": "프로바이더/모델 구성을 확인합니다(테스트 프롬프트는 전송되지 않음)",
   "modelsConfig.testing": "테스트 중…",
   "modelsConfig.tokenLimits": "토큰 한도",
