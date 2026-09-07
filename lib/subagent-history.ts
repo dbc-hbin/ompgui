@@ -8,8 +8,8 @@
 // page reload without the live RPC registry (get_subagent_messages is
 // registry-gated and rejects unknown session files).
 
-import { closeSync, existsSync, fstatSync, openSync, readSync, realpathSync, statSync } from "fs";
-import { basename, dirname, join } from "path";
+import { closeSync, constants, fstatSync, openSync, readSync, realpathSync, statSync } from "fs";
+import { basename, dirname, join, resolve } from "path";
 import { getSessionEntries, entryToUiMessage } from "./session-reader";
 import { parseJsonlLenient } from "./omp/session-files";
 import { parseSubagentProgress } from "./subagent-types";
@@ -28,6 +28,8 @@ export function subagentTranscriptPath(sessionFilePath: string, subagentId: stri
   return join(siblingDirForSession(sessionFilePath), `${subagentId}.jsonl`);
 }
 
+export class SubagentArtifactForbiddenError extends Error {}
+
 /**
  * Resolve a subagent artifact (`.jsonl` transcript or `.md` completion) inside
  * the parent session's sibling artifacts dir, with symlink confinement:
@@ -38,6 +40,8 @@ export function resolveSubagentArtifact(
   sessionFilePath: string,
   subagentId: string,
   extension: ".jsonl" | ".md",
+  recordedPath?: string,
+  strict = false,
 ): string | null {
   let realDir: string;
   try {
@@ -45,14 +49,27 @@ export function resolveSubagentArtifact(
   } catch {
     return null;
   }
-  const candidate = join(realDir, `${subagentId}${extension}`);
+  const candidate = recordedPath ? resolve(realDir, recordedPath) : join(realDir, `${subagentId}${extension}`);
+  let realCandidateDir: string;
+  try {
+    realCandidateDir = realpathSync(dirname(candidate));
+  } catch {
+    return null;
+  }
+  if (realCandidateDir !== realDir) {
+    if (strict) throw new SubagentArtifactForbiddenError("Subagent artifact is outside the parent session artifact directory");
+    return null;
+  }
   let realCandidate: string;
   try {
     realCandidate = realpathSync(candidate);
   } catch {
     return null;
   }
-  if (dirname(realCandidate) !== realDir) return null;
+  if (dirname(realCandidate) !== realDir) {
+    if (strict) throw new SubagentArtifactForbiddenError("Subagent artifact is outside the parent session artifact directory");
+    return null;
+  }
   try {
     if (!statSync(realCandidate).isFile()) return null;
   } catch {
@@ -219,7 +236,6 @@ export function extractSubagentHistory(sessionFilePath: string): SubagentHistory
   }
 
   // Resolve sibling transcript files and async/detached markers.
-  const dir = siblingDirForSession(sessionFilePath);
   const detachedIds = new Set<string>();
   for (const entry of entries) {
     if (entry.type !== "message" || entry.message?.role !== "toolResult") continue;
@@ -233,10 +249,9 @@ export function extractSubagentHistory(sessionFilePath: string): SubagentHistory
   const roster = [...byId.values()];
   for (const entry of roster) {
     if (detachedIds.has(entry.id)) entry.detached = true;
-    const candidate = join(dir, `${entry.id}.jsonl`);
-    const available = existsSync(candidate);
-    if (available) {
-      entry.sessionFile = candidate;
+    const candidate = resolveSubagentArtifact(sessionFilePath, entry.id, ".jsonl");
+    if (candidate) {
+      entry.sessionFile = subagentTranscriptPath(sessionFilePath, entry.id);
       entry.transcriptAvailable = true;
     }
   }
@@ -278,8 +293,10 @@ export function readSubagentTranscriptPage(sessionFilePath: string, fromByte = 0
   let reset = false;
   let fd: number | undefined;
   try {
-    fd = openSync(sessionFilePath, "r");
-    const size = fstatSync(fd).size;
+    fd = openSync(sessionFilePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) return { ...empty, error: "Subagent transcript is not a regular file" };
+    const size = stat.size;
     if (startByte > size) {
       startByte = 0;
       reset = true;
@@ -318,7 +335,7 @@ export function readSubagentTranscriptPage(sessionFilePath: string, fromByte = 0
     // An unterminated tail stays pending: append can complete it on a later call.
     return { sessionFile: sessionFilePath, fromByte: startByte, nextByte: startByte + completeBytes, reset, messages, totalBytes: size };
   } catch {
-    return { ...empty, fromByte: startByte, nextByte: startByte, reset };
+    return { ...empty, fromByte: startByte, nextByte: startByte, reset, error: "Subagent transcript could not be read" };
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
@@ -343,17 +360,17 @@ export const MAX_SUBAGENT_COMPLETION_BYTES = 1024 * 1024;
 export function readCompletionArtifact(
   outputFile: string,
 ): { completion: string; truncated: boolean } | null {
-  let size: number;
+  let fd: number;
   try {
-    size = statSync(outputFile).size;
+    fd = openSync(outputFile, constants.O_RDONLY | constants.O_NOFOLLOW);
   } catch {
     return null;
   }
-  if (size <= 0) return null;
-  const truncated = size > MAX_SUBAGENT_COMPLETION_BYTES;
-  const readBytes = Math.min(size, MAX_SUBAGENT_COMPLETION_BYTES);
-  const fd = openSync(outputFile, "r");
   try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size <= 0) return null;
+    const truncated = stat.size > MAX_SUBAGENT_COMPLETION_BYTES;
+    const readBytes = Math.min(stat.size, MAX_SUBAGENT_COMPLETION_BYTES);
     const buffer = Buffer.alloc(readBytes);
     const bytesRead = readSync(fd, buffer, 0, readBytes, 0);
     const slice = buffer.subarray(0, bytesRead);

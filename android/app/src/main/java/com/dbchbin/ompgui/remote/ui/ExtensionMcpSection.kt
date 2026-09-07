@@ -9,7 +9,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.FilterChip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -328,14 +327,14 @@ private fun McpEditor(requester: RelayRequester, cwd: String, initial: McpDraft,
             }
         }
     }
-    AlertDialog(
+    OmpModalSheet(
         onDismissRequest = { if (!busy) onDismiss() },
-        modifier = Modifier.fillMaxWidth().padding(12.dp),
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        fullHeight = true,
         containerColor = OmpColors.BgPanel,
-        title = { OmpDialogSystemBars(); Text(if (draft.previousName == null) stringResource(R.string.extension_mcp_create_title) else stringResource(R.string.extension_mcp_edit_title), maxLines = 2, overflow = TextOverflow.Ellipsis) },
-        text = {
-            Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    ) {
+        Column(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(if (draft.previousName == null) stringResource(R.string.extension_mcp_create_title) else stringResource(R.string.extension_mcp_edit_title), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.extension_mcp_project, cwd), color = OmpColors.TextMuted)
                 McpField(draft.name, { change(draft.copy(name = it)) }, stringResource(R.string.extension_mcp_name), !busy)
                 if (draft.previousName != null && draft.name != draft.previousName) Text(stringResource(R.string.extension_mcp_rename_note, draft.previousName!!), color = OmpColors.TextMuted)
@@ -368,15 +367,17 @@ private fun McpEditor(requester: RelayRequester, cwd: String, initial: McpDraft,
                 feedback?.let { Text(it, color = if (valid) OmpColors.StatusSuccess else OmpColors.StatusError) }
                 TextButton(onClick = { submit(false) }, enabled = !busy) { Text(stringResource(R.string.extension_mcp_validate_config)) }
             }
-        },
-        confirmButton = { Button(onClick = { submit(true) }, enabled = !busy, shape = MaterialTheme.shapes.small) { Text(if (busy) stringResource(R.string.extension_working) else stringResource(R.string.extension_save)) } },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text(stringResource(R.string.extension_cancel)) } },
-    )
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onDismiss, enabled = !busy) { Text(stringResource(R.string.extension_cancel)) }
+                Button(onClick = { submit(true) }, enabled = !busy, shape = MaterialTheme.shapes.small) { Text(if (busy) stringResource(R.string.extension_working) else stringResource(R.string.extension_save)) }
+            }
+        }
+    }
     clearTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { clearTarget = null },
             title = { OmpDialogSystemBars(); Text(if (target == "env") stringResource(R.string.extension_mcp_clear_env_title) else stringResource(R.string.extension_mcp_clear_headers_title)) },
-            text = { Text(stringResource(R.string.extension_mcp_clear_secret_body)) },
+            text = { Text(stringResource(R.string.extension_mcp_clear_secret_body), modifier = Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) },
             confirmButton = { TextButton(onClick = {
                 if (target == "env") change(draft.copy(env = draft.env.copy(intent = McpSecretIntent.Clear, input = "")))
                 else change(draft.copy(headers = draft.headers.copy(intent = McpSecretIntent.Clear, input = "")))

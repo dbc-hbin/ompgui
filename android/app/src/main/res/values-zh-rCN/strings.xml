@@ -730,4 +730,11 @@ This removes the project server and its saved environment variables and headers.
     <string name="usage_window_5h">5h</string>
     <string name="usage_window_monthly">monthly</string>
     <string name="usage_window_weekly">weekly</string>
+    <string name="chat_submit_steer">调整方向</string>
+    <string name="chat_submit_queue">加入队列</string>
+    <string name="chat_subagent_detail_error">无法加载子代理详情。</string>
+    <string name="chat_subagent_pending">此代理尚未生成结果。</string>
+    <string name="chat_subagent_unavailable">没有可用的完成结果。</string>
+    <string name="chat_queue_composer_hint">使用输入框中的“调整方向”或“加入队列”发送消息。</string>
+    <string name="chat_queue_readonly">此运行时不支持撤回队列中的消息或提高其优先级。</string>
 </resources>

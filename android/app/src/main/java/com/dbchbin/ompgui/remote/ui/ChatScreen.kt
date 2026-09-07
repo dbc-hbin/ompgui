@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -319,7 +320,7 @@ fun ChatScreen(
     onOpenPicker: () -> Unit,
     onClosePicker: () -> Unit,
     onSelectModel: (RelayModelOption) -> Unit,
-    onSendWithAttachments: (suspend (String, List<AttachmentSource>) -> Boolean)? = null,
+    onSendWithAttachments: (suspend (String, List<AttachmentSource>, String) -> Boolean)? = null,
     onOpenUsage: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
     thinkingLevel: String = "auto",
@@ -352,6 +353,19 @@ fun ChatScreen(
     var runtimeExpanded by remember(sessionId) { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val context = LocalContext.current
+    var submitBehavior by remember(context) {
+        mutableStateOf(com.dbchbin.ompgui.remote.store.AppPreferences.getSubmitBehavior(context))
+    }
+    androidx.compose.runtime.DisposableEffect(context) {
+        val preferences = com.dbchbin.ompgui.remote.store.AppPreferences.prefs(context)
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == com.dbchbin.ompgui.remote.store.AppPreferences.KEY_SUBMISSION_MODE) {
+                submitBehavior = com.dbchbin.ompgui.remote.store.AppPreferences.getSubmitBehavior(context)
+            }
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
     val latestDraft by androidx.compose.runtime.rememberUpdatedState(draft)
     var attachedFiles by remember(sessionId) { mutableStateOf<List<AttachmentItem>>(emptyList()) }
     var attachWarning by remember(sessionId) { mutableStateOf<String?>(null) }
@@ -415,7 +429,12 @@ fun ChatScreen(
         }
     }
     val sendWithComposer: () -> Unit = {
-        if (!sending && !running) {
+        if (!sending) {
+            val commandType = when {
+                !running -> "prompt"
+                submitBehavior == com.dbchbin.ompgui.remote.store.AppPreferences.SUBMIT_QUEUE -> "follow_up"
+                else -> "steer"
+            }
             sending = true
             val sendFiles = attachedFiles
             sendJob = commandScope.launch {
@@ -430,7 +449,7 @@ fun ChatScreen(
                     }
                     require(finalText.length <= RelayProtocol.MAX_PROMPT_CHARS) { "Composed prompt exceeds 3 Mi characters" }
                     val sender = onSendWithAttachments ?: throw IllegalStateException("Acknowledged sending is unavailable")
-                    val accepted = sender(finalText, sendFiles.mapNotNull { it.source })
+                    val accepted = sender(finalText, sendFiles.mapNotNull { it.source }, commandType)
                     if (accepted) {
                         attachedFiles = attachedFiles.filterNot { it in sendFiles }
                         if (latestDraft == draft || latestDraft.isEmpty()) onDraftChange("")
@@ -449,16 +468,30 @@ fun ChatScreen(
             }
         }
     }
+    suspend fun scrollToLatest() {
+        if (messages.isEmpty()) return
+        listState.scrollToItem(messages.lastIndex)
+        // A final message can be taller than the viewport: its top is not the end.
+        val layout = listState.layoutInfo
+        val lastItem = layout.visibleItemsInfo.lastOrNull() ?: return
+        val remaining = lastItem.offset + lastItem.size + layout.afterContentPadding - layout.viewportEndOffset
+        if (remaining > 0) listState.scrollBy(remaining.toFloat())
+    }
     val scrollIntent = remember(sessionId) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 if (source == NestedScrollSource.UserInput && available.y > 0f) followLocked = false
                 return Offset.Zero
             }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput && !listState.canScrollForward) followLocked = true
+                return Offset.Zero
+            }
         }
     }
-    LaunchedEffect(messages.size, messages.lastOrNull()?.text, followLocked) {
-        if (messages.isNotEmpty() && followLocked) listState.scrollToItem(messages.lastIndex)
+    LaunchedEffect(messages.size, messages.lastOrNull(), followLocked, listState.layoutInfo.viewportSize.height) {
+        if (followLocked) scrollToLatest()
     }
 
     BoxWithConstraints(
@@ -470,17 +503,17 @@ fun ChatScreen(
     ) {
         val hasActivity = chatNotices.any { it.type == "info" } ||
             running || queueSteering.isNotEmpty() || queueFollowUp.isNotEmpty()
-        val panelCount = (if (todos.isNotEmpty()) 1 else 0) +
+        val pinnedHeaderCount = (if (todos.isNotEmpty()) 1 else 0) +
             (if (subagents.isNotEmpty()) 1 else 0) +
             (if (hasActivity || activityExpanded) 1 else 0)
-        // All expanded bodies share one budget; pinned headers never enter it.
-        // Reserve the 56dp app bar, 108dp minimum composer and layout spacing
-        // before allocating scroll space, including when IME shrinks this box.
+        // Todo and subagent bodies use modal workspaces, never composer space.
+        // Only activity remains inline; reserve all pinned headers and input
+        // before allocating its viewport, including when the IME shrinks this box.
         val activityViewportMax = minOf(
             176.dp,
             maxHeight * 0.4f,
-            (maxHeight - 192.dp - 52.dp * panelCount).coerceAtLeast(0.dp),
-        ) / panelCount.coerceAtLeast(1)
+            (maxHeight - 192.dp - 52.dp * pinnedHeaderCount).coerceAtLeast(0.dp),
+        )
         Column(Modifier.fillMaxSize()) {
         ChatTopBar(
             title = title,
@@ -530,11 +563,11 @@ fun ChatScreen(
         if (commandError != null) {
             Text(commandError!!, color = OmpColors.StatusError, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
         }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
         LazyColumn(
             state = listState,
             modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
+                .fillMaxSize()
                 .nestedScroll(scrollIntent),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -554,15 +587,19 @@ fun ChatScreen(
                 }
             }
         }
-        if (!followLocked) {
+        if (listState.canScrollForward) {
             Box(
                 modifier = Modifier
+                    .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .padding(vertical = 2.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 IconButton(
-                    onClick = { followLocked = true },
+                    onClick = {
+                        followLocked = true
+                        commandScope.launch { scrollToLatest() }
+                    },
                     modifier = Modifier.size(48.dp),
                 ) {
                     Icon(
@@ -573,6 +610,7 @@ fun ChatScreen(
                     )
                 }
             }
+        }
         }
         ChatHistoryHost(requester = requester, sessionId = sessionId, leafId = if (historicalView) branchLeafId else null, onOpenSession = onOpenSession, onEditMessage = onDraftChange, expanded = historyOpen, onDismiss = { historyOpen = false })
         ChatStatsHost(requester = requester, sessionId = sessionId, open = statsOpen, onDismiss = { statsOpen = false })
@@ -592,12 +630,11 @@ fun ChatScreen(
             )
             // Pinned composer panels (web ComposerPanels parity): always visible
             // collapsed headers — not buried inside the activity accordion.
-            TodoPanel(todos = todos, bodyMaxHeight = activityViewportMax)
+            TodoPanel(todos = todos)
             SubagentPanel(
                 requester = requester,
                 sessionId = sessionId,
                 subagents = subagents,
-                bodyMaxHeight = activityViewportMax,
             )
             if (hasActivity || activityExpanded) Row(
                 Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(8.dp))
@@ -632,10 +669,6 @@ fun ChatScreen(
                 running = running,
                 steering = queueSteering,
                 followUp = queueFollowUp,
-                draft = draft,
-                onSteer = { text -> execute(JSONObject().put("type", "steer").put("message", text)) { onDraftChange("") } },
-                onFollowUp = { text -> execute(JSONObject().put("type", "follow_up").put("message", text)) { onDraftChange("") } },
-                onInterrupt = { text -> execute(JSONObject().put("type", "abort_and_prompt").put("message", text)) { onDraftChange("") } },
 
             )
             }
@@ -699,6 +732,7 @@ fun ChatScreen(
             ComposerCard(
                 draft = draft,
                 running = running,
+                submitBehavior = submitBehavior,
                 currentModel = currentModel,
                 attachedFiles = attachedFiles,
                 thinkingLevel = thinkingLevel,
@@ -925,6 +959,7 @@ private fun UserMessage(message: DisplayMessage) {
 private fun ComposerCard(
     draft: String,
     running: Boolean,
+    submitBehavior: String,
     currentModel: ModelRef?,
     attachedFiles: List<AttachmentItem>,
     sending: Boolean,
@@ -969,9 +1004,9 @@ private fun ComposerCard(
             onValueChange = onDraftChange,
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 48.dp, max = 144.dp)
-                .padding(horizontal = 8.dp),
-            textStyle = TextStyle(fontSize = 14.sp, color = OmpColors.Text),
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            textStyle = TextStyle(fontSize = 16.sp, lineHeight = 24.sp, color = OmpColors.Text),
             cursorBrush = SolidColor(OmpColors.Accent),
             maxLines = 6,
             decorationBox = { inner ->
@@ -979,7 +1014,8 @@ private fun ComposerCard(
                     if (draft.isEmpty()) {
                         Text(
                             stringResource(R.string.chat_composer_placeholder),
-                            fontSize = 14.sp,
+                            fontSize = 16.sp,
+                            lineHeight = 24.sp,
                             color = OmpColors.TextDim,
                         )
                     }
@@ -1025,12 +1061,28 @@ private fun ComposerCard(
                 }
             }
             val canSend = draft.isNotBlank() || attachedFiles.isNotEmpty()
-            val active = !sending && (running || canSend)
-            IconButton(onClick = { if (running) onAbort() else onSend() }, enabled = active, modifier = Modifier.size(48.dp)) {
-                Box(Modifier.size(32.dp).clip(CircleShape).background(if (active) OmpColors.AccentStrong else OmpColors.BgHover), contentAlignment = Alignment.Center) {
-                    Icon(if (running) Icons.Filled.Stop else Icons.Filled.ArrowUpward,
-                        stringResource(if (running) R.string.chat_abort else R.string.chat_send), Modifier.size(18.dp),
-                        tint = if (active) androidx.compose.material3.MaterialTheme.colorScheme.onPrimary else OmpColors.TextDim)
+            val stop = running && !canSend
+            val active = !sending && (stop || canSend)
+            val actionLabel = stringResource(when {
+                stop -> R.string.chat_abort
+                !running -> R.string.chat_send
+                submitBehavior == com.dbchbin.ompgui.remote.store.AppPreferences.SUBMIT_QUEUE -> R.string.chat_submit_queue
+                else -> R.string.chat_submit_steer
+            })
+            androidx.compose.material3.TextButton(
+                onClick = { if (stop) onAbort() else onSend() },
+                enabled = active,
+                modifier = Modifier.heightIn(min = 48.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp),
+            ) {
+                if (running && canSend) {
+                    Text(actionLabel, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                } else {
+                    Box(Modifier.size(32.dp).clip(CircleShape).background(if (active) OmpColors.AccentStrong else OmpColors.BgHover), contentAlignment = Alignment.Center) {
+                        Icon(if (stop) Icons.Filled.Stop else Icons.Filled.ArrowUpward,
+                            actionLabel, Modifier.size(18.dp),
+                            tint = if (active) androidx.compose.material3.MaterialTheme.colorScheme.onPrimary else OmpColors.TextDim)
+                    }
                 }
             }
         }
@@ -1124,10 +1176,11 @@ private fun ModelPickerSheet(
     }
     OmpModalSheet(
         onDismissRequest = onClosePicker,
+        fullHeight = true,
         containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
     ) {
-        Column(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+        Column(Modifier.fillMaxWidth().weight(1f)) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.chat_model_picker), fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold, color = OmpColors.Text, modifier = Modifier.weight(1f))
@@ -1135,7 +1188,7 @@ private fun ModelPickerSheet(
             }
             ModelSearchField(query, { query = it }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             LazyColumn(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
+                modifier = Modifier.fillMaxWidth().weight(1f),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
@@ -1205,7 +1258,7 @@ private fun ThinkingPickerSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 332.dp).verticalScroll(rememberScrollState())
+                    .weight(1f, fill = false).verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
@@ -1252,23 +1305,24 @@ private fun BranchSheet(
 ) {
     OmpModalSheet(
         onDismissRequest = onDismiss,
+        fullHeight = true,
         containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
     ) {
-        Column(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+        Column(Modifier.fillMaxWidth().weight(1f)) {
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.chat_menu_branches), fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                    color = OmpColors.Text, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, stringResource(R.string.chat_branches_close), tint = OmpColors.TextMuted) }
+            }
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 560.dp).verticalScroll(rememberScrollState())
+                    .weight(1f).verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp)
                     .padding(bottom = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.chat_menu_branches), fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-                        color = OmpColors.Text, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, stringResource(R.string.chat_branches_close), tint = OmpColors.TextMuted) }
-                }
                 if (branches.isEmpty()) {
                     Text(
                         stringResource(R.string.chat_branches_empty),

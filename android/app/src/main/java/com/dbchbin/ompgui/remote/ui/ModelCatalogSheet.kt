@@ -29,7 +29,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -98,8 +97,7 @@ internal fun ModelCatalogSheet(requester: RelayRequester, draft: ProviderDraft, 
             loading = false
         }
     }
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = OmpColors.Bg,
-        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    OmpModalSheet(onDismissRequest = onDismiss, containerColor = OmpColors.Bg,
         dragHandle = { OmpSheetDragHandle() }) {
         OmpDialogSystemBars()
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f)) {

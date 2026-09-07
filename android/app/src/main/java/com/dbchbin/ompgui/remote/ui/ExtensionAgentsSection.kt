@@ -9,7 +9,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.FilterChip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -226,14 +225,14 @@ private fun AgentEditor(
         }
     }
 
-    AlertDialog(
+    OmpModalSheet(
         onDismissRequest = { if (!busy) onClose() },
+        fullHeight = true,
         containerColor = OmpColors.BgPanel,
-        modifier = Modifier.fillMaxWidth().padding(12.dp),
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-        title = { OmpDialogSystemBars(); Text(if (!existing) stringResource(R.string.extension_agents_create_agent) else name, color = OmpColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-        text = {
-            Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    ) {
+        Column(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(if (!existing) stringResource(R.string.extension_agents_create_agent) else name, color = OmpColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (existing) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(selected = !runtimeSettings, onClick = { runtimeSettings = false }, label = { Text(stringResource(R.string.extension_agents_definition)) })
@@ -284,8 +283,9 @@ private fun AgentEditor(
                 notice?.let { Text(it, color = OmpColors.TextMuted) }
                 error?.let { Text(it, color = OmpColors.StatusError) }
             }
-        },
-        confirmButton = {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onClose, enabled = !busy) { Text(stringResource(R.string.extension_close)) }
+
             if (writable && !runtimeSettings) Button(shape = MaterialTheme.shapes.small, onClick = {
                 val args = JSONObject().put("cwd", cwd).put("name", name.trim()).put("scope", saveScope)
                     .put("description", description).put("systemPrompt", prompt)
@@ -297,9 +297,9 @@ private fun AgentEditor(
                 agentSettingValue(blocking, "")?.let { args.put("blocking", it) }
                 mutate("agents.save", args, close = true)
             }, enabled = !busy && name.isNotBlank() && description.isNotBlank() && (saveScope != "project" || cwd.isNotBlank())) { Text(if (busy) stringResource(R.string.extension_agents_saving) else stringResource(R.string.extension_agents_save_definition)) }
-        },
-        dismissButton = { TextButton(onClick = onClose, enabled = !busy) { Text(stringResource(R.string.extension_close)) } },
-    )
+            }
+        }
+    }
     if (deleting) AlertDialog(
         onDismissRequest = { if (!busy) deleting = false },
         containerColor = OmpColors.BgPanel,

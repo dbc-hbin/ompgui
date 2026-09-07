@@ -1103,6 +1103,7 @@ private fun ModelProvidersSection(
                     } else {
                         "Delete $name and its models from models.yml. Saved as a full snapshot."
                     },
+                    modifier = Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
                     color = OmpColors.TextMuted,
                     fontSize = 13.sp,
                 )

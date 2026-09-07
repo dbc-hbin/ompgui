@@ -595,12 +595,20 @@ private fun SettingEditor(field: SettingField, value: Any?, enabled: Boolean, sa
                     var expanded by remember { mutableStateOf(false) }
                     Box(Modifier.width(128.dp)) {
                         OutlinedButton(onClick = { expanded = true }, enabled = enabled, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp), shape = MaterialTheme.shapes.small, border = BorderStroke(1.dp, OmpColors.Border)) {
-                            Text(value?.toString() ?: stringResource(R.string.settings_default), Modifier.weight(1f), color = OmpColors.Text)
+                            Text(when {
+                                field.path == "Submit during run" && value == AppPreferences.SUBMIT_STEER -> stringResource(R.string.chat_submit_steer)
+                                field.path == "Submit during run" && value == AppPreferences.SUBMIT_QUEUE -> stringResource(R.string.chat_submit_queue)
+                                else -> value?.toString() ?: stringResource(R.string.settings_default)
+                            }, Modifier.weight(1f), color = OmpColors.Text)
                             Icon(Icons.Default.ExpandMore, stringResource(R.string.settings_choose, field.path), modifier = Modifier.size(18.dp))
                         }
                         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                             options.forEach { option ->
-                                DropdownMenuItem(text = { Text(option) }, onClick = { expanded = false; save(if (field.kind == "boolean") option.toBoolean() else option) })
+                                DropdownMenuItem(text = { Text(when {
+                                    field.path == "Submit during run" && option == AppPreferences.SUBMIT_STEER -> stringResource(R.string.chat_submit_steer)
+                                    field.path == "Submit during run" && option == AppPreferences.SUBMIT_QUEUE -> stringResource(R.string.chat_submit_queue)
+                                    else -> option
+                                }) }, onClick = { expanded = false; save(if (field.kind == "boolean") option.toBoolean() else option) })
                             }
                         }
                     }

@@ -155,13 +155,15 @@
     <string name="settings_label_palette">Theme palette</string>
     <string name="settings_label_language">Language</string>
     <string name="settings_label_chime">Completion sound</string>
-    <string name="settings_label_submit">Message during active run</string>
+    <string name="settings_label_submit">While running: Steer or Queue</string>
+    <string name="chat_submit_steer">Steer</string>
+    <string name="chat_submit_queue">Queue</string>
     <string name="settings_label_collapse">Keep tool calls collapsed</string>
     <string name="settings_desc_theme">Choose light, dark, or system color mode.</string>
     <string name="settings_desc_palette">Warm paper/ember or OMP birch/graphite.</string>
     <string name="settings_desc_language">Language for this device\'s interface.</string>
     <string name="settings_desc_chime">Play a tone when the agent completes a run.</string>
-    <string name="settings_desc_submit">Steer interrupts the active run; Queue delivers a follow-up after it finishes.</string>
+    <string name="settings_desc_submit">Choose the composer action while the agent is running. Steer redirects the active run; Queue sends a follow-up after it finishes. An empty composer still shows Stop.</string>
     <string name="settings_desc_collapse">Show compact headers while tools execute.</string>
     <string name="settings_desc_approval_mode">Choose when OMP asks before tool calls.</string>
     <string name="settings_desc_approval_bash">Override the approval policy for terminal commands.</string>
@@ -730,4 +732,9 @@ This removes the project server and its saved environment variables and headers.
     <string name="extension_agents_overwrite_message">Force unpack into %1$s scope can replace existing agent definitions and prompts. This cannot be undone.</string>
     <string name="extension_agents_overwrite_confirm">Overwrite and unpack</string>
     <string name="extension_agents_custom_value">%1$s custom value</string>
+    <string name="chat_subagent_detail_error">Unable to load subagent details.</string>
+    <string name="chat_subagent_pending">This agent has not produced a result yet.</string>
+    <string name="chat_subagent_unavailable">No completion result is available.</string>
+    <string name="chat_queue_composer_hint">Send with Steer or Queue in the composer.</string>
+    <string name="chat_queue_readonly">Queued messages cannot be recalled or promoted by this runtime.</string>
 </resources>

@@ -202,7 +202,7 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
                         onOpenPicker = viewModel::openModelPicker,
                         onClosePicker = viewModel::closeModelPicker,
                         onSelectModel = viewModel::setModel,
-                        onSendWithAttachments = { text, images -> viewModel.sendPrompt(text, images) },
+                        onSendWithAttachments = { text, images, commandType -> viewModel.sendPrompt(text, images, commandType) },
                         onOpenUsage = {
                             viewModel.fetchUsage()
                             chatUsageOpen = true

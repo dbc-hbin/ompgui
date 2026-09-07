@@ -286,9 +286,8 @@ fun FileBrowserSheet(
         }
     }
 
-    ModalBottomSheet(
+    OmpModalSheet(
         onDismissRequest = { if (dirty || busy) { dismissAfterDiscard = true; discard = true } else onDismiss() },
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         dragHandle = { OmpSheetDragHandle() },
         containerColor = OmpColors.Bg,
     ) {

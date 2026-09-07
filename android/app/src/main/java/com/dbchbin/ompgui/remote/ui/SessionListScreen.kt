@@ -55,7 +55,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.CancellationException
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -523,7 +522,7 @@ fun SessionListScreen(
             Box(Modifier.weight(1f)) { FooterNavRow(Icons.Filled.Speed, stringResource(R.string.session_list_usage)) { usageOpen = true; onOpenUsage() } }
         }
         if (projectsOpen) {
-            ModalBottomSheet(onDismissRequest = { projectsOpen = false }, containerColor = OmpColors.Bg, dragHandle = { OmpSheetDragHandle() }) {
+            OmpModalSheet(onDismissRequest = { projectsOpen = false }, containerColor = OmpColors.Bg, dragHandle = { OmpSheetDragHandle() }) {
                 OmpDialogSystemBars()
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 16.dp)) {
                     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -562,7 +561,7 @@ fun SessionListScreen(
             }
         }
         if (worktreesOpen) {
-            ModalBottomSheet(onDismissRequest = { worktreesOpen = false }, containerColor = OmpColors.Bg, dragHandle = { OmpSheetDragHandle() }) {
+            OmpModalSheet(onDismissRequest = { worktreesOpen = false }, containerColor = OmpColors.Bg, dragHandle = { OmpSheetDragHandle() }) {
                 OmpDialogSystemBars()
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 16.dp)) {
                     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1144,8 +1143,7 @@ private fun WorktreeRemoveSheet(
     onConfirm: (force: Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(
-        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    OmpModalSheet(
         onDismissRequest = onDismiss,
         containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
@@ -1264,8 +1262,7 @@ internal fun ArchivesSheet(
     var restoringKey by remember { mutableStateOf<String?>(null) }
     var restoreError by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(query) { listState.scrollToItem(0) }
-    ModalBottomSheet(
-        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    OmpModalSheet(
         onDismissRequest = onDismiss,
         containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
@@ -1381,8 +1378,7 @@ private fun SessionActionSheet(
     autonameBusy: Boolean = false,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(
-        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    OmpModalSheet(
         onDismissRequest = onDismiss,
         containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,

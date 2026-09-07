@@ -21,8 +21,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -88,9 +86,8 @@ fun CommandPaletteSheet(
     if (gitOpen) {
         FileBrowserSheet(requester = requester, path = currentCwd.orEmpty(), cwd = currentCwd.orEmpty(),
             initialGit = true, onDismiss = { gitOpen = false })
-    } else ModalBottomSheet(
+    } else OmpModalSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         dragHandle = { OmpSheetDragHandle() },
         containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,

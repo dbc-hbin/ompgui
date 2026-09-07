@@ -31,7 +31,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -97,9 +98,11 @@ private fun panelShape() = RoundedCornerShape(10.dp)
 // ---------------------------------------------------------------------------
 
 @Composable
-fun TodoPanel(todos: List<com.dbchbin.ompgui.remote.relay.TodoPhase>, bodyMaxHeight: Dp) {
+fun TodoPanel(todos: List<com.dbchbin.ompgui.remote.relay.TodoPhase>) {
     if (todos.isEmpty()) return
     var expanded by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val tasks = remember(todos) { todos.flatMap { it.tasks } }
     val done = remember(tasks) { tasks.count { it.status == "completed" } }
     val headerDesc = if (expanded) {
@@ -119,7 +122,11 @@ fun TodoPanel(todos: List<com.dbchbin.ompgui.remote.relay.TodoPhase>, bodyMaxHei
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(6.dp))
-                .clickable { expanded = !expanded }
+                .clickable(role = Role.Button) {
+                    focusManager.clearFocus()
+                    keyboard?.hide()
+                    expanded = true
+                }
                 .semantics { contentDescription = headerDesc }
                 .heightIn(min = 48.dp)
                 .padding(horizontal = 2.dp, vertical = 4.dp),
@@ -151,18 +158,30 @@ fun TodoPanel(todos: List<com.dbchbin.ompgui.remote.relay.TodoPhase>, bodyMaxHei
                 tint = OmpColors.TextDim,
             )
         }
-        if (expanded) {
+    }
+    if (expanded) {
+        OmpModalSheet(onDismissRequest = { expanded = false }, fullHeight = true) {
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.todo_title), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = OmpColors.Text)
+                    Text(stringResource(R.string.chat_activity_todos, done, tasks.size), fontSize = 13.sp, color = OmpColors.TextMuted)
+                }
+                IconButton(onClick = { expanded = false }) {
+                    Icon(Icons.Filled.Close, stringResource(R.string.extension_close), tint = OmpColors.TextMuted)
+                }
+            }
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = bodyMaxHeight)
+                    .weight(1f)
                     .verticalScroll(rememberScrollState())
-                    .padding(top = 2.dp, bottom = 8.dp),
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 todos.forEach { phase ->
                     Text(
                         phase.name,
-                        fontSize = 12.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = OmpColors.TextMuted,
                         modifier = Modifier.padding(top = 6.dp, start = 4.dp),
@@ -186,7 +205,8 @@ fun TodoPanel(todos: List<com.dbchbin.ompgui.remote.relay.TodoPhase>, bodyMaxHei
                             )
                             Text(
                                 task.content,
-                                fontSize = 13.sp,
+                                fontSize = 15.sp,
+                                lineHeight = 22.sp,
                                 color = OmpColors.Text,
                             )
                         }
@@ -227,10 +247,11 @@ fun SubagentPanel(
     requester: RelayRequester,
     sessionId: String,
     subagents: List<com.dbchbin.ompgui.remote.relay.SubagentChip>,
-    bodyMaxHeight: Dp,
 ) {
     if (subagents.isEmpty()) return
     var expanded by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     var selected by remember { mutableStateOf<com.dbchbin.ompgui.remote.relay.SubagentChip?>(null) }
     val live = remember(subagents) { subagents.count(::subagentIsLive) }
     val headerDesc = if (expanded) {
@@ -250,7 +271,11 @@ fun SubagentPanel(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(6.dp))
-                .clickable { expanded = !expanded }
+                .clickable(role = Role.Button) {
+                    focusManager.clearFocus()
+                    keyboard?.hide()
+                    expanded = true
+                }
                 .semantics { contentDescription = headerDesc }
                 .heightIn(min = 48.dp)
                 .padding(horizontal = 2.dp, vertical = 4.dp),
@@ -286,14 +311,25 @@ fun SubagentPanel(
                 tint = OmpColors.TextDim,
             )
         }
-        if (expanded) {
+    }
+    if (expanded) {
+        OmpModalSheet(onDismissRequest = { expanded = false }, fullHeight = true) {
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.chat_subagent_hub_summary, subagents.size), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = OmpColors.Text)
+                    Text(stringResource(R.string.chat_subagent_hub_live, live), fontSize = 13.sp, color = if (live > 0) OmpColors.Accent else OmpColors.TextMuted)
+                }
+                IconButton(onClick = { expanded = false }) {
+                    Icon(Icons.Filled.Close, stringResource(R.string.extension_close), tint = OmpColors.TextMuted)
+                }
+            }
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = bodyMaxHeight)
+                    .weight(1f)
                     .verticalScroll(rememberScrollState())
-                    .padding(bottom = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 subagents.forEach { chip ->
                     val statusLabel = subagentStatusLabel(chip)
@@ -301,71 +337,35 @@ fun SubagentPanel(
                     val openDesc = stringResource(R.string.chat_subagent_open_transcript)
                     val title = chip.id.ifBlank { chip.agent }.ifBlank { "agent" }
                     val agentType = chip.agent.trim().takeIf { it.isNotEmpty() && !it.equals(title, ignoreCase = true) }
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable { selected = chip }
-                            .semantics {
-                                contentDescription = buildString {
-                                    append(title)
-                                    if (agentType != null) append(", ").append(agentType)
-                                    append(", ").append(statusLabel)
-                                    append(". ").append(openDesc)
-                                }
-                            }
-                            .padding(horizontal = 6.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                            .clip(panelShape())
+                            .background(OmpColors.BgPanel)
+                            .border(1.dp, OmpColors.Border, panelShape())
+                            .clickable(role = Role.Button, onClickLabel = openDesc) { selected = chip }
+                            .heightIn(min = 48.dp)
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .width(92.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(OmpColors.BgHover)
-                                .border(1.dp, OmpColors.Border, RoundedCornerShape(8.dp))
-                                .padding(horizontal = 6.dp, vertical = 6.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
+                        Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = OmpColors.Text)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 statusLabel,
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = if (liveChip) OmpColors.Accent else OmpColors.TextMuted,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(OmpColors.BgHover)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
                             )
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                title,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = OmpColors.Text,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            val activity = chip.task.trim()
-                            val preview = buildList {
-                                if (agentType != null) add(agentType)
-                                if (activity.isNotEmpty()) add(activity)
-                            }.joinToString(" · ")
-                            if (preview.isNotEmpty()) {
-                                Text(
-                                    preview,
-                                    fontSize = 12.sp,
-                                    color = OmpColors.TextMuted,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                            if (agentType != null) {
+                                Text(agentType, fontSize = 13.sp, color = OmpColors.TextMuted, modifier = Modifier.weight(1f))
                             }
                         }
-                        Text(
-                            stringResource(R.string.chat_subagent_view_result),
-                            fontSize = 11.sp,
-                            color = OmpColors.Accent,
-                            modifier = Modifier.padding(start = 4.dp),
-                        )
+                        if (chip.task.isNotBlank()) {
+                            Text(chip.task.trim(), fontSize = 14.sp, lineHeight = 20.sp, color = OmpColors.TextMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                        Text(stringResource(R.string.chat_subagent_view_result), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = OmpColors.Accent)
                     }
                 }
             }
@@ -377,6 +377,7 @@ fun SubagentPanel(
             sessionId = sessionId,
             subagent = selected!!,
             onDismiss = { selected = null },
+            onClose = { selected = null; expanded = false },
         )
     }
 }
@@ -387,6 +388,7 @@ private fun SubagentTranscriptDialog(
     sessionId: String,
     subagent: com.dbchbin.ompgui.remote.relay.SubagentChip,
     onDismiss: () -> Unit,
+    onClose: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var loading by remember { mutableStateOf(true) }
@@ -397,10 +399,13 @@ private fun SubagentTranscriptDialog(
     var nextByte by remember { mutableStateOf(0L) }
     var exhausted by remember { mutableStateOf(false) }
     var transcriptOpen by remember { mutableStateOf(false) }
+    var detailStatus by remember { mutableStateOf("") }
+    var refresh by remember { mutableStateOf(0) }
+    val detailError = stringResource(R.string.chat_subagent_detail_error)
     val noSession = stringResource(R.string.chat_subagent_no_session)
     val statusLabel = subagentStatusLabel(subagent)
 
-    LaunchedEffect(sessionId, subagent.id) {
+    LaunchedEffect(sessionId, subagent.id, refresh) {
         if (sessionId.isBlank()) {
             loading = false
             error = noSession
@@ -412,8 +417,10 @@ private fun SubagentTranscriptDialog(
             val data = ChatRequests.subagentCompletion(requester, sessionId, subagent.id)
             completion = data.optString("completion").takeIf { data.has("completion") && !data.isNull("completion") }
             completionTruncated = data.optBoolean("truncated", false)
+            detailStatus = data.optString("status")
         } catch (e: Exception) {
-            error = e.message ?: "Transcript unavailable"
+            if (e is CancellationException) throw e
+            error = e.message ?: detailError
         } finally {
             loading = false
         }
@@ -454,11 +461,11 @@ private fun SubagentTranscriptDialog(
                 }
                 transcript = builder.toString()
                 nextByte = page.nextByte
-                exhausted = page.exhausted
+                exhausted = data.optString("status") != "pending" && page.exhausted
             } catch (e: Exception) {
                 // Surface the server-coded error; never fake transcript content.
                 if (e is CancellationException) throw e
-                error = e.message ?: "Transcript page failed"
+                error = e.message ?: detailError
             } finally {
                 loading = false
             }
@@ -467,14 +474,31 @@ private fun SubagentTranscriptDialog(
 
     OmpModalSheet(
         onDismissRequest = onDismiss,
+        fullHeight = true,
         containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
     ) {
-        Column(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                stringResource(R.string.chat_back),
+                color = OmpColors.Accent,
+                fontSize = 14.sp,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button, onClick = onDismiss)
+                    .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 14.dp),
+            )
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = { refresh++ }, enabled = !loading && sessionId.isNotBlank()) {
+                Icon(Icons.Filled.Refresh, stringResource(R.string.extension_refresh), tint = OmpColors.TextMuted)
+            }
+            IconButton(onClick = onClose) {
+                Icon(Icons.Filled.Close, stringResource(R.string.extension_close), tint = OmpColors.TextMuted)
+            }
+        }
+        Column(Modifier.fillMaxWidth().weight(1f)) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 560.dp)
+                    .weight(1f)
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp)
                     .padding(bottom = 12.dp),
@@ -495,20 +519,23 @@ private fun SubagentTranscriptDialog(
                             Text(agentType, fontSize = 12.sp, color = OmpColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.extension_close), tint = OmpColors.TextMuted)
-                    }
                 }
                 Text(
                     "$statusLabel · ${subagent.id}",
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     color = OmpColors.TextMuted,
                 )
+                if (subagent.task.isNotBlank()) {
+                    Text(subagent.task, fontSize = 14.sp, lineHeight = 20.sp, color = OmpColors.TextMuted)
+                }
                 if (loading) {
                     Text(stringResource(R.string.chat_subagent_loading), fontSize = 14.sp, color = OmpColors.TextMuted)
                 }
                 if (!error.isNullOrBlank()) {
                     Text(error!!, fontSize = 13.sp, color = OmpColors.StatusError)
+                }
+                if (!loading && error == null && completion.isNullOrBlank()) {
+                    Text(stringResource(if (detailStatus == "pending") R.string.chat_subagent_pending else R.string.chat_subagent_unavailable), fontSize = 14.sp, color = OmpColors.TextMuted)
                 }
                 if (!completion.isNullOrBlank()) {
                     Text(
@@ -538,7 +565,7 @@ private fun SubagentTranscriptDialog(
                         color = OmpColors.Accent,
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .clickable {
+                            .clickable(role = Role.Button) {
                                 transcriptOpen = !transcriptOpen
                                 if (transcriptOpen && transcript.isEmpty() && !exhausted) loadPage()
                             }.heightIn(min = 48.dp)
@@ -549,10 +576,10 @@ private fun SubagentTranscriptDialog(
                     if (transcript.isNotBlank()) {
                         Text(
                             transcript,
-                            fontSize = 12.sp,
+                            fontSize = 14.sp,
                             fontFamily = FontFamily.Monospace,
                             color = OmpColors.Text,
-                            lineHeight = 18.sp,
+                            lineHeight = 21.sp,
                         )
                     }
                     if (!exhausted) {
@@ -563,7 +590,7 @@ private fun SubagentTranscriptDialog(
                             color = OmpColors.Accent,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .clickable(enabled = !loading) { loadPage() }.heightIn(min = 48.dp)
+                                .clickable(enabled = !loading, role = Role.Button) { loadPage() }.heightIn(min = 48.dp)
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                         )
                     }
@@ -583,15 +610,9 @@ fun QueuePanel(
     running: Boolean,
     steering: List<String>,
     followUp: List<String>,
-    draft: String,
-    onSteer: (String) -> Unit,
-    onFollowUp: (String) -> Unit,
-    onInterrupt: (String) -> Unit,
-
 ) {
     val hasQueue = steering.isNotEmpty() || followUp.isNotEmpty()
     if (!running && !hasQueue) return
-    val korean = remember { Locale.getDefault().language == "ko" }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -603,30 +624,12 @@ fun QueuePanel(
     ) {
         if (running) {
             Text(
-                if (korean) "실행 중 — steer/follow-up/중단 가능" else "Running — steer, follow up, or interrupt",
+                stringResource(R.string.chat_queue_composer_hint),
                 fontSize = 12.sp,
                 color = OmpColors.TextMuted,
             )
-            val canQueue = draft.isNotBlank()
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                QueueAction(
-                    label = if (korean) "Steer" else "Steer",
-                    enabled = canQueue,
-                    onClick = { onSteer(draft) },
-                )
-                QueueAction(
-                    label = if (korean) "후속" else "Follow-up",
-                    enabled = canQueue,
-                    onClick = { onFollowUp(draft) },
-                )
-                QueueAction(
-                    label = if (korean) "중단+전송" else "Interrupt",
-                    enabled = canQueue,
-                    onClick = { onInterrupt(draft) },
-                )
-            }
         }
-        if (hasQueue) Text("Queued messages cannot be recalled or promoted by this runtime.", color = OmpColors.TextMuted, fontSize = 12.sp)
+        if (hasQueue) Text(stringResource(R.string.chat_queue_readonly), color = OmpColors.TextMuted, fontSize = 12.sp)
         Column(Modifier.heightIn(max = 160.dp).verticalScroll(rememberScrollState())) {
             steering.forEach { Text("[steer] $it", color = OmpColors.Text) }
             followUp.forEach { Text("[follow-up] $it", color = OmpColors.Text) }
@@ -634,21 +637,6 @@ fun QueuePanel(
     }
 }
 
-@Composable
-private fun QueueAction(label: String, enabled: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (enabled) OmpColors.BgHover else OmpColors.BgPanel)
-            .border(1.dp, OmpColors.Border, RoundedCornerShape(8.dp))
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, fontSize = 13.sp, color = if (enabled) OmpColors.Text else OmpColors.TextDim)
-    }
-}
 
 
 // ---------------------------------------------------------------------------
@@ -686,7 +674,6 @@ fun RuntimePanel(
     onAbort: () -> Unit,
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
 ) {
     // State lives above every disclosure subtree, so collapsing never discards a draft.
     var bashDraft by remember(sessionId) { mutableStateOf("") }
@@ -714,14 +701,14 @@ fun RuntimePanel(
     val scrollState = rememberScrollState()
     if (expanded) {
         OmpModalSheet(
+            fullHeight = true,
             onDismissRequest = { onExpandedChange(false) },
             containerColor = OmpColors.Bg,
             contentColor = OmpColors.Text,
         ) {
-            Column(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+            Column(Modifier.fillMaxWidth().weight(1f)) {
                 Column(
-                    modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-                        .heightIn(max = 560.dp)
+                    Modifier.fillMaxWidth().weight(1f).padding(horizontal = 12.dp, vertical = 8.dp)
                         .border(1.dp, OmpColors.Border, RoundedCornerShape(16.dp))
                         .clip(RoundedCornerShape(16.dp)).background(OmpColors.BgPanel),
                 ) {
@@ -738,7 +725,7 @@ fun RuntimePanel(
                             Icon(Icons.Filled.Close, if (korean) "세션 실행 제어 닫기" else "Close session controls", tint = OmpColors.TextMuted)
                         }
                     }
-                    Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(scrollState)) {
+                    Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(scrollState)) {
                 RuntimeTreeRow(
                     label = if (korean) "실행" else "Execution",
                     expanded = category == "execution", heading = true, icon = Icons.Filled.PlayArrow,
@@ -1120,16 +1107,17 @@ private fun ChatHistoryContent(requester: RelayRequester, sessionId: String, lea
         LaunchedEffect(expanded) { if (expanded && page == null) load(0) }
         if (expanded) {
             OmpModalSheet(
+            fullHeight = true,
                 onDismissRequest = onDismiss,
                 containerColor = OmpColors.Bg,
                 contentColor = OmpColors.Text,
             ) {
-                Column(Modifier.fillMaxWidth().weight(1f, fill = false)) {
-            Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.fillMaxWidth().weight(1f)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("History", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, "Close", tint = OmpColors.TextMuted) }
+                    Text(stringResource(R.string.chat_menu_history), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, stringResource(R.string.extension_close), tint = OmpColors.TextMuted) }
                 }
+            Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (busy) Text("Loading…", color = OmpColors.TextMuted)
                 error?.let { Text(it, color = OmpColors.StatusError) }
                 page?.let { current ->
@@ -1263,16 +1251,17 @@ fun ChatStatsHost(requester: RelayRequester, sessionId: String, open: Boolean, o
     Box {
         if (open) {
             OmpModalSheet(
+            fullHeight = true,
                 onDismissRequest = onDismiss,
                 containerColor = OmpColors.Bg,
                 contentColor = OmpColors.Text,
             ) {
-                Column(Modifier.fillMaxWidth().weight(1f, fill = false)) {
-            Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.fillMaxWidth().weight(1f)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Session info", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, "Close", tint = OmpColors.TextMuted) }
+                Text(stringResource(R.string.chat_menu_session_info), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, stringResource(R.string.extension_close), tint = OmpColors.TextMuted) }
             }
+            Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("State", "Stats", "System prompt").forEach { name ->
                     RuntimeChip(name, enabled = !busy, onClick = {
@@ -1293,7 +1282,7 @@ fun ChatStatsHost(requester: RelayRequester, sessionId: String, open: Boolean, o
                     })
                 }
             }
-            if (selected != null) Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+            if (selected != null) Column(Modifier.fillMaxWidth()) {
                 if (busy) Text("Loading…", color = OmpColors.TextMuted)
                 androidx.compose.foundation.text.selection.SelectionContainer { Text(output, color = OmpColors.Text) }
             }
@@ -1332,20 +1321,21 @@ fun ChatSlashHost(
     Box {
         if (expanded) {
             OmpModalSheet(
+            fullHeight = true,
                 onDismissRequest = onDismiss,
                 containerColor = OmpColors.Bg,
                 contentColor = OmpColors.Text,
             ) {
-                Column(Modifier.fillMaxWidth().weight(1f, fill = false)) {
-            Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.fillMaxWidth().weight(1f)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Commands & files", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, "Close", tint = OmpColors.TextMuted) }
+                    Text(stringResource(R.string.chat_menu_commands), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, stringResource(R.string.extension_close), tint = OmpColors.TextMuted) }
                 }
+            Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 val commands = if (draft.startsWith("/")) slashCommands.filter { it.name.contains(draft.removePrefix("/").substringBefore(' '), ignoreCase = true) } else slashCommands
                 commands.forEach { command -> RuntimeChip("/${command.name}", onClick = { onInsertSlash("/${command.name} "); onDismiss() }) }
                 if (commands.isEmpty()) Text("No matching slash commands", color = OmpColors.TextMuted)
-            if (atQuery != null) Column(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
+            if (atQuery != null) Column(Modifier.fillMaxWidth()) {
                 searchError?.let { Text(it, color = OmpColors.StatusError) }
                 matches.forEach { path -> RuntimeChip(path, onClick = {
                     val token = if (path.any { it.isWhitespace() }) "@\"${path.replace("\"", "\\\"")}\" " else "@$path "
@@ -1442,17 +1432,18 @@ fun ExtensionNoticeList(notices: List<EventProjector.ChatNotice>, onDismiss: (St
     }
     if (detailsOpen && informational.isNotEmpty()) {
         OmpModalSheet(
+            fullHeight = true,
             onDismissRequest = { detailsOpen = false },
             containerColor = OmpColors.Bg,
             contentColor = OmpColors.Text,
         ) {
-            Column(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+            Column(Modifier.fillMaxWidth().weight(1f)) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Extension notices · ${informational.size}", modifier = Modifier.weight(1f), fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     IconButton(onClick = { detailsOpen = false }, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, "Close notices", tint = OmpColors.TextMuted) }
                 }
-                Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()).padding(16.dp),
+                Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     informational.forEach { notice -> ExtensionNoticeRow(notice, onDismiss) }
                 }

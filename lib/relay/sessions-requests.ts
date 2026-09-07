@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { allowFileRoot, getAllowedFileRoots, isExistingFilePathAllowed } from "../file-access";
 import { ToolResultImagesTooLargeError, validateAgentImages } from "../image-attachments";
-import { extractSubagentHistory, readCompletionArtifact, readSubagentTranscriptPage, resolveSubagentArtifact } from "../subagent-history";
+import { SubagentArtifactForbiddenError, extractSubagentHistory, readCompletionArtifact, readSubagentTranscriptPage, resolveSubagentArtifact } from "../subagent-history";
 import { deriveSessionTitleFromFirstMessage, sanitizeSessionTitle } from "../session-title";
 import { getRpcSession, mapPresetToolNames, startRpcSession, WebRpcError } from "../rpc-manager";
 import { RpcCommandError } from "../omp/rpc-process";
@@ -368,6 +368,37 @@ async function handleSubagents(args: Record<string, unknown>): Promise<Record<st
   return { subagents: extractSubagentHistory(filePath) };
 }
 
+async function subagentDetail(id: string, subagentId: string) {
+  const filePath = await resolveSessionPath(id);
+  const rpc = getRpcSession(id);
+  if (!filePath && !rpc?.isAlive()) fail("session_not_found", "Session not found");
+  const history = filePath ? extractSubagentHistory(filePath).find(entry => entry.id === subagentId) : undefined;
+  let live: Record<string, unknown> | undefined;
+  if (rpc?.isAlive()) {
+    try {
+      const result = await rpc.send({ type: "get_subagents" });
+      if (result && typeof result === "object" && "subagents" in result && Array.isArray(result.subagents)) {
+        live = result.subagents.find((entry: unknown): entry is Record<string, unknown> =>
+          entry !== null && typeof entry === "object" && "id" in entry && entry.id === subagentId);
+      }
+    } catch {
+      // Restarted registries may not know persisted tasks; disk is authoritative fallback.
+    }
+  }
+  const status = live?.status;
+  return { filePath, rpc, live, history, pending: status === "started" || status === "pending" || status === "running" };
+}
+
+function resolveDetailArtifact(filePath: string, subagentId: string, extension: ".jsonl" | ".md", recordedPath?: string) {
+  try {
+    return resolveSubagentArtifact(filePath, subagentId, extension, undefined, true)
+      ?? (recordedPath ? resolveSubagentArtifact(filePath, subagentId, extension, recordedPath, true) : null);
+  } catch (error) {
+    if (error instanceof SubagentArtifactForbiddenError) fail("artifact_forbidden", error.message);
+    throw error;
+  }
+}
+
 async function handleSubagentTranscript(args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const id = needId(args.id);
   const subagentId = asString(args.subagentId)?.trim();
@@ -378,12 +409,26 @@ async function handleSubagentTranscript(args: Record<string, unknown>): Promise<
   if (fromByteRaw === undefined || !Number.isSafeInteger(fromByteRaw) || fromByteRaw < 0) {
     fail("invalid_offset", "fromByte must be a non-negative integer");
   }
-  const filePath = await resolveSessionPath(id);
-  if (!filePath) fail("session_not_found", "Session not found");
-  const resolved = resolveSubagentArtifact(filePath, subagentId, ".jsonl");
-  if (!resolved) fail("transcript_not_found", "Subagent transcript not found");
+  const detail = await subagentDetail(id, subagentId);
+  if (detail.live && detail.rpc) {
+    try {
+      const page = await detail.rpc.send({ type: "get_subagent_messages", subagentId, fromByte: fromByteRaw });
+      if (page && typeof page === "object" && "messages" in page && Array.isArray(page.messages) && !("error" in page && page.error)) {
+        return { ...page, status: detail.pending && page.messages.length === 0 ? "pending" : "ready" };
+      }
+    } catch {
+      // Mirror web: the current registry can lose access to old transcript files.
+    }
+  }
+  const resolved = detail.filePath ? resolveDetailArtifact(detail.filePath, subagentId, ".jsonl") : null;
+  if (!resolved) {
+    if (detail.pending) return { status: "pending", fromByte: fromByteRaw, nextByte: fromByteRaw, reset: false, messages: [], totalBytes: null };
+    if (!detail.history && !detail.live) fail("subagent_not_found", "Subagent is not part of this session");
+    fail("transcript_not_found", "No saved transcript is available for this subagent");
+  }
   const page = readSubagentTranscriptPage(resolved, fromByteRaw);
   return {
+    status: detail.pending && page.messages.length === 0 ? "pending" : "ready",
     fromByte: page.fromByte,
     nextByte: page.nextByte,
     reset: page.reset,
@@ -399,13 +444,12 @@ async function handleSubagentCompletion(args: Record<string, unknown>): Promise<
   if (!subagentId || subagentId.length > 100 || !SUBAGENT_ID_RE.test(subagentId)) {
     fail("invalid_subagent_id", "Invalid subagent id");
   }
-  const filePath = await resolveSessionPath(id);
-  if (!filePath) fail("session_not_found", "Session not found");
-  const resolved = resolveSubagentArtifact(filePath, subagentId, ".md");
-  if (!resolved) fail("transcript_not_found", "Subagent completion not found");
-  const completion = readCompletionArtifact(resolved);
-  if (!completion) fail("transcript_not_found", "Subagent completion not found");
-  return { completion: completion.completion, truncated: completion.truncated };
+  const detail = await subagentDetail(id, subagentId);
+  const resolved = detail.filePath ? resolveDetailArtifact(detail.filePath, subagentId, ".md", detail.history?.result?.outputPath) : null;
+  const completion = resolved ? readCompletionArtifact(resolved) : null;
+  if (completion) return { ...completion, status: "ready" };
+  if (!detail.history && !detail.live) fail("subagent_not_found", "Subagent is not part of this session");
+  return { completion: null, truncated: false, status: detail.pending ? "pending" : "unavailable" };
 }
 
 async function handleStats(args: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -499,7 +543,7 @@ async function handleCommand(args: Record<string, unknown>, context: RelayReques
   if (UNSUPPORTED_COMMANDS[type]) fail("unsupported_command", UNSUPPORTED_COMMANDS[type]);
   if (!COMMAND_SET.has(type)) fail("unsupported_command", `Unsupported command: ${type}`);
   const hasAttachments = command.attachmentIds !== undefined;
-  if (hasAttachments && (type !== "prompt" && type !== "abort_and_prompt")) fail("invalid_attachment", "This command does not accept attachmentIds");
+  if (hasAttachments && type !== "prompt" && type !== "abort_and_prompt" && type !== "steer" && type !== "follow_up") fail("invalid_attachment", "This command does not accept attachmentIds");
   if (hasAttachments && command.images !== undefined) fail("invalid_images", "Do not combine images and attachmentIds");
   if (type === "prompt" || type === "abort_and_prompt" || type === "steer" || type === "follow_up") {
     if (typeof command.message !== "string" || command.message.length > RELAY_MAX_PROMPT_CHARS) {

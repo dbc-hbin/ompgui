@@ -155,13 +155,15 @@
     <string name="settings_label_palette">테마 팔레트</string>
     <string name="settings_label_language">언어</string>
     <string name="settings_label_chime">완료 소리</string>
-    <string name="settings_label_submit">실행 중 메시지 동작</string>
+    <string name="settings_label_submit">실행 중 전송: Steer 또는 Queue</string>
+    <string name="chat_submit_steer">Steer</string>
+    <string name="chat_submit_queue">Queue</string>
     <string name="settings_label_collapse">도구 호출 접어두기</string>
     <string name="settings_desc_theme">라이트, 다크 또는 시스템 색상 모드를 선택합니다.</string>
     <string name="settings_desc_palette">따뜻한 paper/ember 또는 OMP birch/graphite.</string>
     <string name="settings_desc_language">이 기기의 인터페이스 언어입니다.</string>
     <string name="settings_desc_chime">에이전트 실행이 끝나면 알림음을 재생합니다.</string>
-    <string name="settings_desc_submit">Steer는 실행 중 작업을 가로채고, Queue는 끝난 뒤 후속 메시지를 전달합니다.</string>
+    <string name="settings_desc_submit">실행 중 입력창의 전송 동작을 선택합니다. Steer는 현재 작업에 방향을 전달하고, Queue는 작업이 끝난 뒤 후속 메시지를 보냅니다. 입력창이 비어 있으면 중단 버튼이 표시됩니다.</string>
     <string name="settings_desc_collapse">도구 실행 중에는 간결한 헤더만 표시합니다.</string>
     <string name="settings_desc_approval_mode">도구 호출 전에 OMP가 확인하는 시점을 선택합니다.</string>
     <string name="settings_desc_approval_bash">터미널 명령에 대한 승인 정책을 재정의합니다.</string>
@@ -730,4 +732,9 @@
     <string name="extension_agents_overwrite_message">%1$s 범위로 강제 풀기는 기존 에이전트 정의와 프롬프트를 바꿀 수 있습니다. 되돌릴 수 없습니다.</string>
     <string name="extension_agents_overwrite_confirm">덮어쓰고 풀기</string>
     <string name="extension_agents_custom_value">%1$s 사용자 값</string>
+    <string name="chat_subagent_detail_error">하위 에이전트 정보를 불러올 수 없습니다.</string>
+    <string name="chat_subagent_pending">이 에이전트는 아직 결과를 생성하지 않았습니다.</string>
+    <string name="chat_subagent_unavailable">완료 결과가 없습니다.</string>
+    <string name="chat_queue_composer_hint">입력창의 Steer 또는 Queue로 메시지를 전송합니다.</string>
+    <string name="chat_queue_readonly">이 런타임에서는 대기 메시지를 취소하거나 순서를 변경할 수 없습니다.</string>
 </resources>

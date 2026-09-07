@@ -730,4 +730,11 @@ This removes the project server and its saved environment variables and headers.
     <string name="usage_window_5h">5h</string>
     <string name="usage_window_monthly">monthly</string>
     <string name="usage_window_weekly">weekly</string>
+    <string name="chat_submit_steer">方向修正</string>
+    <string name="chat_submit_queue">キューに追加</string>
+    <string name="chat_subagent_detail_error">サブエージェントの詳細を読み込めません。</string>
+    <string name="chat_subagent_pending">このエージェントはまだ結果を生成していません。</string>
+    <string name="chat_subagent_unavailable">完了結果はありません。</string>
+    <string name="chat_queue_composer_hint">入力欄の「方向修正」または「キューに追加」で送信します。</string>
+    <string name="chat_queue_readonly">このランタイムでは、キュー内のメッセージを取り消したり、優先順位を上げたりできません。</string>
 </resources>

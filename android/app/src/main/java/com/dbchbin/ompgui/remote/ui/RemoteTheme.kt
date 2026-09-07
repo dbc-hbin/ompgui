@@ -9,6 +9,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -116,13 +121,17 @@ fun OmpModalSheet(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(
             usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = true,
+            decorFitsSystemWindows = false,
             dismissOnBackPress = true,
             dismissOnClickOutside = false,
         ),
     ) {
-        OmpDialogSystemBars()
-        BoxWithConstraints(Modifier.fillMaxSize()) {
+        OmpDialogSystemBars(edgeToEdgeSheet = true)
+        // This dialog owns its insets independently of the activity. Union the
+        // keyboard and safe area so navigation space is never counted twice.
+        BoxWithConstraints(
+            Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.ime)),
+        ) {
             val sheetHeight = maxHeight * 0.94f
             Box(
                 Modifier
@@ -137,15 +146,21 @@ fun OmpModalSheet(
             Surface(
                 modifier = modifier
                     .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .then(if (fullHeight) Modifier.height(sheetHeight) else Modifier.heightIn(max = sheetHeight)),
+                    .fillMaxWidth(),
                 shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
                 color = containerColor,
                 contentColor = contentColor,
                 tonalElevation = 0.dp,
                 shadowElevation = 6.dp,
             ) {
-                Column(Modifier.fillMaxWidth()) {
+                // Constrain the measuring Column itself: nested weighted bodies must
+                // divide the available viewport, not depend on Surface propagation.
+                Column(
+                    Modifier.fillMaxWidth().then(
+                        if (fullHeight) Modifier.height(sheetHeight)
+                        else Modifier.heightIn(max = sheetHeight),
+                    ),
+                ) {
                     dragHandle?.invoke()
                     content()
                 }
@@ -156,7 +171,7 @@ fun OmpModalSheet(
 
 /** Sheets and dialogs own separate windows; changing the activity window is insufficient. */
 @Composable
-internal fun OmpDialogSystemBars() {
+internal fun OmpDialogSystemBars(edgeToEdgeSheet: Boolean = false) {
     val view = LocalView.current
     val dark = OmpColors.dark
     SideEffect {
@@ -167,6 +182,21 @@ internal fun OmpDialogSystemBars() {
             parent = parent.parent
         }
         window?.let {
+            if (edgeToEdgeSheet) {
+                // Floating dialogs otherwise fit their window to system bars even
+                // when Compose measures against the full-screen configuration.
+                it.addFlags(android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN)
+                val attributes = it.attributes
+                if (android.os.Build.VERSION.SDK_INT >= 30) {
+                    attributes.setFitInsetsTypes(0)
+                    attributes.layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                } else if (android.os.Build.VERSION.SDK_INT >= 28) {
+                    attributes.layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+                it.attributes = attributes
+                WindowCompat.setDecorFitsSystemWindows(it, false)
+            }
+            it.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
             val controller = WindowCompat.getInsetsController(it, view)
             controller.isAppearanceLightStatusBars = !dark
             controller.isAppearanceLightNavigationBars = !dark

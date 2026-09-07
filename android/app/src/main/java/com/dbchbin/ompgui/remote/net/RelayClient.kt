@@ -416,12 +416,16 @@ class RelayClient private constructor(
         requestScope.launch { sendPrompt(text) }
     }
 
-    suspend fun sendPrompt(text: String, images: List<AttachmentSource> = emptyList()): Boolean =
+    suspend fun sendPrompt(
+        text: String,
+        images: List<AttachmentSource> = emptyList(),
+        commandType: String = "prompt",
+    ): Boolean =
         withContext(Dispatchers.Main.immediate) {
             val session = openedSessionId ?: return@withContext false
             val generation = sessionGeneration
             val originalDraft = _ui.value.draft
-            if (promptSending || _ui.value.running) return@withContext false
+            if (promptSending || (commandType == "prompt" && _ui.value.running)) return@withContext false
             val trimmed = text.trim()
             if (trimmed.isEmpty() && images.isEmpty()) return@withContext false
             val staged = mutableListOf<String>()
@@ -433,6 +437,9 @@ class RelayClient private constructor(
             }
             promptSending = true
             try {
+                require(commandType == "prompt" || commandType == "steer" || commandType == "follow_up") {
+                    "Unsupported attachment command: $commandType"
+                }
                 checkSession()
                 require(images.size <= AttachmentTransfer.MAX_PER_KIND) { "At most 10 images are allowed" }
                 val outgoing = when (val expansion = expandWebSlashCommand(trimmed)) {
@@ -453,7 +460,7 @@ class RelayClient private constructor(
                 clearUiErrors(setOf(RelayUiErrorKind.Request, RelayUiErrorKind.Session))
                 _ui.update { it.copy(error = null) }
                 request("sessions", "command", JSONObject().put("id", session).put("command",
-                    JSONObject().put("type", "prompt").put("message", outgoing).put("attachmentIds", org.json.JSONArray(staged))))
+                    JSONObject().put("type", commandType).put("message", outgoing).put("attachmentIds", org.json.JSONArray(staged))))
                 checkSession()
                 accepted = true
                 clearUiErrors(setOf(RelayUiErrorKind.Request, RelayUiErrorKind.Session))

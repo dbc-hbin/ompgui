@@ -143,7 +143,11 @@ class RemoteViewModel(
 
     fun sendPrompt() = client().sendPrompt()
 
-    suspend fun sendPrompt(text: String, images: List<AttachmentSource> = emptyList()): Boolean = client().sendPrompt(text, images)
+    suspend fun sendPrompt(
+        text: String,
+        images: List<AttachmentSource> = emptyList(),
+        commandType: String = "prompt",
+    ): Boolean = client().sendPrompt(text, images, commandType)
 
     val usage: StateFlow<JSONObject?> get() = client().usage
 
