@@ -43,7 +43,7 @@ npm install -g ompgui
 ompgui
 ```
 
-Update a global installation with `ompgui update`.
+Update a global installation with `ompgui update`. On macOS, a running managed background service belonging to this installation is fully stopped before updating, then restarted; browser and mobile clients briefly disconnect. A stopped service stays stopped, and an uninstalled service is not installed. Service settings, including authentication, relay, and login auto-start, are retained. If installation or version verification fails after stopping the service, the updater attempts to start it again using the installation still available; this is recovery, not a package rollback, and recovery can fail.
 
 Then open [http://127.0.0.1:30177](http://127.0.0.1:30177). The CLI will try to open the browser automatically after the server is ready. ompgui listens on `127.0.0.1` by default.
 

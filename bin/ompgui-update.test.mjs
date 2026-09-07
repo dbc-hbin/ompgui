@@ -1,124 +1,120 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createRequire } from "node:module";
-
 const require = createRequire(import.meta.url);
-const {
-  detectInstallMethod,
-  getInstallCommand,
-  updateOmpGui,
-} = require("./ompgui-update");
-const { parseLaunchOptions } = require("./ompgui-options");
+const { detectInstallMethod, getInstallCommand, updateOmpGui } = require("./ompgui-update");
 
-test("parses update as a launcher command", () => {
-  const options = parseLaunchOptions(["update"], {});
-  assert.equal(options.command, "update");
-  assert.deepEqual(options.extraPositionals, []);
-});
-
-test("detects Bun global installs and otherwise uses npm", () => {
-  assert.equal(
-    detectInstallMethod("/Users/test/.bun/install/global/node_modules/ompgui", { HOME: "/Users/test" }, "/Users/test"),
-    "bun",
-  );
-  assert.equal(
-    detectInstallMethod("C:\\Users\\test\\node_modules\\ompgui", { USERPROFILE: "C:\\Users\\test" }, "C:\\Users\\test", "win32"),
-    "bun",
-  );
-  assert.equal(
-    detectInstallMethod("C:\\Users\\Alice\\node_modules\\ompgui", { USERPROFILE: "C:\\USERS\\ALICE" }, "C:\\USERS\\ALICE", "win32"),
-    "bun",
-  );
-  assert.equal(detectInstallMethod("/usr/local/lib/node_modules/ompgui", { HOME: "/Users/test" }, "/Users/test"), "npm");
-});
-
-test("builds shell-free global install commands", () => {
-  assert.deepEqual(getInstallCommand("npm", "darwin"), {
-    command: "npm",
-    args: ["install", "--global", "ompgui@latest"],
-  });
-  assert.deepEqual(getInstallCommand("bun", "win32"), {
-    command: "bun.exe",
-    args: ["add", "--global", "ompgui@latest"],
-  });
-  assert.deepEqual(getInstallCommand("npm", "win32", "C:\\nodejs\\node.exe", () => "C:\\nodejs\\node_modules\\npm\\bin\\npm-cli.js"), {
-    command: "C:\\nodejs\\node.exe",
-    args: ["C:\\nodejs\\node_modules\\npm\\bin\\npm-cli.js", "install", "--global", "ompgui@latest"],
-  });
-});
-
-test("updates with the owning package manager and reports the installed version", async () => {
-  const packageDir = await mkdtemp(join(tmpdir(), "ompgui-update-"));
-  const packagePath = join(packageDir, "package.json");
-  await writeFile(packagePath, JSON.stringify({ name: "ompgui", version: "0.5.7" }));
-  const calls = [];
+async function fixture(t) {
+  const root = await mkdtemp(join(tmpdir(), "ompgui-update-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const packageDir = join(root, "node_modules", "ompgui");
+  await mkdir(packageDir, { recursive: true });
+  const version = (value) => writeFile(join(packageDir, "package.json"), JSON.stringify({ name: "ompgui", version: value }));
+  await version("0.7.1");
+  const events = [];
+  let running = true;
   let output = "";
+  let clock = 0;
+  const snapshot = { hostname: "127.0.0.1", port: "30177", verify() {} };
+  const serviceManager = {
+    updateSnapshot: () => snapshot,
+    execute: async (action) => { events.push(action); running = action === "start"; return { running }; },
+    status: () => ({ running }),
+  };
+  const options = { packageDir, platform: "darwin", serviceManager, install: async () => { events.push("install"); await version("0.7.2"); }, ready: async () => { events.push("ready"); return true; }, now: () => clock, pause: async (ms) => { clock += ms; }, readinessTimeout: 300, stdout: { write: (value) => { output += value; } } };
+  return { root, version, events, snapshot, serviceManager, options, output: () => output };
+}
 
-  try {
-    const result = await updateOmpGui({
-      packageDir,
-      env: { HOME: "/Users/test" },
-      homeDir: "/Users/test",
-      install: async (command, args, env) => {
-        calls.push({ command, args, env });
-        const packageJson = JSON.parse(await readFile(packagePath, "utf8"));
-        packageJson.version = "0.5.8";
-        await writeFile(packagePath, JSON.stringify(packageJson));
-      },
-      stdout: { write: (chunk) => { output += chunk; } },
-    });
-
-    assert.deepEqual(calls, [{
-      command: "npm",
-      args: ["install", "--global", "ompgui@latest"],
-      env: { HOME: "/Users/test" },
-    }]);
-    assert.equal(result.beforeVersion, "0.5.7");
-    assert.equal(result.afterVersion, "0.5.8");
-    assert.match(output, /Updating ompgui v0\.5\.7 with npm/);
-    assert.match(output, /Updated ompgui v0\.5\.7 to v0\.5\.8/);
-  } finally {
-    await rm(packageDir, { recursive: true, force: true });
-  }
+test("targets the executing package rather than the PATH npm prefix", () => {
+  assert.deepEqual(getInstallCommand("npm", "darwin", undefined, undefined, "/opt/custom/lib/node_modules/ompgui").args, ["install", "--global", "--prefix", "/opt/custom", "ompgui@latest"]);
+  assert.deepEqual(getInstallCommand("npm", "linux", undefined, undefined, "/srv/app/node_modules/ompgui").args, ["install", "--no-save", "--prefix", "/srv/app", "ompgui@latest"]);
+  assert.deepEqual(getInstallCommand("npm", "win32", "C:\\node\\node.exe", () => "C:\\node\\npm-cli.js", "D:\\npm\\node_modules\\ompgui"), { command: "C:\\node\\node.exe", args: ["C:\\node\\npm-cli.js", "install", "--global", "--prefix", "D:\\npm", "ompgui@latest"] });
+  assert.equal(detectInstallMethod("/home/me/.bun/install/global/node_modules/ompgui", {}, "/home/me"), "bun");
+  assert.deepEqual(getInstallCommand("bun", "linux", undefined, undefined, "/home/me/.bun/install/global/node_modules/ompgui").args, ["add", "--global", "--global-dir", "/home/me/.bun/install/global", "--global-bin-dir", "/home/me/.bun/bin", "ompgui@latest"]);
 });
 
-test("reports an unchanged version as already current", async () => {
-  const packageDir = await mkdtemp(join(tmpdir(), "ompgui-update-"));
-  await writeFile(join(packageDir, "package.json"), JSON.stringify({ name: "ompgui", version: "0.5.7" }));
-  let output = "";
-
-  try {
-    await updateOmpGui({
-      packageDir,
-      install: async () => {},
-      stdout: { write: (chunk) => { output += chunk; } },
-    });
-    assert.match(output, /ompgui v0\.5\.7 is already up to date/);
-  } finally {
-    await rm(packageDir, { recursive: true, force: true });
-  }
+test("awaits stop before install and readiness before success", async (t) => {
+  const f = await fixture(t);
+  const stopped = Promise.withResolvers();
+  f.serviceManager.execute = async (action) => { f.events.push(action); if (action === "stop") await stopped.promise; return {}; };
+  const updating = updateOmpGui(f.options);
+  await Promise.resolve();
+  assert.deepEqual(f.events, ["stop"]);
+  stopped.resolve();
+  const result = await updating;
+  assert.deepEqual(f.events, ["stop", "install", "start", "ready"]);
+  assert.equal(result.afterVersion, "0.7.2");
 });
 
-test("fails when the installed package version cannot be verified", async () => {
-  const packageDir = await mkdtemp(join(tmpdir(), "ompgui-update-"));
-  const packagePath = join(packageDir, "package.json");
-  await writeFile(packagePath, JSON.stringify({ name: "ompgui", version: "0.5.7" }));
+test("stopped and uninstalled services remain unchanged", async (t) => {
+  const f = await fixture(t);
+  f.serviceManager.updateSnapshot = () => null;
+  await updateOmpGui(f.options);
+  assert.deepEqual(f.events, ["install"]);
+});
 
-  try {
-    await assert.rejects(
-      updateOmpGui({
-        packageDir,
-        install: async () => {
-          await rm(packagePath);
-        },
-        stdout: { write: () => {} },
-      }),
-      /could not be verified/,
-    );
-  } finally {
-    await rm(packageDir, { recursive: true, force: true });
-  }
+test("unsupported platforms do not inspect or operate a service", async (t) => {
+  const f = await fixture(t);
+  f.serviceManager.updateSnapshot = () => { throw new Error("must not inspect"); };
+  await updateOmpGui({ ...f.options, platform: "linux" });
+  assert.deepEqual(f.events, ["install"]);
+});
+
+test("ownership or layout mismatch prevents stop and installation", async (t) => {
+  const f = await fixture(t);
+  f.serviceManager.updateSnapshot = () => { throw new Error("different installation"); };
+  await assert.rejects(updateOmpGui(f.options), /different installation/);
+  await assert.rejects(updateOmpGui({ ...f.options, packageDir: f.root }), /installation layout/);
+  assert.deepEqual(f.events, []);
+});
+
+test("installer failure restarts available installation and preserves original error", async (t) => {
+  const f = await fixture(t);
+  const failure = new Error("installer failed");
+  f.options.install = async () => { f.events.push("install"); throw failure; };
+  await assert.rejects(updateOmpGui(f.options), (error) => error === failure);
+  assert.deepEqual(f.events, ["stop", "install", "start", "ready"]);
+  assert.match(f.output(), /no rollback was performed/);
+});
+
+test("invalid version triggers recovery and reports both failures", async (t) => {
+  const f = await fixture(t);
+  f.options.install = async () => { await f.version("invalid"); };
+  const failure = new Error("launcher unavailable");
+  f.serviceManager.execute = async (action) => { if (action === "start") throw failure; return {}; };
+  await assert.rejects(updateOmpGui(f.options), (error) => error instanceof AggregateError && /could not be verified/.test(error.errors[0].message) && error.errors[1] === failure);
+});
+
+test("unchanged version still restarts running service", async (t) => {
+  const f = await fixture(t);
+  f.options.install = async () => { f.events.push("install"); };
+  await updateOmpGui(f.options);
+  assert.deepEqual(f.events, ["stop", "install", "start", "ready"]);
+  assert.match(f.output(), /already up to date/);
+});
+
+test("startup snapshot must remain intact before restart", async (t) => {
+  const f = await fixture(t);
+  let changed = false;
+  f.snapshot.verify = () => { if (changed) throw new Error("startup configuration changed"); };
+  f.options.install = async () => { changed = true; await f.version("0.7.2"); };
+  await assert.rejects(updateOmpGui(f.options), /startup configuration changed/);
+  assert.deepEqual(f.events, ["stop"]);
+});
+
+test("readiness deadline fails without claiming success", async (t) => {
+  const f = await fixture(t);
+  f.options.ready = async () => false;
+  await assert.rejects(updateOmpGui(f.options), /did not become ready/);
+  assert.doesNotMatch(f.output(), /service is ready|Updated ompgui/);
+});
+
+test("stop failure never replaces live files", async (t) => {
+  const f = await fixture(t);
+  f.serviceManager.execute = async () => { throw new Error("still stopping"); };
+  await assert.rejects(updateOmpGui(f.options), /still stopping/);
+  assert.deepEqual(f.events, []);
 });

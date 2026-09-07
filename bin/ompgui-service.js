@@ -14,7 +14,9 @@ function plistValue(value) {
   if (value && typeof value === "object") return `<dict>${Object.entries(value).map(([key, entry]) => `<key>${escapeXml(key)}</key>${plistValue(entry)}`).join("")}</dict>`;
   return `<string>${escapeXml(value)}</string>`;
 }
-function createServiceManager({ now = Date.now, pause = (milliseconds) => Atomics.wait(POLL_WAIT, 0, 0, milliseconds), label = LABEL, platform = process.platform, home = os.homedir(), uid = process.getuid?.(), env = process.env, execPath = process.execPath, cliPath = path.join(__dirname, "ompgui.js"), portAvailable = (port, hostname) => {
+function createServiceManager({ processAlive = (pid) => {
+  try { process.kill(pid, 0); return true; } catch (error) { if (error.code === "ESRCH") return false; throw error; }
+}, now = Date.now, pause = (milliseconds) => Atomics.wait(POLL_WAIT, 0, 0, milliseconds), label = LABEL, platform = process.platform, home = os.homedir(), uid = process.getuid?.(), env = process.env, execPath = process.execPath, cliPath = path.join(__dirname, "ompgui.js"), portAvailable = (port, hostname) => {
   const probe = spawnSync(process.execPath, [__filename, "--check-port", String(port), hostname], { encoding: "utf8", timeout: 5000 });
   if (probe.status === 0) return true;
   if (probe.status === 2) return false;
@@ -72,10 +74,10 @@ function createServiceManager({ now = Date.now, pause = (milliseconds) => Atomic
     const disabled = command(["print-disabled", domain]);
     const explicitlyDisabled = new RegExp(`"${label.replaceAll(".", "\\.")}"\\s*=>\\s*(?:true|disabled)\\b`).test(disabled);
     state.autoStart = Boolean(config && config.RunAtLoad !== false && !explicitlyDisabled);
-    return { ...state, loaded: printed !== null };
+    return { ...state, loaded: printed !== null, explicitlyDisabled };
   }
   function status() {
-    try { const state = inspect(); delete state.loaded; return state; }
+    try { const state = inspect(); delete state.loaded; delete state.explicitlyDisabled; return state; }
     catch (error) { return { supported: platform === "darwin", installed: fs.existsSync(plistPath), running: false, autoStart: false, label, pid: null, logPath: null, error: error.message }; }
   }
   function validate(action) {
@@ -125,9 +127,14 @@ function createServiceManager({ now = Date.now, pause = (milliseconds) => Atomic
     if (["stop", "uninstall"].includes(action)) {
       if (before.loaded) {
         command(["bootout", target]);
-        const deadline = now() + 5000;
+        // The launcher allows 5 seconds before forcing its Next child to exit.
+        const deadline = now() + 10000;
         while (command(["print", target], true) !== null) {
           if (now() >= deadline) throw new Error("Service is still stopping. Configuration was preserved; wait, check ompgui status, and retry the action.");
+          pause(100);
+        }
+        while (before.pid !== null && processAlive(before.pid)) {
+          if (now() >= deadline) throw new Error("Service process is still exiting. Configuration was preserved; wait, check ompgui status, and retry the action.");
           pause(100);
         }
       }
@@ -136,7 +143,7 @@ function createServiceManager({ now = Date.now, pause = (milliseconds) => Atomic
       if (!before.installed && action !== "install") throw new Error("Service is not installed. Run ompgui service install first.");
       if (action === "install") command(["enable", target]);
       if (!before.loaded) {
-        const restoreDisabled = action !== "install" && !before.autoStart;
+        const restoreDisabled = action !== "install" && before.explicitlyDisabled;
         if (restoreDisabled) command(["enable", target]);
         try {
           command(["bootstrap", domain, plistPath]);
@@ -148,7 +155,24 @@ function createServiceManager({ now = Date.now, pause = (milliseconds) => Atomic
     }
     return status();
   }
-  return { status, execute, validate, plistPath };
+  function updateSnapshot(packageDir) {
+    if (platform !== "darwin") return null;
+    const before = inspect();
+    if (!before.installed || !before.running) return null;
+    const config = readInstalled();
+    const packagePath = path.resolve(path.dirname(fs.realpathSync(config.ProgramArguments[1])), "..");
+    if (packagePath !== fs.realpathSync(packageDir)) throw new Error("Running ompgui service belongs to another installation; update that installation instead.");
+    const contents = fs.readFileSync(plistPath);
+    const launch = require("./ompgui-options").parseLaunchOptions(config.ProgramArguments.slice(2), config.EnvironmentVariables || {});
+    return {
+      packagePath, port: launch.port, hostname: launch.hostname,
+      verify() {
+        const current = inspect();
+        if (!current.installed || !fs.readFileSync(plistPath).equals(contents) || current.explicitlyDisabled !== before.explicitlyDisabled) throw new Error("Service configuration changed during update; refusing automatic restart.");
+      },
+    };
+  }
+  return { status, execute, validate, updateSnapshot, plistPath };
 }
 async function runServiceCli(options) {
   const action = options.command === "service" ? options.extraPositionals[0] || "repair" : options.command;

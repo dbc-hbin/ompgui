@@ -7,7 +7,7 @@ import test from "node:test";
 const require = createRequire(import.meta.url);
 const { createServiceManager, LABEL } = require("./ompgui-service");
 
-function fixture(t, { installed = true, loaded = true, disabled = false, stoppingPolls = 0, portAvailable = () => true } = {}) {
+function fixture(t, { installed = true, loaded = true, disabled = false, stoppingPolls = 0, processAlive = () => false, portAvailable = () => true } = {}) {
   let running = loaded;
   let stopping = false;
   let time = 0;
@@ -44,10 +44,10 @@ function fixture(t, { installed = true, loaded = true, disabled = false, stoppin
     if (args[0] === "enable") disabled = false;
     return { status: 0, stdout: "" };
   };
-  manager = createServiceManager({ now: () => time, pause: (milliseconds) => { time += milliseconds; }, platform: "darwin", home, cliPath: config.ProgramArguments[1], run, portAvailable, env: config.EnvironmentVariables });
+  manager = createServiceManager({ now: () => time, pause: (milliseconds) => { time += milliseconds; }, platform: "darwin", home, cliPath: config.ProgramArguments[1], run, portAvailable, processAlive, env: config.EnvironmentVariables });
   mkdirSync(join(home, "Library", "LaunchAgents"), { recursive: true });
   if (installed) writeFileSync(manager.plistPath, "original plist including secrets", { mode: 0o600 });
-  return { manager, config, calls, fail: (value) => { failure = value; }, source: (value) => { source = value; } };
+  return { manager, config, calls, packageDir: pkg, fail: (value) => { failure = value; }, source: (value) => { source = value; } };
 }
 
 test("stop retains login registration and secrets; start restores runtime", (t) => {
@@ -114,6 +114,43 @@ test("unload timeout preserves configuration and reports retry instructions", (t
   assert.throws(() => manager.execute("uninstall"), /still stopping.*Configuration was preserved.*retry/);
   assert.deepEqual(readFileSync(manager.plistPath), original);
   assert.equal(manager.status().pid, null);
+});
+
+test("stop waits for launcher PID exit after registration disappears", (t) => {
+  let probes = 0;
+  let exited = false;
+  const { manager } = fixture(t, { processAlive: (pid) => { assert.equal(pid, 4242); exited = probes++ >= 3; return !exited; } });
+  manager.execute("stop");
+  assert.equal(exited, true, "stop must not return while the original launcher still exists");
+});
+
+test("a stuck launcher prevents uninstall from deleting configuration", (t) => {
+  const { manager } = fixture(t, { processAlive: () => true });
+  assert.throws(() => manager.execute("uninstall"), /process is still exiting/);
+  assert.equal(existsSync(manager.plistPath), true);
+});
+
+test("updater snapshots bind exact package and endpoint without exposing credentials", (t) => {
+  const { manager, config, packageDir } = fixture(t, { disabled: true });
+  config.ProgramArguments.push("--port", "32123", "--hostname", "::1");
+  const snapshot = manager.updateSnapshot(packageDir);
+  assert.equal(snapshot.port, "32123");
+  assert.equal(snapshot.hostname, "::1");
+  assert.doesNotMatch(JSON.stringify(snapshot), /secret|private\.example/);
+  assert.throws(() => manager.updateSnapshot(tmpdir()), /another installation/);
+  manager.execute("stop");
+  snapshot.verify();
+  assert.equal(manager.updateSnapshot(packageDir), null);
+  manager.execute("enable");
+  assert.throws(() => snapshot.verify(), /configuration changed/);
+});
+
+test("updater refuses changed preserved plist before automatic restart", (t) => {
+  const { manager, packageDir } = fixture(t);
+  const snapshot = manager.updateSnapshot(packageDir);
+  manager.execute("stop");
+  writeFileSync(manager.plistPath, "changed by user");
+  assert.throws(() => snapshot.verify(), /configuration changed/);
 });
 
 test("foreign plist and loaded service source are never mutated", (t) => {
