@@ -1,4 +1,8 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.dbchbin.ompgui.remote.ui
+
+import androidx.compose.foundation.layout.FlowRow
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
@@ -449,16 +453,16 @@ private fun UsageProviderCard(
     ) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             // Provider header with name and capacity chips
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     formatProviderName(provider),
                     style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 // Capacity chips
                 val capacity = data?.optJSONObject("capacity")?.optJSONArray(provider)
                 if (capacity != null && capacity.length() > 0) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         for (index in 0 until capacity.length()) {
                             val stat = capacity.optJSONObject(index) ?: continue
                             val remaining = stat.opt("remainingAccounts")?.toString()?.toIntOrNull() ?: 0

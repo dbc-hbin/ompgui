@@ -13,7 +13,14 @@ const { MessageView, SafeMarkdownBody, TaskResultPanel, loadToolResultImages } =
 const { CodeBlock } = await jiti.import("./MermaidBlock.tsx");
 const { CHAT_COLUMN_MAX_WIDTH } = await jiti.import("../lib/chat-layout.ts");
 const { collectToolResultImages } = await jiti.import("../lib/image-attachments.ts");
+const { normalizeToolCalls } = await jiti.import("../lib/normalize.ts");
 const messageViewSource = await readFile(new URL("./MessageView.tsx", import.meta.url), "utf8");
+
+test("supported legacy assistant strings render as normal answers", () => {
+  const message = normalizeToolCalls({ role: "assistant", content: "Legacy answer remains readable" });
+  const html = renderToStaticMarkup(React.createElement(MessageView, { message }));
+  assert.match(html, /Legacy answer remains readable/);
+});
 
 test("large message content avoids the markdown pipeline until requested", () => {
   const largeMessage = "x".repeat(100_001);
@@ -76,6 +83,23 @@ test("streaming tool calls can still start expanded when the preference is disab
   assert.match(html, /<pre/);
 });
 
+
+test("collapsed tool headers summarize structured arguments without exposing payloads", () => {
+  const render = (toolName, input) => renderToStaticMarkup(React.createElement(MessageView, {
+    message: { role: "assistant", content: [{ type: "toolCall", toolCallId: "preview", toolName, input }] },
+  }));
+  const tasks = [{ agent: "scout", task: "PRIVATE_ASSIGNMENT" }, { agent: "worker", task: "PRIVATE_ASSIGNMENT" }];
+  const taskHtml = render("task", { tasks });
+  assert.match(taskHtml, /tasks: 2 items/);
+  assert.doesNotMatch(taskHtml, /\[object Object\]|PRIVATE_ASSIGNMENT/);
+  const todoHtml = render("todo", { phases: { current: { image: "PRIVATE_IMAGE" }, next: [] } });
+  assert.match(todoHtml, /phases: \{current, next\}/);
+  assert.doesNotMatch(todoHtml, /\[object Object\]|PRIVATE_IMAGE/);
+  assert.match(render("task", { tasks, i: "Delegating audit", intent: "Secondary intent" }), /Delegating audit/);
+  assert.match(render("todo", { phases: {}, intent: "Updating plan" }), /Updating plan/);
+  assert.match(render("bash", { command: "printf preview-command" }), /printf preview-command/);
+  assert.match(render("read", { path: "src/preview-path.ts" }), /src\/preview-path\.ts/);
+});
 
 test("task tool results render a per-subagent summary panel", () => {
   const html = renderToStaticMarkup(React.createElement(TaskResultPanel, {
@@ -249,6 +273,66 @@ function expandedToolCallHtml({ result, toolName = "read", sessionId } = {}) {
     toolResults: new Map([["call-1", result]]),
   }));
 }
+
+test("edit calls expose original input while pending, failed, or without a diff", () => {
+  const pending = expandedToolCallHtml({ toolName: "edit" });
+  const failed = expandedToolCallHtml({ toolName: "edit", result: {
+    role: "toolResult", toolCallId: "call-1", toolName: "edit", isError: true,
+    content: [{ type: "text", text: "Target did not match" }],
+  } });
+  const noDiff = expandedToolCallHtml({ toolName: "edit", result: {
+    role: "toolResult", toolCallId: "call-1", toolName: "edit",
+    content: [{ type: "text", text: "No changes applied" }],
+  } });
+  for (const html of [pending, failed, noDiff]) assert.match(html, /<pre[^>]*>[\s\S]*&quot;path&quot;: &quot;foo.ts&quot;/);
+  assert.match(failed, /Target did not match/);
+  assert.match(noDiff, /No changes applied/);
+});
+
+test("partial edit failure shows applied diff, error, and original input together", () => {
+  const html = expandedToolCallHtml({ toolName: "edit", result: {
+    role: "toolResult", toolCallId: "call-1", toolName: "edit", isError: true,
+    content: [{ type: "text", text: "Second replacement failed" }],
+    details: { diff: "-old value\n+applied value" },
+  } });
+  assert.match(html, /applied value/);
+  assert.match(html, /Second replacement failed/);
+  assert.match(html, /&quot;path&quot;: &quot;foo.ts&quot;/);
+});
+
+test("non-task async tools do not render subagent summaries", () => {
+  for (const toolName of ["bash", "hub"]) {
+    const html = expandedToolCallHtml({ toolName, result: {
+      role: "toolResult", toolCallId: "call-1", toolName,
+      content: [{ type: "text", text: "Process started" }],
+      details: { async: { state: "running", jobId: "ProcessJob", type: "task" } },
+    } });
+    assert.match(html, /Process started/);
+    assert.doesNotMatch(html, /Subagents|1 subagent|ProcessJob/);
+  }
+});
+
+test("native task usage costs match disk-projected costs without exposing payloads", () => {
+  const row = { id: "Worker", agent: "worker", task: "Implement", exitCode: 0 };
+  const nativeDetails = { results: [{ ...row, usage: { cost: { total: 1.25 } }, output: "PRIVATE_PAYLOAD" }] };
+  const before = structuredClone(nativeDetails);
+  const render = (details) => expandedToolCallHtml({ toolName: "task", result: {
+    role: "toolResult", toolCallId: "call-1", toolName: "task", content: [], details,
+  } });
+  const native = render(nativeDetails);
+  assert.equal(native, render({ results: [{ ...row, cost: 1.25 }] }));
+  assert.match(native, /\$1\.25/);
+  assert.doesNotMatch(native, /PRIVATE_PAYLOAD/);
+  assert.deepEqual(nativeDetails, before);
+});
+
+test("paired progressive result is replaced by final content without duplicate output", () => {
+  const partial = { role: "toolResult", toolCallId: "call-1", toolName: "read", content: [{ type: "text", text: "Progress so far" }] };
+  assert.match(expandedToolCallHtml({ result: partial }), /Progress so far/);
+  const final = expandedToolCallHtml({ result: { ...partial, content: [{ type: "text", text: "Completed output" }] } });
+  assert.doesNotMatch(final, /Progress so far/);
+  assert.equal(final.match(/Completed output/g)?.length, 1);
+});
 
 test("assistant image blocks render inline through the clickable thumbnail", () => {
   const html = renderToStaticMarkup(React.createElement(MessageView, {

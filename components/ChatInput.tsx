@@ -9,7 +9,7 @@ import {
   type SubmitDuringRunBehavior,
 } from "@/lib/composer-prefs";
 import type { BuiltinSlashCommandResult, CompactResultInfo, SlashCommandInfo } from "@/hooks/useAgentSession";
-import type { MessageQueueItem, MessageQueueSnapshot } from "@/lib/message-queue";
+import type { MessageQueueItem, MessageQueueSnapshot, QueueRecallResult } from "@/lib/message-queue";
 import type { ActiveGoal, ActivePlan } from "@/lib/web-mode-state";
 import { formatGoalElapsed } from "@/lib/web-mode-state";
 import { toast } from "@/components/ui/toast";
@@ -47,11 +47,7 @@ import {
   formatRingPercent,
 } from "@/lib/context-usage";
 
-export interface AttachedImage {
-  data: string;   // base64, no prefix
-  mimeType: string;
-  previewUrl: string; // object URL for display
-}
+import type { AttachedImage } from "@/lib/agent-session-types";
 
 export type AttachedTextFile = AttachedTextFileData;
 
@@ -64,7 +60,7 @@ interface ModelOption {
 interface Props {
   onSend: (message: string, images?: AttachedImage[]) => void;
   onAbort: () => void;
-  onPromptWithStreamingBehavior?: (message: string, behavior: "steer" | "followUp", images?: AttachedImage[]) => void;
+  onPromptWithStreamingBehavior?: (message: string, behavior: "steer" | "followUp", images?: AttachedImage[]) => Promise<boolean>;
   /** Existing-session RPC mutations stay disabled until state is ready. */
   runtimeReady?: boolean;
   isStreaming: boolean;
@@ -91,7 +87,7 @@ interface Props {
   retryInfo?: { attempt: number; maxAttempts: number; errorMessage?: string } | null;
   onAbortRetry?: () => void;
   queuedMessages?: MessageQueueSnapshot | null;
-  onRecallQueuedMessage?: (id: string) => Promise<string | null>;
+  onRecallQueuedMessage?: (id: string) => Promise<QueueRecallResult["recalled"] | null>;
   onDeleteQueuedMessage?: (id: string) => Promise<boolean>;
   onPromoteQueuedToSteer?: (id: string) => Promise<boolean>;
   queueEnqueuePending?: boolean;
@@ -498,7 +494,17 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const historyItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const fileIndexMetaRef = useRef<{ cwd: string; fetchedAt: number } | null>(null);
   const draftKeyRef = useRef(draftKey);
+  const recallOwnerRef = useRef({ draftKey, mounted: true });
+  recallOwnerRef.current.draftKey = draftKey;
+  useEffect(() => {
+    const owner = recallOwnerRef.current;
+    owner.mounted = true;
+    return () => { owner.mounted = false; };
+  }, []);
   const valueRef = useRef(value);
+  const enqueueInFlightRef = useRef(false);
+  const [enqueueInFlight, setEnqueueInFlight] = useState(false);
+  const submissionPending = queueEnqueuePending || enqueueInFlight;
   const attachedImagesRef = useRef(attachedImages);
   const attachedTextFilesRef = useRef(attachedTextFiles);
   // Bumped whenever the user clears/sends the composer: in-flight FileReader
@@ -525,6 +531,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     // Mirrors the TUI's queue restore: queued text first, then whatever
     // the user already typed, separated by a blank line.
     const combined = [text, current].filter((t) => t.trim()).join("\n\n");
+    valueRef.current = combined;
     setValue(combined);
     setAtQuery(null);
     requestAnimationFrame(() => {
@@ -701,16 +708,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, []);
 
   const processFiles = useCallback((files: File[]) => {
-    if (!runtimeReady || !runtimeReadyRef.current) return;
-    if (isStreaming) {
-      setAttachError("Attachments are disabled while the agent is running.");
-      return;
-    }
+    if (!runtimeReady || !runtimeReadyRef.current || queueEnqueuePending || enqueueInFlightRef.current) return;
     const imageFiles = files.filter((file) => file.type.startsWith("image/"));
     const otherFiles = files.filter((file) => !file.type.startsWith("image/"));
     void processImageFiles(imageFiles);
     void processTextFiles(otherFiles);
-  }, [isStreaming, processImageFiles, processTextFiles, runtimeReady]);
+  }, [processImageFiles, processTextFiles, runtimeReady, queueEnqueuePending]);
 
   const removeImage = useCallback((index: number) => {
     if (!runtimeReadyRef.current) return;
@@ -804,7 +807,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const handleSend = useCallback(async () => {
     const msg = value.trim();
     if (!msg && !attachedImages.length && !attachedTextFiles.length) return;
-    if (!runtimeReady || isStreaming) return;
+    if (!runtimeReady || isStreaming || queueEnqueuePending || enqueueInFlightRef.current) return;
     onAudioUnlock?.();
     const composedMessage = composeMessageWithTextAttachments(msg, attachedTextFiles);
     if (!attachedImages.length && !attachedTextFiles.length && msg.startsWith("/") && onBuiltinCommand) {
@@ -816,7 +819,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     }
     onSend(composedMessage, attachedImages.length ? attachedImages : undefined);
     clearInput();
-  }, [value, attachedImages, attachedTextFiles, isStreaming, runtimeReady, onBuiltinCommand, onSend, clearInput, onAudioUnlock]);
+  }, [value, attachedImages, attachedTextFiles, isStreaming, runtimeReady, queueEnqueuePending, onBuiltinCommand, onSend, clearInput, onAudioUnlock]);
 
   const slashQuery = value.startsWith("/") && !/\s/.test(value.slice(1))
     ? value.slice(1).toLowerCase()
@@ -1088,11 +1091,10 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     });
   }, []);
 
-  const sendQueued = useCallback((mode: "steer" | "followup") => {
+  const sendQueued = useCallback(async (mode: "steer" | "followup") => {
     const msg = value.trim();
-    if (!runtimeReady || queueEnqueuePending || !onPromptWithStreamingBehavior) return;
+    if (!runtimeReady || queueEnqueuePending || enqueueInFlightRef.current || !onPromptWithStreamingBehavior) return;
     if (!msg && !attachedImages.length && !attachedTextFiles.length) return;
-    if (attachedImages.length || attachedTextFiles.length) return;
     onAudioUnlock?.();
     const streamingBehavior = mode === "steer" ? "steer" : "followUp";
     const expansion = expandWebSlashCommand(msg);
@@ -1104,8 +1106,23 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       return;
     }
     // Keep action commands on omp's prompt path; expand web-only commands.
-    onPromptWithStreamingBehavior(expansion.kind === "expand" ? expansion.prompt : msg, streamingBehavior);
-    clearInput();
+    const revision = attachmentRevisionRef.current;
+    enqueueInFlightRef.current = true;
+    setEnqueueInFlight(true);
+    try {
+      const accepted = await onPromptWithStreamingBehavior(
+        composeMessageWithTextAttachments(expansion.kind === "expand" ? expansion.prompt : msg, attachedTextFiles),
+        streamingBehavior,
+        attachedImages.length ? attachedImages : undefined,
+      );
+      if (accepted && revision === attachmentRevisionRef.current
+        && valueRef.current === value
+        && attachedImagesRef.current === attachedImages
+        && attachedTextFilesRef.current === attachedTextFiles) clearInput();
+    } finally {
+      enqueueInFlightRef.current = false;
+      setEnqueueInFlight(false);
+    }
   }, [value, attachedImages, attachedTextFiles, runtimeReady, queueEnqueuePending, onPromptWithStreamingBehavior, clearInput, onAudioUnlock, t]);
 
   // ── Queued follow-up bar ────────────────────────────────────────────────
@@ -1125,11 +1142,56 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
   const handleQueuedEdit = useCallback((item: MessageQueueItem) => {
     if (item.status === "sending" || !onRecallQueuedMessage) return;
+    if (valueRef.current.trim() || attachedImagesRef.current.length || attachedTextFilesRef.current.length) {
+      if (!window.confirm(t("chatInput.queuedRecallConfirm"))) return;
+    }
+    const imageCount = item.attachments?.length ?? 0;
+    if (attachedImagesRef.current.length + pendingImageCountRef.current + imageCount > MAX_ATTACHED_IMAGES) {
+      toast.error(t("chatInput.queuedOpFailed"), t("chatInput.queuedRecallImageLimit"));
+      return;
+    }
+    const originDraftKey = draftKey;
     void runQueuedMutation(item.id, async () => {
-      const text = await onRecallQueuedMessage(item.id);
-      if (typeof text === "string" && text.length > 0) prependDraft(text);
+      pendingImageCountRef.current += imageCount;
+      try {
+        const recalled = await onRecallQueuedMessage(item.id);
+        if (!recalled) return;
+        const isCurrentComposer = recallOwnerRef.current.mounted
+          && recallOwnerRef.current.draftKey === originDraftKey;
+        const ownsDraftRefs = recallOwnerRef.current.mounted && draftKeyRef.current === originDraftKey;
+        const previous = ownsDraftRefs
+          ? { value: valueRef.current, images: attachedImagesRef.current.map(imageToDraftImage), files: attachedTextFilesRef.current.map(textFileToDraftFile) }
+          : originDraftKey ? getDraft(originDraftKey) : null;
+        if (originDraftKey) {
+          setDraft(originDraftKey, {
+            value: [recalled.text, previous?.value ?? ""].filter((text) => text.trim()).join("\n\n"),
+            images: [...(previous?.images ?? []), ...(recalled.images ?? []).map(({ data, mimeType }) => ({ data, mimeType }))],
+            files: previous?.files ?? [],
+          });
+        }
+        // The server already removed the item. Preserve it under its origin
+        // key, but never inject it into a newly selected session's composer.
+        if (!isCurrentComposer) {
+          // A key change can render before its draft-switch effect runs.
+          // Keep the outgoing refs in sync so that effect cannot overwrite
+          // the recovered draft with the pre-recall version.
+          if (ownsDraftRefs) {
+            valueRef.current = [recalled.text, previous?.value ?? ""].filter((text) => text.trim()).join("\n\n");
+            attachedImagesRef.current = [...attachedImagesRef.current, ...(recalled.images ?? []).map(draftImageToAttachedImage)];
+          }
+          return;
+        }
+        prependDraft(recalled.text);
+        if (recalled.images?.length) {
+          const restored = recalled.images.map(draftImageToAttachedImage);
+          attachedImagesRef.current = [...attachedImagesRef.current, ...restored];
+          setAttachedImages(attachedImagesRef.current);
+        }
+      } finally {
+        pendingImageCountRef.current -= imageCount;
+      }
     });
-  }, [onRecallQueuedMessage, prependDraft, runQueuedMutation]);
+  }, [draftKey, onRecallQueuedMessage, prependDraft, runQueuedMutation, t]);
 
   const handleQueuedDelete = useCallback((item: MessageQueueItem) => {
     if (item.status === "sending" || !onDeleteQueuedMessage) return;
@@ -1463,7 +1525,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     getSubmitDuringRunBehavior,
     (): SubmitDuringRunBehavior => "steer",
   );
-  const hasQueueableDraft = Boolean(value.trim()) && attachedImages.length === 0 && attachedTextFiles.length === 0;
+  const hasQueueableDraft = Boolean(value.trim() || attachedImages.length || attachedTextFiles.length);
   const mobileRunSubmitMode = resolveMobileRunSubmitMode(
     isMobile,
     isStreaming,
@@ -1556,7 +1618,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         // only hide files the app can attach (code, config, logs, ...).
         accept="*/*"
         multiple
-        disabled={isStreaming || !runtimeReady}
+        disabled={submissionPending || !runtimeReady}
         style={{ display: "none" }}
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
@@ -2297,6 +2359,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   >
                     {item.text}
                   </span>
+                  {!!item.attachments?.length && (
+                    <span style={{ color: "var(--text-muted)", flexShrink: 0 }}>
+                      {t("chatInput.queuedImages", { count: item.attachments.length })}
+                    </span>
+                  )}
                   {failed && (
                     <span
                       role="alert"
@@ -2417,7 +2484,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             <button
               className="composer-attachment ui-focus-ring"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isStreaming || !runtimeReady}
+              disabled={submissionPending || !runtimeReady}
               title={t("chatInput.attachFile")}
               aria-label={t("chatInput.attachFile")}
               data-has-attachments={attachedImages.length || attachedTextFiles.length ? "true" : undefined}
@@ -2897,8 +2964,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 type="button"
                 className="composer-queue-action composer-queue-action-steer ui-focus-ring"
                 onClick={() => sendQueued("steer")}
-                disabled={!runtimeReady || queueEnqueuePending || !value.trim() || !!attachedImages.length || !!attachedTextFiles.length}
-                title={(attachedImages.length || attachedTextFiles.length) ? t("chatInput.imagesCannotQueue") : t("chatInput.steerNowTitle")}
+                disabled={!runtimeReady || submissionPending || !hasQueueableDraft}
+                title={t("chatInput.steerNowTitle")}
                 aria-label={t("chatInput.steer")}
               >
                 <svg width="11" height="11" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
@@ -2912,8 +2979,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 type="button"
                 className="composer-queue-action composer-queue-action-followup ui-focus-ring"
                 onClick={() => sendQueued("followup")}
-                disabled={!runtimeReady || queueEnqueuePending || !value.trim() || !!attachedImages.length || !!attachedTextFiles.length}
-                title={(attachedImages.length || attachedTextFiles.length) ? t("chatInput.imagesCannotQueue") : t("chatInput.followUpTitle")}
+                disabled={!runtimeReady || submissionPending || !hasQueueableDraft}
+                title={t("chatInput.followUpTitle")}
                 aria-label={t("chatInput.followUp")}
               >
                 <svg width="11" height="11" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
@@ -2932,7 +2999,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 onClick={() => sendQueued(mobileRunSubmitMode)}
                 title={mobileRunSubmitMode === "steer" ? t("chatInput.steerNowTitle") : t("chatInput.followUpTitle")}
                 aria-label={mobileRunSubmitMode === "steer" ? t("chatInput.steer") : t("chatInput.followUp")}
-                disabled={!runtimeReady || queueEnqueuePending}
+                disabled={!runtimeReady || submissionPending}
                 data-state="run-submit"
               >
                 <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -2963,7 +3030,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 className="composer-primary-action ui-focus-ring"
                 type="button"
                 onClick={handleSend}
-                disabled={!runtimeReady || (!value.trim() && !attachedImages.length && !attachedTextFiles.length)}
+                disabled={!runtimeReady || submissionPending || (!value.trim() && !attachedImages.length && !attachedTextFiles.length)}
                 title={t("chatInput.send")}
                 aria-label={t("chatInput.send")}
                 data-state="send"

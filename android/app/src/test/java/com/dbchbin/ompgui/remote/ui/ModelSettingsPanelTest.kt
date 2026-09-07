@@ -9,6 +9,38 @@ import org.junit.Test
 
 class ModelSettingsPanelTest {
     @Test
+    fun connectivityReasonsStayDistinctAndNeverEchoUnknownCodes() {
+        val text: (Int) -> String = { id ->
+            when (id) {
+                com.dbchbin.ompgui.remote.R.string.model_connectivity_unsupported -> "Unsupported provider/API"
+                com.dbchbin.ompgui.remote.R.string.model_connectivity_credential_method -> "Unsupported credential method"
+                com.dbchbin.ompgui.remote.R.string.model_connectivity_auth_required -> "Credentials required"
+                com.dbchbin.ompgui.remote.R.string.model_connectivity_timeout -> "Timed out"
+                com.dbchbin.ompgui.remote.R.string.model_connectivity_model_mismatch -> "Wrong model"
+                com.dbchbin.ompgui.remote.R.string.model_connectivity_provider_failed -> "Provider failure"
+                com.dbchbin.ompgui.remote.R.string.model_connectivity_confirmation_required -> "Confirm request"
+                com.dbchbin.ompgui.remote.R.string.model_connectivity_config_invalid -> "Correct configuration"
+                else -> error("Unexpected reason")
+            }
+        }
+        assertEquals("Unsupported provider/API", modelConnectivityErrorNote("connectivity_unsupported", text))
+        assertEquals("Unsupported credential method", modelConnectivityErrorNote("connectivity_credential_method_unsupported", text))
+        assertEquals("Credentials required", modelConnectivityErrorNote("connectivity_auth_required", text))
+        assertEquals("Timed out", modelConnectivityErrorNote("connectivity_timeout", text))
+        assertEquals("Wrong model", modelConnectivityErrorNote("connectivity_model_mismatch", text))
+        assertEquals("Provider failure", modelConnectivityErrorNote("connectivity_failed", text))
+        assertEquals("Confirm request", modelConnectivityErrorNote("connectivity_confirmation_required", text))
+        for (code in listOf("models_config_invalid", "provider_name_required", "provider_required", "model_required", "model_id_required")) {
+            assertEquals("Correct configuration", modelConnectivityErrorNote(code, text))
+        }
+        for (code in listOf(null, "", "private-api-key", "{\"code\":\"connectivity_timeout\"}")) {
+            assertEquals("Provider failure", modelConnectivityErrorNote(code, text))
+        }
+        assertEquals(null, modelConnectivityErrorNote("connectivity_cancelled", text))
+        assertEquals(null, modelConnectivityErrorNote("request_cancelled", text))
+    }
+
+    @Test
     fun sanitizesRolesLikeDesktopPutFilter() {
         val cleaned = sanitizeRolesForSave(
             mapOf(

@@ -6,8 +6,7 @@ import { useI18n } from "@/lib/i18n";
 import { formatCost, formatDuration, formatTokens } from "@/lib/subagent-format";
 import { MarkdownBody } from "./MarkdownBody";
 import { Dialog, DialogContent, DialogTitle, DialogClose } from "./ui/primitives";
-import type { SubagentInfo } from "@/hooks/useAgentSession";
-import type { SubagentActivityEvent, SubagentSnapshotLike } from "@/lib/subagent-types";
+import type { SubagentInfo, SubagentActivityEvent, SubagentSnapshotLike } from "@/lib/subagent-types";
 import type { AgentMessage, ToolResultMessage } from "@/lib/types";
 
 interface SubagentMessagesPage {

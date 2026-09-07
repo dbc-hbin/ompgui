@@ -3,6 +3,7 @@ import {
   resolveOmpBin,
   runOmpCli,
 } from "./omp/omp-cli";
+import { getAgentDir } from "./omp/paths";
 import type {
   ProviderWindowStat,
   UsageLimit,
@@ -223,6 +224,48 @@ interface UsageCacheDependencies {
   ttlMs: number;
 }
 
+declare global {
+  var __ompgui_shared_usage: { scope: string; state: UsageCacheState } | undefined;
+}
+
+export function usageErrorCode(status: number): string {
+  switch (status) {
+    case 503:
+      return "omp_not_found";
+    case 501:
+      return "usage_not_supported";
+    default:
+      return "usage_fetch_failed";
+  }
+}
+
+/** Shared by REST, Relay system requests, and the legacy Relay usage frame. */
+export async function getUsage(
+  refresh = false,
+  dependencies?: Omit<UsageCacheDependencies, "ttlMs">,
+): Promise<UsageFetchResult> {
+  const scope = getAgentDir();
+  let shared = globalThis.__ompgui_shared_usage;
+  if (!shared || shared.scope !== scope) {
+    shared = { scope, state: {} };
+    globalThis.__ompgui_shared_usage = shared;
+  }
+  // Pin the environment before invalidation yields: switching profiles must not
+  // fetch the new profile into the old profile's in-flight request.
+  const env = dependencies ? undefined : { ...process.env };
+  try {
+    return await fetchCachedUsage(shared.state, refresh, {
+      ...(dependencies ?? {
+        fetch: () => fetchUsagePayload({ env }),
+        invalidate: () => runOmpCli(["usage", "invalidate"], { timeout: 15_000, env }),
+      }),
+      ttlMs: 60_000,
+    });
+  } catch (error) {
+    return { ok: false, status: 502, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export async function fetchCachedUsage(
   state: UsageCacheState,
   isRefresh: boolean,
@@ -277,6 +320,8 @@ export async function fetchCachedUsage(
       if (state.refreshFlight) return state.refreshFlight;
       const latestRefresh = state.latestRefresh;
       if (latestRefresh?.generation === currentGeneration) return latestRefresh.result;
+      // Even a rejected refresh supersedes this read; never repopulate its cache.
+      return result;
     }
     if (result.ok) state.entry = { at: now(), payload: result.payload };
     return result;
@@ -305,13 +350,15 @@ export function buildEmptyUsageResponse(
 
 export async function fetchUsagePayload(
   opts: {
+    env?: NodeJS.ProcessEnv;
     executor?: (
       args: string[],
       o: { timeout: number },
     ) => Promise<{ stdout: string; stderr?: string }>;
   } = {},
 ): Promise<UsageFetchResult> {
-  const executor = opts.executor ?? runOmpCli;
+  const executor = opts.executor ?? ((args: string[], options: { timeout: number }) =>
+    runOmpCli(args, { ...options, env: opts.env }));
   if (!opts.executor && !resolveOmpBin()) {
     return { ok: false, status: 503, error: "omp binary not found" };
   }

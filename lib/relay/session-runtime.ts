@@ -6,10 +6,11 @@ import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { RpcCommandError } from "../omp/rpc-process";
 import { resolveOmpBin } from "../omp/omp-cli";
-import { buildSessionTree, getLeafEntryId, materializeSessionEntries } from "../omp/session-files";
+import { buildSessionTree, getLeafEntryId } from "../omp/session-files";
 import type { SessionEntry, SessionTreeNode } from "../types";
 import type { RelayAgentState, RelayBranchItem, RelayDisplayMessage, RelaySessionListItem } from "./protocol";
-import { projectRemoteReplica } from "../remote-replica";
+import { projectOnlineTranscript } from "./online-transcript";
+import type { OnlineTranscriptPage } from "./online-transcript";
 import {
   getRpcSession,
   getRunningRpcSessionIds,
@@ -75,7 +76,7 @@ export async function listRelaySessions(): Promise<{
 }
 
 export interface RelayOpenResult {
-  snapshot: {
+  snapshot: OnlineTranscriptPage & {
     title?: string;
     cwd?: string;
     leafId: string | null;
@@ -89,6 +90,37 @@ export async function openRelaySession(
   sessionId: string,
   emit: (event: AgentEvent) => void,
 ): Promise<RelayOpenResult> {
+  const deliver = (event: AgentEvent) => {
+    if (event.type === "tool_execution_update" || event.type === "tool_execution_end") {
+      const raw = event.result ?? event.partialResult;
+      if (typeof raw === "object" && raw !== null) {
+        const projected = projectOnlineTranscript([{ ...raw, role: "toolResult", toolCallId: event.toolCallId, toolName: event.toolName }]).messages[0];
+        if (projected) {
+          const pending = projected.truncated === true || (projected.deferredImages?.count ?? 0) > 0;
+          const result: Record<string, unknown> = { ...projected, contentPending: pending };
+          // A transient result is not yet an addressable transcript entry. The
+          // final message_end supplies the real content hash/reference.
+          delete result.entryId;
+          if (projected.deferredImages) result.deferredImages = { count: projected.deferredImages.count };
+          const bounded: AgentEvent = { ...event, contentPending: pending };
+          delete bounded.result;
+          delete bounded.partialResult;
+          bounded[event.type === "tool_execution_end" ? "result" : "partialResult"] = result;
+          emit(bounded);
+          return;
+        }
+      }
+    }
+    if ((event.type === "message_start" || event.type === "message_end") && event.message) {
+      const page = projectOnlineTranscript([event.message]);
+      const message = page.messages[0];
+      if (message) {
+        emit({ ...event, entryId: message.entryId, message });
+        return;
+      }
+    }
+    emit(event);
+  };
   const filePath = await resolveSessionPath(sessionId);
   if (!filePath) {
     // OMP keeps a new session in memory until its first assistant message.
@@ -100,22 +132,18 @@ export async function openRelaySession(
     if (typeof transcript !== "object" || transcript === null || !("messages" in transcript) || !Array.isArray(transcript.messages)) {
       throw new RelaySessionError("rpc_command_failed", "Live session transcript is unavailable");
     }
-    const projected = projectRemoteReplica({
-      origin: "https://ompgui.relay",
-      session: { id: sessionId, cwd: live.cwd },
-      messages: transcript.messages,
-    });
+    const projected = projectOnlineTranscript(transcript.messages);
     if (!live.isAlive() || getRpcSession(sessionId) !== live) throw new RelaySessionError("session_not_found", "Session not found");
     let disposed = false;
     const unsubscribe = live.onEvent((event) => {
-      if (!disposed && live.sessionId === sessionId && getRpcSession(sessionId) === live) emit(event);
+      if (!disposed && live.sessionId === sessionId && getRpcSession(sessionId) === live) deliver(event);
     });
     const unsubscribeDestroy = live.onDestroy(() => {
       if (!disposed && live.sessionId === sessionId) emit({ type: "session_closed", sessionId });
     });
     emit({ type: "connected", sessionId });
     return {
-      snapshot: { cwd: live.cwd, leafId: null, messages: projected?.session.messages ?? [], agent: { running: live.isRunning(), ready: true, state } },
+      snapshot: { cwd: live.cwd, leafId: null, ...projected, agent: { running: live.isRunning(), ready: true, state } },
       dispose: () => {
         if (disposed) return;
         disposed = true;
@@ -133,16 +161,10 @@ export async function openRelaySession(
     throw new RelaySessionError("session_file_malformed", "Session file is missing or malformed");
   }
 
-  const entries = materializeSessionEntries(document.entries, { skipToolResultImages: true });
+  const entries = document.entries;
   const leafId = getLeafEntryId(entries);
-  const context = buildSessionContext(entries, leafId, { deferThinking: true, deferToolResultImages: true });
-  const projected = projectRemoteReplica({
-    origin: "https://ompgui.relay",
-    session: { id: sessionId, title: document.header.title, cwd: document.header.cwd },
-    leafId,
-    messages: context.messages,
-  });
-  const messages = projected?.session.messages ?? [];
+  const context = buildSessionContext(entries, leafId, { deferThinking: false, deferToolResultImages: false });
+  const projected = projectOnlineTranscript(context.messages, context.entryIds);
 
   const existing = getRpcSession(sessionId);
   const ready = Boolean(existing?.isAlive());
@@ -178,7 +200,7 @@ export async function openRelaySession(
       if (disposed || session.sessionId !== sessionId) return;
       const subscribedSession = session;
       unsubscribe = subscribedSession.onEvent((event) => {
-        if (!disposed && subscribedSession.sessionId === sessionId && getRpcSession(sessionId) === subscribedSession) emit(event);
+        if (!disposed && subscribedSession.sessionId === sessionId && getRpcSession(sessionId) === subscribedSession) deliver(event);
       });
       unsubscribeDestroy = subscribedSession.onDestroy(() => {
         if (disposed || subscribedSession.sessionId !== sessionId) return;
@@ -200,7 +222,7 @@ export async function openRelaySession(
       ...(document.header.title ? { title: document.header.title } : {}),
       ...(document.header.cwd ? { cwd: document.header.cwd } : {}),
       leafId,
-      messages,
+      ...projected,
       agent,
     },
     dispose,
@@ -214,6 +236,9 @@ export async function sendRelayCommand(
 ): Promise<unknown> {
   const existing = getRpcSession(sessionId);
   if (existing?.isAlive()) return existing.send(prepareCommand ? prepareCommand() : command);
+  if (command.type === "extension_ui_response") {
+    throw new RelaySessionError("dialog_not_pending", "This dialog is no longer pending in this session");
+  }
 
   const filePath = await resolveSessionPath(sessionId);
   if (!filePath) throw new RelaySessionError("session_not_found", "Session not found");
@@ -284,7 +309,7 @@ async function loadRelaySessionEntries(sessionId: string) {
   if (!document.header) {
     throw new RelaySessionError("session_file_malformed", "Session file is missing or malformed");
   }
-  const entries = materializeSessionEntries(document.entries, { skipToolResultImages: true });
+  const entries = document.entries;
   return { filePath, document, entries };
 }
 
@@ -299,7 +324,7 @@ export async function listRelayBranches(sessionId: string): Promise<{
   return { id: sessionId, leafId: getLeafEntryId(entries), branches };
 }
 
-export async function snapshotRelayLeaf(sessionId: string, leafId: string): Promise<{
+export async function snapshotRelayLeaf(sessionId: string, leafId: string): Promise<OnlineTranscriptPage & {
   title?: string;
   cwd?: string;
   leafId: string | null;
@@ -309,19 +334,14 @@ export async function snapshotRelayLeaf(sessionId: string, leafId: string): Prom
   const { document, entries } = await loadRelaySessionEntries(sessionId);
   const ids = new Set(entries.map((entry) => entry.id));
   if (!ids.has(leafId)) throw new RelaySessionError("unknown_leaf", "Unknown conversation branch");
-  const context = buildSessionContext(entries, leafId, { deferThinking: true, deferToolResultImages: true });
-  const projected = projectRemoteReplica({
-    origin: "https://ompgui.relay",
-    session: { id: sessionId, title: document.header?.title, cwd: document.header?.cwd },
-    leafId,
-    messages: context.messages,
-  });
+  const context = buildSessionContext(entries, leafId, { deferThinking: false, deferToolResultImages: false });
+  const projected = projectOnlineTranscript(context.messages, context.entryIds);
   const agent: RelayAgentState = { running: false, ready: false };
   return {
     ...(document.header?.title ? { title: document.header.title } : {}),
     ...(document.header?.cwd ? { cwd: document.header.cwd } : {}),
     leafId,
-    messages: projected?.session.messages ?? [],
+    ...projected,
     agent,
   };
 }

@@ -13,6 +13,7 @@ import { parseOmpJsonStdout, runOmpCli } from "../omp/omp-cli";
 import { runUtilityCommand } from "../omp/rpc-utility";
 import {
   deleteMcpServer,
+  McpServerConflictError,
   readDiscoveredMcpServers,
   readMcpConfig,
   redactMcpServer,
@@ -130,7 +131,13 @@ export async function listRelayPlugins(rawCwd: string): Promise<{ cwd: string; p
   const { stdout } = await runOmpCli(["plugin", "list", "--json"], { cwd, timeout: 60_000 });
   const parsed = parseOmpJsonStdout<{
     npm?: Array<{ name?: string; version?: string; enabled?: boolean }>;
-    marketplace?: Array<{ id?: string; scope?: string; enabled?: boolean; version?: string }>;
+    marketplace?: Array<{
+      id?: string;
+      scope?: string;
+      enabled?: boolean;
+      version?: string;
+      entries?: Array<{ scope?: string; enabled?: boolean; version?: string; installPath?: string }>;
+    }>;
   }>(stdout);
   const packages: RelayPluginItem[] = [];
   for (const plugin of parsed?.npm ?? []) {
@@ -145,12 +152,14 @@ export async function listRelayPlugins(rawCwd: string): Promise<{ cwd: string; p
   }
   for (const plugin of parsed?.marketplace ?? []) {
     if (!plugin.id) continue;
-    const enabled = plugin.enabled !== false;
+    const entry = plugin.entries?.[0];
+    const metadata = entry ?? plugin;
+    const enabled = metadata.enabled !== false;
     packages.push(slimPlugin(plugin.id, {
-      scope: plugin.scope === "project" ? "project" : "global",
-      status: enabled ? "loaded" : "disabled",
+      scope: (plugin.scope ?? entry?.scope) === "project" ? "project" : "global",
+      status: !enabled ? "disabled" : entry ? (entry.installPath && existsSync(entry.installPath) ? "installed" : "missing") : "loaded",
       disabled: !enabled,
-      version: plugin.version,
+      version: metadata.version,
     }));
   }
   return { cwd, packages };
@@ -289,7 +298,10 @@ export async function saveRelayMcpServer(rawCwd: string, name: string, value: un
   }
   try {
     writeMcpServer(cwd, name, server, previousName);
-  } catch {
+  } catch (error) {
+    if (error instanceof McpServerConflictError) {
+      throw new RelaySessionError("mcp_name_conflict", error.message);
+    }
     throw new RelaySessionError("mcp_write_failed", "Unable to write MCP configuration");
   }
   return { name };

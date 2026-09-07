@@ -34,7 +34,7 @@ import {
   toQueueMutationResult,
   toQueueSnapshotEvent,
 } from "./session-queue";
-import type { MessageQueueItem, QueueMutationResult } from "./message-queue";
+import type { QueueMutationResult } from "./message-queue";
 
 // ============================================================================
 // Types
@@ -561,9 +561,12 @@ export class AgentSessionWrapper {
     if (PENDING_UI_METHODS.has(method)) {
       this.forgetPendingUiRequest(id);
       const timeout = typeof event.timeout === "number" ? event.timeout : undefined;
-      if (timeout && timeout > 0) {
+      if (timeout !== undefined && Number.isFinite(timeout) && timeout > 0 && timeout <= 2_147_483_647) {
         event.expiresAt = Date.now() + timeout;
-        const timer = setTimeout(() => this.forgetPendingUiRequest(id), timeout);
+        const timer = setTimeout(() => {
+          this.forgetPendingUiRequest(id);
+          this.emit({ type: "extension_ui_request", method: "cancel", id: `expired:${id}`, targetId: id });
+        }, timeout);
         timer.unref?.();
         this.uiExpiryTimers.set(id, timer);
       }
@@ -701,8 +704,9 @@ export class AgentSessionWrapper {
         this.forgetPendingUiRequest(id);
         continue;
       }
-      listener(event);
     }
+    listener({ type: "extension_ui_pending", ids: [...this.pendingUiRequests.keys()] });
+    for (const event of this.pendingUiRequests.values()) listener(event);
     listener(toQueueSnapshotEvent(this.messageQueue.getSnapshot()));
     return () => {
       const i = this.listeners.indexOf(listener);
@@ -854,6 +858,8 @@ export class AgentSessionWrapper {
     const state = await this.proc.sendCommand<RpcSessionState>({ type: "get_state" });
     this.applyIdentity(state);
     if (oldId && oldId !== this._sessionId) {
+      this.clearPendingUiRequests();
+      this.emit({ type: "extension_ui_pending", ids: [] });
       this.discardQueue(QUEUE_DISCARDED_ON_SWITCH);
       this.onIdentityChangeCallback?.(oldId, this._sessionId);
     }
@@ -1122,9 +1128,36 @@ export class AgentSessionWrapper {
       }
 
       case "extension_ui_response": {
-        const { id, ...rest } = command as { id: string; [key: string]: unknown };
+        const id = command.id;
+        const pending = typeof id === "string" ? this.pendingUiRequests.get(id) : undefined;
+        if (!pending || typeof id !== "string") {
+          throw new WebRpcError("This dialog is no longer pending in this session", "dialog_not_pending");
+        }
+        if (typeof pending.expiresAt === "number" && pending.expiresAt <= Date.now()) {
+          this.forgetPendingUiRequest(id);
+          this.emit({ type: "extension_ui_request", method: "cancel", id: `expired:${id}`, targetId: id });
+          throw new WebRpcError("This dialog has expired", "dialog_not_pending");
+        }
+        let response: Record<string, unknown>;
+        if (command.cancelled === true) {
+          response = { cancelled: true, ...(command.timedOut === true ? { timedOut: true } : {}) };
+        } else if (pending.method === "confirm" || pending.method === "open_url") {
+          if (typeof command.confirmed !== "boolean") {
+            throw new WebRpcError("A boolean confirmation is required", "invalid_dialog_response");
+          }
+          response = { confirmed: command.confirmed };
+        } else {
+          if (typeof command.value !== "string" || command.value.length > 3 * 1024 * 1024) {
+            throw new WebRpcError("A dialog value of at most 3Mi characters is required", "invalid_dialog_response");
+          }
+          if (pending.method === "select" && (!Array.isArray(pending.options) || !pending.options.includes(command.value))) {
+            throw new WebRpcError("Select one of the offered options", "invalid_dialog_response");
+          }
+          response = { value: command.value };
+        }
+        this.proc.sendFrame({ type: "extension_ui_response", id, ...response });
         this.forgetPendingUiRequest(id);
-        this.proc.sendFrame({ type: "extension_ui_response", id, ...rest });
+        this.emit({ type: "extension_ui_request", method: "cancel", id: `answered:${id}`, targetId: id });
         return null;
       }
 
@@ -1205,23 +1238,30 @@ export class AgentSessionWrapper {
           if (typeof command.message !== "string") {
             throw new SessionQueueError("message is required", QUEUE_ERROR_INVALID);
           }
+          this.messageQueue.enqueue({ lane: command.lane, text: command.message, images: command.images });
           this.abortHoldsDispatch = false;
-          this.messageQueue.enqueue({ lane: command.lane, text: command.message });
           this.emitQueueSnapshot();
           return this.finishQueueCommand();
         }
         case QUEUE_COMMAND_PROMOTE: {
           if (typeof command.id !== "string") throw new SessionQueueError("id is required", QUEUE_ERROR_INVALID);
-          this.abortHoldsDispatch = false;
           this.messageQueue.promote(command.id, this.requireExpectedRevision(command));
+          this.abortHoldsDispatch = false;
           this.emitQueueSnapshot();
           return this.finishQueueCommand();
         }
         case QUEUE_COMMAND_RECALL: {
           if (typeof command.id !== "string") throw new SessionQueueError("id is required", QUEUE_ERROR_INVALID);
-          const { item } = this.messageQueue.recall(command.id, this.requireExpectedRevision(command));
+          const maxResponseBytes = command.__relayRecallMaxBytes;
+          if (maxResponseBytes !== undefined && typeof maxResponseBytes !== "number") {
+            throw new SessionQueueError("Invalid recall response capacity", QUEUE_ERROR_INVALID);
+          }
+          const { item } = this.messageQueue.recall(command.id, this.requireExpectedRevision(command), maxResponseBytes);
           this.emitQueueSnapshot();
-          return this.finishQueueCommand(item);
+          // Capture the bounded response before yielding to any concurrent enqueue.
+          const result = toQueueMutationResult(this.queueSnapshotForClient(), item);
+          this.scheduleQueueDispatch();
+          return Promise.resolve(result);
         }
         case QUEUE_COMMAND_DELETE: {
           if (typeof command.id !== "string") throw new SessionQueueError("id is required", QUEUE_ERROR_INVALID);
@@ -1247,9 +1287,9 @@ export class AgentSessionWrapper {
     return command.expectedRevision;
   }
 
-  private async finishQueueCommand(recalled?: MessageQueueItem): Promise<QueueMutationResult> {
+  private async finishQueueCommand(): Promise<QueueMutationResult> {
     await this.drainQueueDispatch();
-    return toQueueMutationResult(this.queueSnapshotForClient(), recalled);
+    return toQueueMutationResult(this.queueSnapshotForClient());
   }
 
   private queueSnapshotForClient() {
@@ -1387,6 +1427,7 @@ export class AgentSessionWrapper {
     const epoch = this.queueEpoch;
     const proc = this.proc;
     const sessionId = this._sessionId;
+    const images = this.messageQueue.getImages(item.id);
     this.messageQueue.markSending(item.id);
     this.emitQueueSnapshot();
     if (!streamingBehavior) {
@@ -1398,6 +1439,7 @@ export class AgentSessionWrapper {
         {
           type: "prompt",
           message: item.text,
+          ...(images ? { images } : {}),
           ...(streamingBehavior ? { streamingBehavior } : {}),
         },
         QUEUE_FORWARD_TIMEOUT_MS,

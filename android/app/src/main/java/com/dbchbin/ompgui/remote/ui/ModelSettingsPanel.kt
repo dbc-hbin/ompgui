@@ -9,9 +9,15 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.dbchbin.ompgui.remote.R
+import kotlinx.coroutines.CancellationException
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.size
@@ -81,7 +87,7 @@ import org.json.JSONObject
  * Server-disabled operations (API-key store/remove, logout) surface the exact
  * 501 capability codes plus terminal guidance instead of fake success.
  */
-enum class ModelSettingsSection { All, Defaults, Providers }
+enum class ModelSettingsSection { All, Defaults, Roles, Providers }
 
 @Composable
 fun ModelSettingsPanel(
@@ -118,11 +124,11 @@ fun ModelSettingsPanel(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // Keep both domains composed: changing category must not drop provider
-        // drafts, write-only credentials, or a running OAuth coroutine.
+        // Keep every section composed: changing category must not drop role or
+        // provider drafts, write-only credentials, or a running OAuth coroutine.
         val hidden = Modifier.clearAndSetSemantics { }.layout { _, _ -> layout(0, 0) { } }
         Column(
-            modifier = if (selectedSection == ModelSettingsSection.Providers) hidden else Modifier.fillMaxWidth(),
+            modifier = if (selectedSection == ModelSettingsSection.All || selectedSection == ModelSettingsSection.Defaults) Modifier.fillMaxWidth() else hidden,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             ModelCatalogSection(
@@ -132,12 +138,17 @@ fun ModelSettingsPanel(
                 error = catalogError,
                 onRefresh = ::refreshCatalog,
             )
-            ModelRolesSection(korean = korean, requester = requester, catalog = catalog)
             ModelRegistrySection(korean = korean, requester = requester, catalog = catalog)
             ModelFallbackSection(korean = korean, requester = requester, catalog = catalog)
         }
         Column(
-            modifier = if (selectedSection == ModelSettingsSection.Defaults) hidden else Modifier.fillMaxWidth(),
+            modifier = if (selectedSection == ModelSettingsSection.All || selectedSection == ModelSettingsSection.Roles) Modifier.fillMaxWidth() else hidden,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ModelRolesSection(korean = korean, requester = requester, catalog = catalog)
+        }
+        Column(
+            modifier = if (selectedSection == ModelSettingsSection.All || selectedSection == ModelSettingsSection.Providers) Modifier.fillMaxWidth() else hidden,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             ModelProvidersSection(korean = korean, requester = requester, catalog = catalog)
@@ -317,6 +328,22 @@ fun modelRequestErrorNote(error: Exception, action: String): String {
     return if (detail.isNullOrBlank()) "$action failed" else detail
 }
 
+/** Only stable codes select local text; provider messages may contain credentials. */
+internal fun modelConnectivityErrorNote(code: String?, text: (Int) -> String): String? {
+    val reason = when (code) {
+        "connectivity_cancelled", "request_cancelled" -> return null
+        "connectivity_unsupported" -> R.string.model_connectivity_unsupported
+        "connectivity_credential_method_unsupported" -> R.string.model_connectivity_credential_method
+        "connectivity_auth_required" -> R.string.model_connectivity_auth_required
+        "connectivity_timeout" -> R.string.model_connectivity_timeout
+        "connectivity_model_mismatch" -> R.string.model_connectivity_model_mismatch
+        "connectivity_confirmation_required" -> R.string.model_connectivity_confirmation_required
+        "models_config_invalid", "provider_name_required", "provider_required", "model_required", "model_id_required" -> R.string.model_connectivity_config_invalid
+        else -> R.string.model_connectivity_provider_failed
+    }
+    return text(reason)
+}
+
 fun modelSelectorLabel(selector: String, catalog: List<CatalogModel>): String {
     val match = catalog.firstOrNull { it.selector == selector }
     return if (match != null && match.name != match.id) "${match.name} ($selector)" else selector
@@ -396,12 +423,13 @@ private fun ModelCatalogSection(
         } else if (filtered.isEmpty()) {
             ModelStatusText(text = if (korean) "모델이 없습니다" else "No models")
         } else {
-            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-                filtered.forEachIndexed { index, model ->
+            LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
+                itemsIndexed(filtered, key = { _, model -> model.selector }) { index, model ->
                     if (index > 0) HorizontalDivider(color = OmpColors.Border, thickness = 1.dp)
                     ModelRow(label = model.selector, value = model.name)
                 }
                 if (matching.size > filtered.size) {
+                    item {
                     ModelStatusText(
                         text = if (korean) {
                             "${filtered.size} / ${matching.size} 표시 중"
@@ -417,6 +445,7 @@ private fun ModelCatalogSection(
                         },
                         onClick = { visibleCount += 60 },
                     )
+                    }
                 }
             }
         }
@@ -493,7 +522,7 @@ private fun ModelRolesSection(
     }
 
     ModelSectionHeader(title = if (korean) "모델 역할" else "Model roles")
-    ModelCard(disclosure = if (korean) "역할별 모델 및 추론 설정" else "Models and reasoning by role") {
+    ModelCard {
         var pickerFor by remember { mutableStateOf<String?>(null) }
         var pickerQuery by remember { mutableStateOf("") }
         Text(
@@ -544,11 +573,12 @@ private fun ModelRolesSection(
                         ModelTextField(raw, { roles = roles + (role to it) }, "provider/model[:effort]")
                         ModelSearchField(pickerQuery, { pickerQuery = it })
                         val q = pickerQuery.trim()
-                        val options = catalog.models
-                            .filter { q.isEmpty() || it.selector.contains(q, ignoreCase = true) || it.name.contains(q, ignoreCase = true) }
+                        val options = remember(catalog.models, q) {
+                            catalog.models.filter { q.isEmpty() || it.selector.contains(q, ignoreCase = true) || it.name.contains(q, ignoreCase = true) }
+                        }
                         if (options.isEmpty()) ModelStatusText(if (korean) "검색 결과가 없습니다" else "No matching models")
-                        Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-                        options.forEach { option ->
+                        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
+                        items(options, key = { it.selector }) { option ->
                             Text(
                                 text = "${option.name} (${option.selector})",
                                 fontSize = 13.sp,
@@ -722,11 +752,12 @@ private fun ModelRegistrySection(
             ModelSearchField(query, { query = it })
             val q = query.trim()
             val names = remember(catalog.models) { catalog.models.associate { it.selector to it.name } }
-            val visible = allSelectors
-                .filter { q.isEmpty() || it.contains(q, ignoreCase = true) || names[it]?.contains(q, ignoreCase = true) == true }
+            val visible = remember(allSelectors, names, q) {
+                allSelectors.filter { q.isEmpty() || it.contains(q, ignoreCase = true) || names[it]?.contains(q, ignoreCase = true) == true }
+            }
             if (visible.isEmpty()) ModelStatusText(if (korean) "검색 결과가 없습니다" else "No matching models")
-            Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-            visible.forEach { selector ->
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
+            items(visible, key = { it }) { selector ->
                 ModelCheckRow(
                     label = selector,
                     checked = selector in allowSet,
@@ -841,6 +872,13 @@ private fun ModelProvidersSection(
     var pendingDelete by remember { mutableStateOf<String?>(null) }
     var newName by remember { mutableStateOf("") }
     var validating by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    // Serialized when confirmation opens: edits cannot change the approved candidate.
+    var connectionCandidate by remember { mutableStateOf<String?>(null) }
+    var connectionPending by remember { mutableStateOf(false) }
+    var connectionTarget by remember { mutableStateOf<String?>(null) }
+    var connectionResult by remember { mutableStateOf<String?>(null) }
+    var connectionError by remember { mutableStateOf<String?>(null) }
 
     fun load() {
         scope.launch {
@@ -1003,6 +1041,23 @@ private fun ModelProvidersSection(
                             onValidate = ::validateCurrent,
                             onSave = { saveDrafts(providers, "full") },
                             onDelete = { pendingDelete = name },
+                            connectionPending = connectionPending,
+                            onConnectModel = { model ->
+                                if (!connectionPending && connectionCandidate == null) {
+                                    try {
+                                        val provider = draft.toUpdateJson().apply { remove("originalName") }
+                                        val modelCandidate = provider.getJSONArray("models")
+                                            .getJSONObject(draft.models.indexOf(model))
+                                        connectionCandidate = JSONObject()
+                                            .put("providerName", draft.name.ifBlank { draft.originalName.orEmpty() })
+                                            .put("provider", provider)
+                                            .put("model", modelCandidate)
+                                            .toString()
+                                    } catch (e: Exception) {
+                                        connectionError = context.getString(R.string.model_connectivity_failed, context.getString(R.string.model_connectivity_invalid_response))
+                                    }
+                                }
+                            },
                             onTestModel = { model ->
                                 scope.launch {
                                     pending = true
@@ -1082,6 +1137,67 @@ private fun ModelProvidersSection(
         )
     }
 
+    if (connectionPending || connectionResult != null || connectionError != null) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            connectionTarget?.let { Text(it, color = OmpColors.Text, style = MaterialTheme.typography.labelMedium) }
+            if (connectionPending) ModelStatusText(stringResource(R.string.model_connectivity_loading))
+            connectionResult?.let { ModelStatusText(it) }
+            connectionError?.let { ModelErrorText(it) }
+        }
+    }
+    connectionCandidate?.let { snapshot ->
+        val candidate = remember(snapshot) { JSONObject(snapshot) }
+        val providerName = candidate.getString("providerName")
+        val modelId = candidate.getJSONObject("model").getString("id")
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { connectionCandidate = null },
+            containerColor = OmpColors.BgPanel,
+            title = { OmpDialogSystemBars(); Text(stringResource(R.string.model_connectivity_title), color = OmpColors.Text) },
+            text = {
+                Text(
+                    stringResource(R.string.model_connectivity_confirmation, providerName, modelId),
+                    modifier = Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
+                    color = OmpColors.TextMuted,
+                )
+            },
+            confirmButton = {
+                TextButton(enabled = !connectionPending, onClick = {
+                    if (!connectionPending && connectionCandidate == snapshot) {
+                        connectionCandidate = null
+                        connectionPending = true
+                        connectionTarget = "$providerName / $modelId"
+                        connectionResult = null
+                        connectionError = null
+                        scope.launch {
+                            try {
+                                val data = requester.request("models", "providers.connectivity", JSONObject(snapshot).put("confirm", true))
+                                val responseText = data.opt("responseText")
+                                if (data.opt("ok") != true || responseText !is String || responseText.isBlank()) {
+                                    connectionError = modelConnectivityErrorNote(data.opt("code") as? String) { context.getString(it) }
+                                } else {
+                                    connectionResult = context.getString(
+                                        R.string.model_connectivity_success,
+                                        data.getLong("latencyMs"),
+                                        responseText.take(512),
+                                    )
+                                }
+                            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                                connectionError = modelConnectivityErrorNote("connectivity_timeout") { context.getString(it) }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                connectionError = modelConnectivityErrorNote((e as? RelayRequestException)?.code) { context.getString(it) }
+                            } finally {
+                                connectionPending = false
+                            }
+                        }
+                    }
+                }) { Text(stringResource(R.string.model_connectivity_confirm)) }
+            },
+            dismissButton = { TextButton(onClick = { connectionCandidate = null }) { Text(stringResource(R.string.model_connectivity_cancel)) } },
+        )
+    }
+
     pendingDelete?.let { name ->
         val doomed = providers[name]
         androidx.compose.material3.AlertDialog(
@@ -1136,6 +1252,8 @@ private fun ProviderEditor(
     onSave: () -> Unit,
     onDelete: () -> Unit,
     onTestModel: (ModelDraft) -> Unit,
+    connectionPending: Boolean,
+    onConnectModel: (ModelDraft) -> Unit,
 ) {
     var rename by remember(draft.name) { mutableStateOf(draft.name) }
     var catalogOpen by remember { mutableStateOf(false) }
@@ -1266,6 +1384,8 @@ private fun ProviderEditor(
                     onChange(draft.copy(models = draft.models.filterIndexed { i, _ -> i != index }))
                 },
                 onTest = { onTestModel(model) },
+                connectionEnabled = !connectionPending && !pending && !validating && draftError == null,
+                onConnect = { onConnectModel(model) },
             )
         }
         ModelActionLink(
@@ -1368,6 +1488,8 @@ private fun ModelDraftEditor(
     onChange: (ModelDraft) -> Unit,
     onDelete: () -> Unit,
     onTest: () -> Unit,
+    connectionEnabled: Boolean,
+    onConnect: () -> Unit,
 ) {
     var expanded by remember(model.originalId) { mutableStateOf(model.id.isBlank()) }
     Column(
@@ -1401,8 +1523,12 @@ private fun ModelDraftEditor(
             }
             AdvancedDraftFields(model.redacted, model.advanced, false) { onChange(model.copy(advanced = it)) }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ModelActionLink(if (korean) "연결 테스트" else "Test connection", onTest)
+                ModelActionLink(stringResource(R.string.model_connectivity_configuration_check), onTest)
                 ModelActionLink(if (korean) "모델 삭제" else "Remove model", onDelete, danger = true)
+            }
+            Text(stringResource(R.string.model_connectivity_hint), color = OmpColors.TextMuted, style = MaterialTheme.typography.bodySmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ModelActionLink(stringResource(R.string.model_connectivity_title), onConnect, enabled = connectionEnabled)
             }
         }
     }
@@ -1495,8 +1621,10 @@ private fun ModelFallbackSection(
     ModelCard(disclosure = "Retry behavior and fallback chains") {
         var candidateQuery by remember(role) { mutableStateOf("") }
         val cq = candidateQuery.trim()
-        val options = catalog.models.filter {
-            (cq.isEmpty() || it.selector.contains(cq, ignoreCase = true) || it.name.contains(cq, ignoreCase = true)) && it.selector !in chain
+        val options = remember(catalog.models, cq, chain) {
+            catalog.models.filter {
+                (cq.isEmpty() || it.selector.contains(cq, ignoreCase = true) || it.name.contains(cq, ignoreCase = true)) && it.selector !in chain
+            }
         }
         Text(
             text = "retry · fallbackChains / maxRetries / modelFallback / revertPolicy",
@@ -1571,8 +1699,8 @@ private fun ModelFallbackSection(
         }
         ModelSearchField(candidateQuery, { candidateQuery = it })
         if (options.isEmpty()) ModelStatusText(if (korean) "검색 결과가 없습니다" else "No matching models")
-        Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-            options.forEach { option ->
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
+            items(options, key = { it.selector }) { option ->
                 Text(
                     text = "${option.name} (${option.selector})",
                     fontSize = 13.sp,

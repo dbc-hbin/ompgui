@@ -9,7 +9,7 @@ import { comparableProjectPath } from "../comparable-path";
 import { allowFileRoot, getAllowedFileRoots, isExistingFilePathAllowed } from "../file-access";
 import { buildEntriesFromFiles, filterFileEntries } from "../file-fuzzy";
 import { getImageMime, getAudioMime, getDocumentMime, documentPreviewKind } from "../file-types";
-import { addWorktree, findCurrentWorktreePath, listWorktrees, resolveProject } from "../worktree";
+import { addWorktree, findCurrentWorktreePath, listWorktrees, resolveAllowedWorktreeListing, resolveProject } from "../worktree";
 import type { WorktreeInfo } from "../worktree";
 import { resolveDirentIsDirectory } from "../file-dirent";
 import { loadProjectRegistry, hideProject, mergeProjects, ProjectPathError, saveProjectRegistry, upsertProject, validateProjectPath } from "../project-registry";
@@ -307,13 +307,15 @@ export async function readRelayFile(rawPath: string): Promise<RelayFileContent> 
 }
 
 export async function listRelayWorktrees(rawCwd: string): Promise<RelayWorktreeList> {
-  const cwd = await assertAllowedPath(rawCwd);
-  const project = await resolveProject(cwd);
+  const cwd = resolve(rawCwd.trim());
+  const listing = await resolveAllowedWorktreeListing(cwd, await getAllowedFileRoots());
+  if (!listing) throw new RelaySessionError("access_denied", "Path is outside allowed workspaces");
+  const { project, listingCwd } = listing;
   let worktrees: WorktreeInfo[] = [];
   let currentWorktreePath: string | null = null;
   let isGit = true;
   try {
-    worktrees = await listWorktrees(existsSync(cwd) ? cwd : project.projectRoot);
+    worktrees = await listWorktrees(listingCwd);
     currentWorktreePath = findCurrentWorktreePath(worktrees, cwd);
   } catch {
     isGit = false;

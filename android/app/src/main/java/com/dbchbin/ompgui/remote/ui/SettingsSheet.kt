@@ -98,11 +98,12 @@ fun SettingsSheet(
     val scrollKey = if (query.isBlank()) category else "search"
     val contentScroll = scrollPositions.getOrPut(scrollKey) { androidx.compose.foundation.ScrollState(0) }
     var modelsVisited by remember { mutableStateOf(false) }
-    val modelCategory = category == "Models" || category == "Providers"
-    val categories = listOf("Browse", "General", "Safety", "Models", "Providers", "Intelligence", "Agents", "Tools", "System")
+    val modelCategory = category == "Models" || category == "Roles" || category == "Providers"
+    val categories = listOf("Browse", "General", "Roles", "Safety", "Models", "Providers", "Intelligence", "Agents", "Tools", "System")
     val categoryTitles = listOf(
         stringResource(R.string.settings_category_browse),
         stringResource(R.string.settings_category_general),
+        stringResource(R.string.settings_category_roles),
         stringResource(R.string.settings_category_safety),
         stringResource(R.string.settings_category_models),
         stringResource(R.string.settings_category_providers),
@@ -114,6 +115,7 @@ fun SettingsSheet(
     val categoryDescriptions = listOf(
         stringResource(R.string.settings_browse_hint),
         stringResource(R.string.settings_category_desc_general),
+        stringResource(R.string.settings_category_desc_roles),
         stringResource(R.string.settings_category_desc_safety),
         stringResource(R.string.settings_category_desc_models),
         stringResource(R.string.settings_category_desc_providers),
@@ -365,7 +367,26 @@ fun SettingsSheet(
                                 it.category in matchedCategories
                         }
                     }
-                    if (query.isNotBlank() && fields.isEmpty() && !localMatches) Text(stringResource(R.string.settings_no_matches), color = OmpColors.TextMuted)
+                    val rolesCategoryIndex = categories.indexOf("Roles")
+                    val rolesMatch = query.isNotBlank() && (
+                        categoryTitles[rolesCategoryIndex].contains(query, true) ||
+                            categoryDescriptions[rolesCategoryIndex].contains(query, true) ||
+                            "modelRoles".contains(query, true) ||
+                            nativeModelRoles.any { it.contains(query, true) }
+                        )
+                    if (rolesMatch) {
+                        SettingsCategoryOverview(
+                            categories = listOf("Roles"),
+                            titles = listOf(categoryTitles[rolesCategoryIndex]),
+                            descriptions = listOf(categoryDescriptions[rolesCategoryIndex]),
+                            onSelect = { selected ->
+                                category = selected
+                                query = ""
+                                notice = null
+                            },
+                        )
+                    }
+                    if (query.isNotBlank() && fields.isEmpty() && !localMatches && !rolesMatch) Text(stringResource(R.string.settings_no_matches), color = OmpColors.TextMuted)
                     SettingFieldGroups(
                         fields = fields,
                         snapshot = snapshot,
@@ -409,7 +430,15 @@ fun SettingsSheet(
                     val visible = modelCategory && query.isBlank()
                     val visibility = if (visible) Modifier else Modifier.clearAndSetSemantics {}.layout { _, _ -> layout(0, 0) {} }
                     Column(Modifier.fillMaxWidth().then(visibility)) {
-                        ModelSettingsPanel(requester, settingsCwd, selectedSection = if (category == "Providers") ModelSettingsSection.Providers else ModelSettingsSection.Defaults)
+                        ModelSettingsPanel(
+                            requester,
+                            settingsCwd,
+                            selectedSection = when (category) {
+                                "Roles" -> ModelSettingsSection.Roles
+                                "Providers" -> ModelSettingsSection.Providers
+                                else -> ModelSettingsSection.Defaults
+                            },
+                        )
                     }
                 }
             }
@@ -567,7 +596,8 @@ private fun SettingEditor(field: SettingField, value: Any?, enabled: Boolean, sa
     Column(Modifier.fillMaxWidth()) {
         HorizontalDivider(color = OmpColors.Border)
         Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(label, style = MaterialTheme.typography.titleSmall)
                     description?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted) }
@@ -575,11 +605,15 @@ private fun SettingEditor(field: SettingField, value: Any?, enabled: Boolean, sa
                     if (value == null) Text(stringResource(R.string.settings_uses_server_default), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted)
                     if (field.kind == "integer") Text("${field.min}–${field.max}", style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted)
                 }
+                if (field.kind == "boolean" && value is Boolean) {
+                    Switch(checked = value, onCheckedChange = { save(it) }, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = label })
+                }
+                }
             when {
                 field.kind == "integer" -> {
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(draft, { draft = it; error = null }, enabled = enabled, modifier = Modifier.width(96.dp).semantics { contentDescription = label }, singleLine = true, textStyle = MaterialTheme.typography.bodyMedium, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number), isError = error != null)
-                        TextButton(modifier = Modifier.size(48.dp), contentPadding = PaddingValues(0.dp), enabled = enabled && draft != (value?.toString() ?: ""), onClick = {
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        OutlinedTextField(draft, { draft = it; error = null }, enabled = enabled, modifier = Modifier.fillMaxWidth().semantics { contentDescription = label }, singleLine = true, textStyle = MaterialTheme.typography.bodyMedium, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number), isError = error != null)
+                        TextButton(modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp), enabled = enabled && draft != (value?.toString() ?: ""), onClick = {
                             try {
                                 val parsed = draft.toInt().also { require(it in field.min..field.max) { context.getString(R.string.settings_integer_range, field.min, field.max) } }
                                 save(parsed)
@@ -587,13 +621,10 @@ private fun SettingEditor(field: SettingField, value: Any?, enabled: Boolean, sa
                         }) { Text(stringResource(R.string.settings_save)) }
                     }
                 }
-                field.kind == "boolean" && value is Boolean -> {
-                    Switch(checked = value, onCheckedChange = { save(it) }, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = label })
-                }
-                field.kind == "boolean" || field.kind == "choice" -> {
+                (field.kind == "boolean" && value !is Boolean) || field.kind == "choice" -> {
                     val options = if (field.kind == "boolean") listOf("true", "false") else field.choices
                     var expanded by remember { mutableStateOf(false) }
-                    Box(Modifier.width(128.dp)) {
+                    Box(Modifier.fillMaxWidth()) {
                         OutlinedButton(onClick = { expanded = true }, enabled = enabled, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp), shape = MaterialTheme.shapes.small, border = BorderStroke(1.dp, OmpColors.Border)) {
                             Text(when {
                                 field.path == "Submit during run" && value == AppPreferences.SUBMIT_STEER -> stringResource(R.string.chat_submit_steer)

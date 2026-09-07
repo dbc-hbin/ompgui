@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -218,14 +220,23 @@ private fun ExtensionSkillsSection(requester: RelayRequester, cwd: String) {
             if (expanded) {
             Text(row.optString("description"), color = OmpColors.TextMuted)
             Text(listOf(row.optString("scope"), row.optString("source"), row.getString("filePath")).filter { it.isNotBlank() }.joinToString(" · "), color = OmpColors.TextMuted)
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(
+                    value = !row.getBoolean("disableModelInvocation"),
+                    enabled = !operation.pending,
+                    role = Role.Switch,
+                    onValueChange = { enabled ->
+                        coroutineScope.launch { operation.run(fallbackError) {
+                            requester.request("extensions", "skills.toggle", JSONObject().put("cwd", cwd).put("filePath", row.getString("filePath")).put("disableModelInvocation", !enabled))
+                            load(offset)
+                        } }
+                    },
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Text(stringResource(R.string.extension_skills_allow_invocation), color = OmpColors.Text, modifier = Modifier.weight(1f))
-                Switch(checked = !row.getBoolean("disableModelInvocation"), enabled = !operation.pending, onCheckedChange = { enabled ->
-                    coroutineScope.launch { operation.run(fallbackError) {
-                        requester.request("extensions", "skills.toggle", JSONObject().put("cwd", cwd).put("filePath", row.getString("filePath")).put("disableModelInvocation", !enabled))
-                        load(offset)
-                    } }
-                })
+                Switch(checked = !row.getBoolean("disableModelInvocation"), enabled = !operation.pending, onCheckedChange = null)
             }
             TextButton(enabled = !operation.pending, onClick = {
                 coroutineScope.launch { operation.run(fallbackError) {

@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -89,6 +90,89 @@ import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun QueueScreen(
+    queue: com.dbchbin.ompgui.remote.relay.RelayMessageQueue,
+    busy: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+    onRefresh: () -> Unit,
+    onRecall: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onPromote: (String) -> Unit,
+) {
+    OmpModalSheet(
+        fullHeight = true,
+        onDismissRequest = onDismiss,
+        containerColor = OmpColors.Bg,
+        contentColor = OmpColors.Text,
+    ) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.chat_queue_title), Modifier.weight(1f), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = OmpColors.Text)
+            IconButton(onClick = onRefresh, enabled = !busy) {
+                Icon(Icons.Filled.Refresh, stringResource(R.string.extension_refresh), tint = OmpColors.TextMuted)
+            }
+            IconButton(onClick = onDismiss) {
+                Icon(Icons.Filled.Close, stringResource(R.string.extension_close), tint = OmpColors.TextMuted)
+            }
+        }
+        androidx.compose.foundation.lazy.LazyColumn(
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            item {
+                Text(stringResource(R.string.chat_queue_description), color = OmpColors.TextMuted)
+                queue.nativeQueuedCount?.let { count ->
+                    Text(stringResource(R.string.chat_queue_native_count, count), color = OmpColors.TextMuted, modifier = Modifier.padding(top = 8.dp))
+                }
+                if (busy) Text(stringResource(R.string.chat_queue_busy), color = OmpColors.TextMuted, modifier = Modifier.padding(top = 8.dp))
+                if (!error.isNullOrBlank()) Text(error, color = OmpColors.StatusError, modifier = Modifier.padding(top = 8.dp))
+                if (queue.items.isEmpty()) Text(
+                    stringResource(if (queue.revision < 0) R.string.chat_queue_loading else R.string.chat_queue_empty),
+                    color = OmpColors.TextMuted, modifier = Modifier.padding(top = 16.dp),
+                )
+            }
+            items(count = queue.items.size, key = { queue.items[it].id }) { index ->
+                val item = queue.items[index]
+                val actionable = !busy && queue.revision >= 0 && (item.status == "queued" || item.status == "failed")
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(stringResource(if (item.lane == "steer") R.string.chat_queue_steer else R.string.chat_queue_follow_up), color = OmpColors.Accent, fontSize = 13.sp)
+                        Text(when (item.status) {
+                            "queued" -> stringResource(R.string.chat_queue_pending)
+                            "sending" -> stringResource(R.string.chat_queue_sending)
+                            "failed" -> stringResource(R.string.chat_queue_failed)
+                            else -> item.status
+                        }, color = if (item.status == "failed") OmpColors.StatusWarning else OmpColors.TextMuted, fontSize = 13.sp)
+                    }
+                    if (item.text.isNotEmpty()) Text(item.text, color = OmpColors.Text, fontSize = 14.sp)
+                    item.attachments.forEach { attachment ->
+                        Text(stringResource(R.string.chat_queue_attachment, attachment.mimeType, attachment.bytes), color = OmpColors.TextMuted, fontSize = 12.sp)
+                    }
+                    if (item.status == "failed") Text(stringResource(R.string.chat_queue_uncertain), color = OmpColors.StatusWarning, fontSize = 13.sp)
+                    item.error?.takeIf { it.isNotBlank() }?.let { Text(it, color = OmpColors.StatusError, fontSize = 13.sp) }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        androidx.compose.material3.TextButton(onClick = { onRecall(item.id) }, enabled = actionable) {
+                            Text(stringResource(R.string.chat_queue_recall))
+                        }
+                        androidx.compose.material3.TextButton(onClick = { onDelete(item.id) }, enabled = actionable) {
+                            Text(stringResource(R.string.chat_queue_delete))
+                        }
+                        if (item.status == "queued" && item.lane == "followUp") {
+                            androidx.compose.material3.TextButton(onClick = { onPromote(item.id) }, enabled = actionable) {
+                                Text(stringResource(R.string.chat_queue_promote))
+                            }
+                        }
+                    }
+                    androidx.compose.material3.HorizontalDivider(color = OmpColors.Border)
+                }
+            }
+        }
+    }
+}
 
 /** Reduced-motion aware: panels render statically, no animation. */
 private fun panelShape() = RoundedCornerShape(10.dp)
@@ -141,11 +225,11 @@ fun TodoPanel(todos: List<com.dbchbin.ompgui.remote.relay.TodoPhase>) {
             )
             Text(
                 stringResource(R.string.todo_title),
+                modifier = Modifier.weight(1f),
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = OmpColors.Text,
             )
-            Spacer(modifier = Modifier.weight(1f))
             Text(
                 stringResource(R.string.chat_activity_todos, done, tasks.size),
                 fontSize = 12.sp,
@@ -249,10 +333,10 @@ fun SubagentPanel(
     subagents: List<com.dbchbin.ompgui.remote.relay.SubagentChip>,
 ) {
     if (subagents.isEmpty()) return
-    var expanded by remember { mutableStateOf(false) }
+    var expanded by remember(sessionId) { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
-    var selected by remember { mutableStateOf<com.dbchbin.ompgui.remote.relay.SubagentChip?>(null) }
+    var selected by remember(sessionId) { mutableStateOf<com.dbchbin.ompgui.remote.relay.SubagentChip?>(null) }
     val live = remember(subagents) { subagents.count(::subagentIsLive) }
     val headerDesc = if (expanded) {
         stringResource(R.string.chat_subagent_collapse)
@@ -283,7 +367,7 @@ fun SubagentPanel(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(
-                Icons.Filled.AccountTree,
+                Icons.Filled.Groups,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
                 tint = OmpColors.TextMuted,
@@ -348,7 +432,10 @@ fun SubagentPanel(
                             .padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = OmpColors.Text)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Groups, null, Modifier.size(20.dp), tint = OmpColors.TextMuted)
+                            Text(title, modifier = Modifier.weight(1f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = OmpColors.Text)
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 statusLabel,
@@ -601,45 +688,6 @@ private fun SubagentTranscriptDialog(
 }
 
 // ---------------------------------------------------------------------------
-// Queue: steer / follow-up / interrupt while running.
-// ---------------------------------------------------------------------------
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun QueuePanel(
-    running: Boolean,
-    steering: List<String>,
-    followUp: List<String>,
-) {
-    val hasQueue = steering.isNotEmpty() || followUp.isNotEmpty()
-    if (!running && !hasQueue) return
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(panelShape())
-            .background(OmpColors.BgPanel)
-            .border(1.dp, OmpColors.Border, panelShape())
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        if (running) {
-            Text(
-                stringResource(R.string.chat_queue_composer_hint),
-                fontSize = 12.sp,
-                color = OmpColors.TextMuted,
-            )
-        }
-        if (hasQueue) Text(stringResource(R.string.chat_queue_readonly), color = OmpColors.TextMuted, fontSize = 12.sp)
-        Column(Modifier.heightIn(max = 160.dp).verticalScroll(rememberScrollState())) {
-            steering.forEach { Text("[steer] $it", color = OmpColors.Text) }
-            followUp.forEach { Text("[follow-up] $it", color = OmpColors.Text) }
-        }
-    }
-}
-
-
-
-// ---------------------------------------------------------------------------
 // Runtime controls: modes, bash, handoff, reload, compact, fork, export.
 // ---------------------------------------------------------------------------
 
@@ -672,6 +720,7 @@ fun RuntimePanel(
     onExport: () -> Unit,
     onOpenPalette: () -> Unit,
     onAbort: () -> Unit,
+    onOpenQueue: () -> Unit,
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
 ) {
@@ -681,17 +730,17 @@ fun RuntimePanel(
     var bashError by remember(sessionId) { mutableStateOf<String?>(null) }
     var category by remember(sessionId) { mutableStateOf<String?>(null) }
     var branch by remember(sessionId) { mutableStateOf<String?>(null) }
-    val korean = LocalContext.current.resources.configuration.locales[0].language == "ko"
-    val onLabel = if (korean) "켜짐" else "On"
-    val offLabel = if (korean) "꺼짐" else "Off"
+    val context = LocalContext.current
+    val onLabel = stringResource(R.string.chat_runtime_on)
+    val offLabel = stringResource(R.string.chat_runtime_off)
     val boolChoices = listOf("true" to onLabel, "false" to offLabel)
     val interruptChoices = listOf(
-        "immediate" to if (korean) "즉시" else "Immediate",
-        "wait" to if (korean) "대기" else "Wait",
+        "immediate" to stringResource(R.string.chat_runtime_immediate),
+        "wait" to stringResource(R.string.chat_runtime_wait),
     )
     val queueChoices = listOf(
-        "one-at-a-time" to if (korean) "한 번에 하나씩" else "One at a time",
-        "all" to if (korean) "모두" else "All",
+        "one-at-a-time" to stringResource(R.string.chat_runtime_one_at_a_time),
+        "all" to stringResource(R.string.chat_runtime_all),
     )
     val toggleBranch: (String) -> Unit = { branch = if (branch == it) null else it }
     val toggleCategory: (String) -> Unit = {
@@ -713,99 +762,99 @@ fun RuntimePanel(
                         .clip(RoundedCornerShape(16.dp)).background(OmpColors.BgPanel),
                 ) {
                     Row(
-                        Modifier.fillMaxWidth().height(48.dp).padding(start = 12.dp),
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(start = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Icon(Icons.Filled.Tune, null, Modifier.size(20.dp), tint = OmpColors.TextMuted)
-                        Text(if (korean) "세션 실행 제어" else "Session controls",
+                        Text(stringResource(R.string.chat_runtime_controls),
                             Modifier.weight(1f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-                            color = OmpColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            color = OmpColors.Text)
                         IconButton(onClick = { onExpandedChange(false) }, modifier = Modifier.size(48.dp)) {
-                            Icon(Icons.Filled.Close, if (korean) "세션 실행 제어 닫기" else "Close session controls", tint = OmpColors.TextMuted)
+                            Icon(Icons.Filled.Close, stringResource(R.string.extension_close), tint = OmpColors.TextMuted)
                         }
                     }
                     Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(scrollState)) {
                 RuntimeTreeRow(
-                    label = if (korean) "실행" else "Execution",
+                    label = stringResource(R.string.chat_runtime_execution),
                     expanded = category == "execution", heading = true, icon = Icons.Filled.PlayArrow,
                     onClick = { toggleCategory("execution") },
                 )
                 if (category == "execution") {
                     RuntimeSettingBranch(
-                        if (korean) "빠른 모드" else "Fast mode", fastMode?.toString(), boolChoices,
+                        stringResource(R.string.chat_runtime_fast), fastMode?.toString(), boolChoices,
                         branch == "fast", { toggleBranch("fast") }, { onFastModeChange(it == "true") },
                     )
                     RuntimeSettingBranch(
-                        if (korean) "자동 재시도" else "Auto retry", autoRetry?.toString(), boolChoices,
+                        stringResource(R.string.chat_runtime_retry), autoRetry?.toString(), boolChoices,
                         branch == "retry", { toggleBranch("retry") }, { onAutoRetryChange(it == "true") },
                     )
                     RuntimeSettingBranch(
-                        if (korean) "인터럽트 모드" else "Interrupt mode", interruptMode, interruptChoices,
+                        stringResource(R.string.chat_runtime_interrupt), interruptMode, interruptChoices,
                         branch == "interrupt", { toggleBranch("interrupt") }, onInterruptModeChange,
                     )
-                    RuntimeTreeRow(if (korean) "모델 순환" else "Cycle model", depth = 1, icon = Icons.Filled.SwapHoriz, onClick = onCycleModel)
-                    RuntimeTreeRow(if (korean) "핸드오프" else "Handoff", depth = 1, icon = Icons.Filled.AccountTree, onClick = onHandoff)
-                    RuntimeTreeRow(if (korean) "리로드" else "Reload", depth = 1, icon = Icons.Filled.Refresh, onClick = onReload)
-                    RuntimeTreeRow(if (korean) "재시도 중단" else "Abort retry", depth = 1, icon = Icons.Filled.Stop, onClick = onRetryAbort)
-                    if (running) RuntimeTreeRow(if (korean) "에이전트 중단" else "Abort agent", depth = 1, icon = Icons.Filled.Stop, onClick = onAbort)
+                    RuntimeTreeRow(stringResource(R.string.chat_runtime_cycle_model), depth = 1, icon = Icons.Filled.SwapHoriz, onClick = onCycleModel)
+                    RuntimeTreeRow(stringResource(R.string.chat_runtime_handoff), depth = 1, icon = Icons.Filled.AccountTree, onClick = onHandoff)
+                    RuntimeTreeRow(stringResource(R.string.chat_runtime_reload), depth = 1, icon = Icons.Filled.Refresh, onClick = onReload)
+                    RuntimeTreeRow(stringResource(R.string.chat_runtime_abort_retry), depth = 1, icon = Icons.Filled.Stop, onClick = onRetryAbort)
+                    if (running) RuntimeTreeRow(stringResource(R.string.chat_runtime_abort_agent), depth = 1, icon = Icons.Filled.Stop, onClick = onAbort)
                 }
                 RuntimeTreeRow(
-                    label = if (korean) "메시지 대기열" else "Message queue",
+                    label = stringResource(R.string.chat_runtime_queue),
                     expanded = category == "queue", heading = true, icon = Icons.Filled.Queue,
                     onClick = { toggleCategory("queue") },
                 )
                 if (category == "queue") {
+                    RuntimeTreeRow(stringResource(R.string.chat_queue_title), depth = 1, icon = Icons.Filled.Queue, onClick = onOpenQueue)
                     RuntimeSettingBranch(
-                        if (korean) "스티어링 모드" else "Steering", steeringMode, queueChoices,
+                        stringResource(R.string.chat_runtime_steering), steeringMode, queueChoices,
                         branch == "steering", { toggleBranch("steering") }, onSteeringModeChange,
                     )
                     RuntimeSettingBranch(
-                        if (korean) "후속 메시지 모드" else "Follow-up", followUpMode, queueChoices,
+                        stringResource(R.string.chat_runtime_follow_up), followUpMode, queueChoices,
                         branch == "followUp", { toggleBranch("followUp") }, onFollowUpModeChange,
                     )
                 }
                 RuntimeTreeRow(
-                    label = if (korean) "컨텍스트" else "Context",
+                    label = stringResource(R.string.chat_runtime_context),
                     expanded = category == "context", heading = true, icon = Icons.Filled.Compress,
                     onClick = { toggleCategory("context") },
                 )
                 if (category == "context") {
                     RuntimeSettingBranch(
-                        if (korean) "자동 압축" else "Auto compaction", autoCompaction?.toString(), boolChoices,
+                        stringResource(R.string.chat_runtime_auto_compaction), autoCompaction?.toString(), boolChoices,
                         branch == "autoCompact", { toggleBranch("autoCompact") }, { onAutoCompactionChange(it == "true") },
                     )
-                    RuntimeTreeRow(if (korean) "지금 압축" else "Compact now", depth = 1, icon = Icons.Filled.Compress, onClick = onCompact)
+                    RuntimeTreeRow(stringResource(R.string.chat_runtime_compact), depth = 1, icon = Icons.Filled.Compress, onClick = onCompact)
                     RuntimeTreeRow(
-                        if (korean) "사용자 지정 압축" else "Custom compaction", depth = 1, icon = Icons.Filled.Edit,
+                        stringResource(R.string.chat_runtime_custom_compaction), depth = 1, icon = Icons.Filled.Edit,
                         expanded = branch == "compact", onClick = { toggleBranch("compact") },
                     )
                     if (branch == "compact") {
                         RuntimeDraftEditor(
-                            label = if (korean) "압축 지시 (선택)" else "Compaction instructions (optional)",
+                            label = stringResource(R.string.chat_runtime_compact_instructions),
                             value = compactDraft, onValueChange = { compactDraft = it },
                         )
-                        RuntimeTreeRow(if (korean) "지시 적용 및 압축" else "Apply instructions and compact", depth = 2, icon = Icons.Filled.Compress) {
+                        RuntimeTreeRow(stringResource(R.string.chat_runtime_apply_compact), depth = 2, icon = Icons.Filled.Compress) {
                             onCustomCompact(compactDraft.trim())
                             compactDraft = ""
                         }
                     }
                 }
                 RuntimeTreeRow(
-                    label = if (korean) "셸" else "Shell",
+                    label = stringResource(R.string.chat_runtime_shell),
                     expanded = category == "shell", heading = true, icon = Icons.Filled.Terminal,
                     onClick = { toggleCategory("shell") },
                 )
                 if (category == "shell") {
                     RuntimeDraftEditor(
-                        label = if (korean) "셸 명령 (단일 !만 지원)" else "Shell command (single ! only)",
+                        label = stringResource(R.string.chat_runtime_shell_command),
                         value = bashDraft, monospace = true, depth = 1,
                         onValueChange = { bashDraft = it; bashError = null },
                     )
                     if (bashDraft.startsWith("!!")) {
                         Text(
-                            if (korean) "!! 제외 실행은 지원되지 않습니다. 서버 오류가 표시됩니다."
-                            else "!! excluded output is unsupported and fails server-side.",
+                            stringResource(R.string.chat_runtime_excluded_output),
                             modifier = Modifier.padding(start = 28.dp, end = 12.dp),
                             fontSize = 12.sp, color = OmpColors.StatusWarning,
                         )
@@ -813,10 +862,10 @@ fun RuntimePanel(
                     bashError?.let {
                         Text(it, modifier = Modifier.padding(start = 28.dp, end = 12.dp), fontSize = 12.sp, color = OmpColors.StatusError)
                     }
-                    RuntimeTreeRow(if (korean) "실행" else "Run", depth = 1, icon = Icons.Filled.PlayArrow) {
+                    RuntimeTreeRow(stringResource(R.string.chat_runtime_run), depth = 1, icon = Icons.Filled.PlayArrow) {
                         val cmd = bashDraft.trim().removePrefix("!").trim()
                         if (cmd.isEmpty()) {
-                            bashError = if (korean) "명령을 입력하세요" else "Enter a command"
+                            bashError = context.getString(R.string.chat_runtime_enter_command)
                         } else {
                             // Preserve !! submission: the server's coded error remains authoritative.
                             bashError = null
@@ -824,17 +873,17 @@ fun RuntimePanel(
                             bashDraft = ""
                         }
                     }
-                    RuntimeTreeRow(if (korean) "bash 중단" else "Abort bash", depth = 1, icon = Icons.Filled.Stop, onClick = onAbortBash)
+                    RuntimeTreeRow(stringResource(R.string.chat_runtime_abort_bash), depth = 1, icon = Icons.Filled.Stop, onClick = onAbortBash)
                 }
                 RuntimeTreeRow(
-                    label = if (korean) "출력" else "Output",
+                    label = stringResource(R.string.chat_runtime_output),
                     expanded = category == "output", heading = true, icon = Icons.Filled.Description,
                     onClick = { toggleCategory("output") },
                 )
                 if (category == "output") {
-                    RuntimeTreeRow(if (korean) "마지막 복사" else "Copy last", depth = 1, icon = Icons.Filled.ContentCopy, onClick = onCopyLast)
-                    RuntimeTreeRow(if (korean) "내보내기" else "Export", depth = 1, icon = Icons.Filled.FileUpload, onClick = onExport)
-                    RuntimeTreeRow(if (korean) "명령 팔레트" else "Command palette", depth = 1, icon = Icons.Filled.Terminal, onClick = onOpenPalette)
+                    RuntimeTreeRow(stringResource(R.string.chat_runtime_copy_last), depth = 1, icon = Icons.Filled.ContentCopy, onClick = onCopyLast)
+                    RuntimeTreeRow(stringResource(R.string.chat_runtime_export), depth = 1, icon = Icons.Filled.FileUpload, onClick = onExport)
+                    RuntimeTreeRow(stringResource(R.string.session_list_command_palette), depth = 1, icon = Icons.Filled.Terminal, onClick = onOpenPalette)
                 }
                     }
                 }
@@ -856,7 +905,8 @@ private fun RuntimeTreeRow(
     icon: ImageVector? = null,
     onClick: () -> Unit,
 ) {
-    val korean = LocalContext.current.resources.configuration.locales[0].language == "ko"
+    val expandedLabel = stringResource(R.string.chat_runtime_expanded)
+    val collapsedLabel = stringResource(R.string.chat_runtime_collapsed)
     val relocation = remember { BringIntoViewRequester() }
     val scope = rememberCoroutineScope()
     var rowSize by remember { mutableStateOf(IntSize.Zero) }
@@ -882,9 +932,9 @@ private fun RuntimeTreeRow(
                 }
                 .semantics {
                     if (expanded != null) stateDescription = if (expanded) {
-                        if (korean) "펼쳐짐" else "Expanded"
+                        expandedLabel
                     } else {
-                        if (korean) "접힘" else "Collapsed"
+                        collapsedLabel
                     }
                     if (checked != null) selected = checked
                 }
@@ -911,7 +961,7 @@ private fun RuntimeTreeRow(
             )
             if (value != null) {
                 Text(
-                    value, modifier = Modifier.width(112.dp).padding(start = 8.dp),
+                    value, modifier = Modifier.weight(1f).padding(start = 8.dp),
                     fontSize = 13.sp, textAlign = TextAlign.End,
                     color = if (enabled) OmpColors.TextMuted else OmpColors.TextDim,
                 )
@@ -929,11 +979,10 @@ private fun RuntimeSettingBranch(
     onExpand: () -> Unit,
     onSelect: (String) -> Unit,
 ) {
-    val korean = LocalContext.current.resources.configuration.locales[0].language == "ko"
     val selectedChoice = choices.firstOrNull { it.first == current }
     RuntimeTreeRow(
         label, depth = 1,
-        value = selectedChoice?.second ?: if (korean) "사용 불가" else "Unavailable",
+        value = selectedChoice?.second ?: stringResource(R.string.chat_runtime_unavailable),
         expanded = expanded && selectedChoice != null,
         enabled = selectedChoice != null,
         onClick = onExpand,
@@ -1004,36 +1053,185 @@ fun LongMessageText(
     sessionId: String,
     message: com.dbchbin.ompgui.remote.relay.DisplayMessage,
 ) {
-    var expanded by remember(sessionId, message.timestamp, message.role) { mutableStateOf(false) }
-    val preview = remember(message.text) { message.text.take(4_000) }
-    Column(modifier = Modifier.fillMaxWidth()) {
-        val visibleText = if (expanded) message.text else preview
-        val textModifier = if (expanded) Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()) else Modifier.fillMaxWidth()
-        if (message.role == "toolResult" || message.role == "tool") {
-            MarkdownText(visibleText, textModifier)
-        } else {
-            MessageText(visibleText, textModifier)
+    var expanded by remember(sessionId, message.entryId, message.timestamp, message.role) { mutableStateOf(false) }
+    val context = LocalContext.current
+    Column(Modifier.fillMaxWidth()) {
+        val visible = if (expanded) message.text else EventProjector.previewText(message.text)
+        val modifier = if (expanded) Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()) else Modifier.fillMaxWidth()
+        androidx.compose.foundation.text.selection.SelectionContainer {
+            MessageText(visible, modifier, plainText = message.role == "user")
         }
-        if (!expanded) {
-            Text(
-                "Show full (${message.text.length} chars)",
-                fontSize = 12.sp,
-                color = OmpColors.Accent,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable { expanded = true }.heightIn(min = 48.dp)
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-            )
-        } else {
-            Text(
-                "Show less",
-                fontSize = 12.sp,
-                color = OmpColors.TextMuted,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable { expanded = false }.heightIn(min = 48.dp)
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-            )
+        IconButton(onClick = {
+            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", message.text))
+        }) { Icon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy_content), tint = OmpColors.TextMuted) }
+        if (message.text.length > 4_000) RuntimeChip(
+            if (expanded) stringResource(R.string.chat_show_less) else stringResource(R.string.chat_show_full, message.text.length),
+            onClick = { expanded = !expanded },
+        )
+    }
+}
+
+@Composable
+fun TranscriptContent(
+    requester: RelayRequester,
+    sessionId: String,
+    leafId: String?,
+    message: com.dbchbin.ompgui.remote.relay.DisplayMessage,
+    results: Map<String, com.dbchbin.ompgui.remote.relay.DisplayMessage> = emptyMap(),
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var full by remember(sessionId, leafId, message.entryId, message.content, message.text) { mutableStateOf<JSONObject?>(null) }
+    var media by remember(sessionId, leafId, message.entryId) { mutableStateOf<JSONArray?>(null) }
+    var busy by remember(sessionId, leafId, message.entryId) { mutableStateOf(false) }
+    var failure by remember(sessionId, leafId, message.entryId) { mutableStateOf<String?>(null) }
+    var mediaSummary by remember(sessionId, leafId, message.entryId) { mutableStateOf<String?>(null) }
+    fun perform(action: suspend () -> Unit) {
+        if (busy) return
+        busy = true
+        scope.launch {
+            try { action(); failure = null }
+            catch (e: Exception) { if (e is CancellationException) throw e; failure = e.message ?: context.getString(R.string.extension_request_failed) }
+            finally { busy = false }
+        }
+    }
+    val content = full?.optJSONArray("content") ?: message.content
+    val truncated = message.truncated && full == null
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (content == null) LongMessageText(requester, sessionId, message.copy(text = full?.optString("text", message.text) ?: message.text))
+        else for (index in 0 until content.length()) {
+            val block = content.optJSONObject(index) ?: continue
+            androidx.compose.runtime.key(sessionId, leafId, message.entryId, index, block.optString("toolCallId")) {
+                when (block.optString("type")) {
+                    "text" -> LongMessageText(requester, sessionId, message.copy(text = block.optString("text")))
+                    "toolCall" -> TranscriptTool(requester, sessionId, leafId, block, results[block.optString("toolCallId")], truncated)
+                    "image" -> if (block.optString("data").isNotEmpty()) HistoryImage(block)
+                    "thinking" -> {
+                        var thinking by remember(block) { mutableStateOf(block.optString("thinking")) }
+                        var loaded by remember(block) { mutableStateOf(!block.optBoolean("deferred")) }
+                        var expanded by remember { mutableStateOf(false) }
+                        RuntimeChip(stringResource(R.string.chat_load_thinking, index + 1), enabled = !busy, onClick = {
+                            if (!loaded && !message.entryId.isNullOrBlank()) perform {
+                                val args = JSONObject().put("id", sessionId).put("entryId", message.entryId).put("blockIndex", index)
+                                if (!leafId.isNullOrBlank()) args.put("leafId", leafId)
+                                thinking = requester.request("sessions", "thinking", args).getString("thinking")
+                                loaded = true
+                                expanded = true
+                            } else expanded = !expanded
+                        })
+                        if (expanded) LongMessageText(requester, sessionId, message.copy(text = thinking))
+                    }
+                    else -> TranscriptJson(block.toString(2))
+                }
+            }
+        }
+        val details = full?.optJSONObject("details") ?: message.details
+        if (details != null) TranscriptJson(details.toString(2))
+        if (truncated) RuntimeChip(stringResource(R.string.chat_load_full_entry), enabled = !busy && !message.entryId.isNullOrBlank(), onClick = {
+            perform {
+                val json = StringBuilder()
+                var offset = 0
+                do {
+                    val args = JSONObject().put("id", sessionId).put("entryId", message.entryId).put("offset", offset).put("limit", 32_768)
+                    if (!leafId.isNullOrBlank()) args.put("leafId", leafId)
+                    val page = requester.request("sessions", "content", args)
+                    check(page.optString("encoding") == "json") { context.getString(R.string.chat_history_unavailable) }
+                    json.append(page.getString("text"))
+                    val more = page.getBoolean("hasMore")
+                    if (!more) break
+                    val next = page.getInt("nextOffset")
+                    check(next > offset) { context.getString(R.string.chat_history_unavailable) }
+                    offset = next
+                } while (true)
+                full = JSONObject(json.toString())
+            }
+        })
+        val deferred = message.deferredImages != null || (content != null && (0 until content.length()).any {
+            val block = content.optJSONObject(it)
+            block?.optString("type") == "image" && block.optString("data").isEmpty()
+        })
+        if (deferred) RuntimeChip(stringResource(R.string.chat_load_media), enabled = !busy && !message.entryId.isNullOrBlank(), onClick = {
+            perform {
+                val images = JSONArray()
+                var offset = 0
+                var missing = 0
+                do {
+                    val args = JSONObject().put("id", sessionId).put("entryId", message.entryId).put("offset", offset).put("limit", 1)
+                    if (!leafId.isNullOrBlank()) args.put("leafId", leafId)
+                    val response = requester.request("sessions", "media", args)
+                    val page = response.getJSONArray("images")
+                    for (index in 0 until page.length()) images.put(page.getJSONObject(index))
+                    missing += response.optInt("missingCount")
+                    if (!response.optBoolean("hasMore")) break
+                    val next = response.getInt("nextOffset")
+                    check(next > offset) { context.getString(R.string.chat_history_unavailable) }
+                    offset = next
+                } while (true)
+                media = images
+                mediaSummary = context.getString(R.string.chat_media_summary, images.length(), missing)
+            }
+        })
+        media?.let { images -> for (index in 0 until images.length()) images.optJSONObject(index)?.let { HistoryImage(it) } }
+        mediaSummary?.let { Text(it, color = OmpColors.TextMuted, fontSize = 12.sp) }
+        if (busy) Text(stringResource(R.string.chat_content_loading), color = OmpColors.TextMuted)
+        failure?.let { Text(it, color = OmpColors.StatusError) }
+    }
+}
+
+@Composable
+private fun TranscriptJson(value: String, initiallyExpanded: Boolean = false) {
+    var expanded by remember { mutableStateOf(initiallyExpanded) }
+    val context = LocalContext.current
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        RuntimeChip(if (expanded) stringResource(R.string.chat_hide_details) else stringResource(R.string.chat_show_details), onClick = { expanded = !expanded })
+        IconButton(onClick = {
+            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", value))
+        }) { Icon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy_content), tint = OmpColors.TextMuted) }
+    }
+    if (expanded) androidx.compose.foundation.text.selection.SelectionContainer {
+        Text(value, Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()), color = OmpColors.Text, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+    }
+}
+
+@Composable
+fun TranscriptTool(
+    requester: RelayRequester,
+    sessionId: String,
+    leafId: String?,
+    call: JSONObject?,
+    result: com.dbchbin.ompgui.remote.relay.DisplayMessage?,
+    inputTruncated: Boolean = false,
+) {
+    var expanded by remember(call?.optString("toolCallId") ?: result?.toolCallId) { mutableStateOf(false) }
+    val name = call?.optString("toolName")?.takeIf { it.isNotBlank() } ?: result?.toolName ?: stringResource(R.string.chat_role_tool)
+    val status = when {
+        result?.isError == true -> stringResource(R.string.chat_tool_failed)
+        result == null -> stringResource(R.string.chat_tool_pending)
+        result.streaming -> stringResource(R.string.chat_tool_progress)
+        else -> stringResource(R.string.chat_tool_complete)
+    }
+    Column(Modifier.fillMaxWidth().background(OmpColors.ToolBg, panelShape()).border(1.dp, OmpColors.Border, panelShape()).padding(8.dp)) {
+        androidx.compose.material3.TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
+            Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null)
+            Text("$name · $status", Modifier.weight(1f), color = if (result?.isError == true) OmpColors.StatusError else OmpColors.TextMuted)
+        }
+        if (expanded) {
+            (call?.optString("toolCallId") ?: result?.toolCallId)?.let { Text(it, color = OmpColors.TextDim, fontSize = 11.sp) }
+            if (call != null) {
+                Text(stringResource(R.string.chat_tool_input), color = OmpColors.TextMuted, fontSize = 12.sp)
+                TranscriptJson(when (val input = call.opt("input")) {
+                    is JSONObject -> input.toString(2)
+                    is JSONArray -> input.toString(2)
+                    else -> input?.toString() ?: "null"
+                }, initiallyExpanded = true)
+                if (inputTruncated) Text(stringResource(R.string.chat_tool_input_truncated), color = OmpColors.TextMuted, fontSize = 12.sp)
+            }
+            if (result != null) {
+                Text(stringResource(R.string.chat_tool_result), color = OmpColors.TextMuted, fontSize = 12.sp)
+                TranscriptContent(requester, sessionId, leafId, result)
+            }
         }
     }
 }
@@ -1049,35 +1247,34 @@ fun ChatExtensionHost(
     status: Map<String, String>, widgets: Map<String, List<String>>,
     onDismissNotice: (String) -> Unit, onDismissRequest: (String) -> Unit,
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var error by remember(sessionId, requests.firstOrNull()) { mutableStateOf<String?>(null) }
-    var sending by remember(sessionId, requests.firstOrNull()) { mutableStateOf(false) }
+    val currentSessionId by androidx.compose.runtime.rememberUpdatedState(sessionId)
+    var error by remember(sessionId, requests.firstOrNull()?.id) { mutableStateOf<String?>(null) }
+    var sending by remember(sessionId, requests.firstOrNull()?.id) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
         ExtensionNoticeList(notices, onDismissNotice)
         status.forEach { (key, value) -> Text("$key: $value", color = OmpColors.Text) }
         widgets.forEach { (key, lines) -> Text("$key\n${lines.joinToString("\n")}", color = OmpColors.Text) }
     }
     val request = requests.firstOrNull() ?: return
-    val id = when (request) {
-        is EventProjector.ChatExtensionRequest.Select -> request.id
-        is EventProjector.ChatExtensionRequest.Confirm -> request.id
-        is EventProjector.ChatExtensionRequest.Input -> request.id
-        is EventProjector.ChatExtensionRequest.Editor -> request.id
-    }
+    val id = request.id
     fun respond(response: JSONObject) {
         if (sending) return
         sending = true
         scope.launch {
             try {
                 ChatRequests.command(requester, sessionId, ChatRequests.extensionResponse(id, response))
-                onDismissRequest(id)
+                if (currentSessionId == sessionId) onDismissRequest(id)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                error = e.message ?: "Response failed"
+                error = e.message ?: context.getString(R.string.chat_response_failed)
             } finally { sending = false }
         }
     }
-    ExtensionDialogSheet(request, sending, error, ::respond, { respond(JSONObject().put("cancelled", true)) })
+    androidx.compose.runtime.key(sessionId, request.id) {
+        ExtensionDialogSheet(request, sending, error, ::respond, { respond(JSONObject().put("cancelled", true)) })
+    }
 }
 
 @Composable
@@ -1090,6 +1287,7 @@ fun ChatHistoryHost(requester: RelayRequester, sessionId: String, leafId: String
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChatHistoryContent(requester: RelayRequester, sessionId: String, leafId: String?, onOpenSession: (String) -> Unit, onEditMessage: (String) -> Unit, expanded: Boolean, onDismiss: () -> Unit) {
+    val context = LocalContext.current
     var page by remember(sessionId) { mutableStateOf<ChatRequests.HistoryPage?>(null) }
     var busy by remember(sessionId) { mutableStateOf(false) }
     var error by remember(sessionId) { mutableStateOf<String?>(null) }
@@ -1099,7 +1297,7 @@ private fun ChatHistoryContent(requester: RelayRequester, sessionId: String, lea
         busy = true
         scope.launch {
             try { page = ChatRequests.parseHistoryPage(ChatRequests.history(requester, sessionId, leafId ?: page?.leafId, offset, 25)); error = null }
-            catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = e.message ?: "History unavailable" }
+            catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = e.message ?: context.getString(R.string.chat_history_unavailable) }
             finally { busy = false }
         }
     }
@@ -1118,7 +1316,7 @@ private fun ChatHistoryContent(requester: RelayRequester, sessionId: String, lea
                     IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, stringResource(R.string.extension_close), tint = OmpColors.TextMuted) }
                 }
             Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (busy) Text("Loading…", color = OmpColors.TextMuted)
+                if (busy) Text(stringResource(R.string.chat_subagent_loading), color = OmpColors.TextMuted)
                 error?.let { Text(it, color = OmpColors.StatusError) }
                 page?.let { current ->
                     Text("${current.offset} / ${current.total}", color = OmpColors.TextMuted)
@@ -1130,11 +1328,11 @@ private fun ChatHistoryContent(requester: RelayRequester, sessionId: String, lea
                         }
                     }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        RuntimeChip("Previous", enabled = !busy && current.offset > 0, onClick = { load((current.offset - 25).coerceAtLeast(0)) })
-                        RuntimeChip("Next", enabled = !busy && current.hasMore, onClick = { load(current.offset + current.messages.length()) })
+                        RuntimeChip(stringResource(R.string.extension_previous), enabled = !busy && current.offset > 0, onClick = { load((current.offset - 25).coerceAtLeast(0)) })
+                        RuntimeChip(stringResource(R.string.extension_next), enabled = !busy && current.hasMore, onClick = { load(current.offset + current.messages.length()) })
                     }
                 }
-                RuntimeChip("Refresh", enabled = !busy, onClick = { load(page?.offset ?: 0) })
+                RuntimeChip(stringResource(R.string.extension_refresh), enabled = !busy, onClick = { load(page?.offset ?: 0) })
             }
                 }
             }
@@ -1144,6 +1342,7 @@ private fun ChatHistoryContent(requester: RelayRequester, sessionId: String, lea
 
 @Composable
 private fun HistoryEntry(requester: RelayRequester, sessionId: String, entryId: String, message: JSONObject, onOpenSession: (String) -> Unit, onEditMessage: (String) -> Unit) {
+    val context = LocalContext.current
     var details by remember { mutableStateOf<String?>(null) }
     var media by remember { mutableStateOf<org.json.JSONArray?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -1154,7 +1353,7 @@ private fun HistoryEntry(requester: RelayRequester, sessionId: String, entryId: 
         busy = true
         scope.launch {
             try { action(); error = null }
-            catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = e.message ?: "Request failed" }
+            catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = e.message ?: context.getString(R.string.extension_request_failed) }
             finally { busy = false }
         }
     }
@@ -1163,9 +1362,17 @@ private fun HistoryEntry(requester: RelayRequester, sessionId: String, entryId: 
     var thinkingExpanded by remember(entryId) { mutableStateOf(true) }
     androidx.compose.material3.HorizontalDivider(color = OmpColors.Border)
     if (role == "toolResult") {
-        RuntimeChip("${if (outputExpanded) "▾" else "▸"} Tool output · ${message.optString("toolName", "tool")}", onClick = { outputExpanded = !outputExpanded })
+        RuntimeChip(stringResource(R.string.chat_tool_output, if (outputExpanded) "▾" else "▸", message.optString("toolName", "tool")), onClick = { outputExpanded = !outputExpanded })
         if (!outputExpanded) return
-    } else Text(role, color = OmpColors.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    } else Text(
+        when (role) {
+            "user" -> stringResource(R.string.chat_role_user)
+            "assistant" -> stringResource(R.string.chat_role_assistant)
+            "system" -> stringResource(R.string.chat_role_system)
+            "tool" -> stringResource(R.string.chat_role_tool)
+            else -> role
+        }, color = OmpColors.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+    )
     val content = message.opt("content")
     if (content is org.json.JSONArray) {
         for (index in 0 until content.length()) {
@@ -1176,14 +1383,14 @@ private fun HistoryEntry(requester: RelayRequester, sessionId: String, entryId: 
                 } else {
                     MessageText(block.optString("text"), Modifier.fillMaxWidth())
                 }
-                "thinking" -> RuntimeChip("Load thinking ${index + 1}", enabled = !busy && entryId.isNotBlank(), onClick = {
+                "thinking" -> RuntimeChip(stringResource(R.string.chat_load_thinking, index + 1), enabled = !busy && entryId.isNotBlank(), onClick = {
                     perform { details = ChatRequests.thinking(requester, sessionId, entryId, index).getString("thinking"); thinkingExpanded = true }
                 })
                 "image" -> HistoryImage(block)
                 else -> {
                     var blockExpanded by remember(entryId, index) { mutableStateOf(false) }
                     Column(Modifier.fillMaxWidth().background(OmpColors.ToolBg, panelShape()).border(1.dp, OmpColors.Border, panelShape()).padding(8.dp)) {
-                        RuntimeChip("${if (blockExpanded) "▾" else "▸"} ${block.optString("toolName", block.optString("type", "Details"))}", onClick = { blockExpanded = !blockExpanded })
+                        RuntimeChip("${if (blockExpanded) "▾" else "▸"} ${block.optString("toolName", block.optString("type", stringResource(R.string.chat_details)))}", onClick = { blockExpanded = !blockExpanded })
                         if (blockExpanded) androidx.compose.foundation.text.selection.SelectionContainer {
                             Text(block.toString(2), fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = OmpColors.TextMuted)
                         }
@@ -1197,31 +1404,31 @@ private fun HistoryEntry(requester: RelayRequester, sessionId: String, entryId: 
         MessageText(content?.toString().orEmpty(), plainText = true)
     }
     details?.let {
-        RuntimeChip(if (thinkingExpanded) "Hide details" else "Show details", onClick = { thinkingExpanded = !thinkingExpanded })
+        RuntimeChip(if (thinkingExpanded) stringResource(R.string.chat_hide_details) else stringResource(R.string.chat_show_details), onClick = { thinkingExpanded = !thinkingExpanded })
         if (thinkingExpanded) androidx.compose.foundation.text.selection.SelectionContainer {
             Text(it, color = OmpColors.TextMuted, fontSize = 13.sp, lineHeight = 20.sp)
         }
     }
     media?.let { images -> for (i in 0 until images.length()) images.optJSONObject(i)?.let { HistoryImage(it) } }
     error?.let { Text(it, color = OmpColors.StatusError) }
-    if (message.optString("role") == "user") RuntimeChip("Copy to composer", onClick = {
+    if (message.optString("role") == "user") RuntimeChip(stringResource(R.string.chat_copy_to_composer), onClick = {
         val text = if (content is org.json.JSONArray) {
             (0 until content.length()).mapNotNull { index -> content.optJSONObject(index)?.takeIf { it.optString("type") == "text" }?.optString("text") }.joinToString("\n")
         } else content?.toString().orEmpty()
         onEditMessage(text)
     })
     if (entryId.isNotBlank()) {
-        if (message.optString("role") == "toolResult") RuntimeChip("Load media", enabled = !busy, onClick = {
+        if (message.optString("role") == "toolResult") RuntimeChip(stringResource(R.string.chat_load_media), enabled = !busy, onClick = {
             perform {
                 val result = ChatRequests.media(requester, sessionId, entryId)
                 media = result.getJSONArray("images")
-                details = "${media?.length()} images; ${result.optInt("missingCount")} missing"
+                details = context.getString(R.string.chat_media_summary, media?.length() ?: 0, result.optInt("missingCount"))
             }
         })
-        if (message.optString("role") == "user") RuntimeChip("Fork here", enabled = !busy, onClick = {
+        if (message.optString("role") == "user") RuntimeChip(stringResource(R.string.chat_fork_here), enabled = !busy, onClick = {
             perform {
                 val result = ChatRequests.command(requester, sessionId, JSONObject().put("type", "fork").put("entryId", entryId)).getJSONObject("result")
-                if (result.optBoolean("cancelled")) details = "Fork cancelled"
+                if (result.optBoolean("cancelled")) details = context.getString(R.string.chat_fork_cancelled)
                 else onOpenSession(result.getString("newSessionId"))
             }
         })
@@ -1231,19 +1438,30 @@ private fun HistoryEntry(requester: RelayRequester, sessionId: String, entryId: 
 @Composable
 private fun HistoryImage(block: JSONObject) {
     val data = block.optString("data")
-    val bitmap = remember(data) {
-        try {
-            val bytes = android.util.Base64.decode(data, android.util.Base64.DEFAULT)
-            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-        } catch (_: IllegalArgumentException) { null }
-    }
-    if (bitmap != null) androidx.compose.foundation.Image(bitmap.asImageBitmap(), "Message attachment", Modifier.fillMaxWidth().heightIn(max = 320.dp))
-    else Text("Image data unavailable", color = OmpColors.TextMuted)
+    val bitmap = androidx.compose.runtime.produceState<android.graphics.Bitmap?>(null, data) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            if (data.isEmpty() || data.length > 28_000_000) return@withContext null
+            try {
+                val bytes = android.util.Base64.decode(data, android.util.Base64.DEFAULT)
+                val options = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+                if (options.outWidth <= 0 || options.outHeight <= 0) return@withContext null
+                var sample = 1
+                while (options.outWidth / sample > 2048 || options.outHeight / sample > 2048) sample *= 2
+                options.inJustDecodeBounds = false
+                options.inSampleSize = sample
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+            } catch (_: IllegalArgumentException) { null }
+        }
+    }.value
+    if (bitmap != null) androidx.compose.foundation.Image(bitmap.asImageBitmap(), stringResource(R.string.chat_attachment), Modifier.fillMaxWidth().heightIn(max = 320.dp))
+    else Text(stringResource(R.string.chat_image_unavailable), color = OmpColors.TextMuted)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ChatStatsHost(requester: RelayRequester, sessionId: String, open: Boolean, onDismiss: () -> Unit) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var selected by remember(sessionId) { mutableStateOf<String?>(null) }
     var output by remember(sessionId) { mutableStateOf("") }
@@ -1263,8 +1481,8 @@ fun ChatStatsHost(requester: RelayRequester, sessionId: String, open: Boolean, o
             }
             Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf("State", "Stats", "System prompt").forEach { name ->
-                    RuntimeChip(name, enabled = !busy, onClick = {
+                listOf("State" to R.string.chat_stats_state, "Stats" to R.string.chat_stats_stats, "System prompt" to R.string.chat_stats_system_prompt).forEach { (name, label) ->
+                    RuntimeChip(stringResource(label), enabled = !busy, onClick = {
                         selected = name; busy = true
                         scope.launch {
                             try {
@@ -1274,16 +1492,16 @@ fun ChatStatsHost(requester: RelayRequester, sessionId: String, open: Boolean, o
                                     else -> ChatRequests.systemPrompt(requester, sessionId)
                                 }
                                 output = if (name == "System prompt") {
-                                    if (data.isNull("systemPrompt")) "System prompt unavailable" else data.optString("systemPrompt")
+                                    if (data.isNull("systemPrompt")) context.getString(R.string.chat_system_prompt_unavailable) else data.optString("systemPrompt")
                                 } else data.toString(2)
-                            } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; output = e.message ?: "Request failed" }
+                            } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; output = e.message ?: context.getString(R.string.extension_request_failed) }
                             finally { busy = false }
                         }
                     })
                 }
             }
             if (selected != null) Column(Modifier.fillMaxWidth()) {
-                if (busy) Text("Loading…", color = OmpColors.TextMuted)
+                if (busy) Text(stringResource(R.string.chat_subagent_loading), color = OmpColors.TextMuted)
                 androidx.compose.foundation.text.selection.SelectionContainer { Text(output, color = OmpColors.Text) }
             }
             }
@@ -1303,6 +1521,7 @@ fun ChatSlashHost(
     expanded: Boolean,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
     var matches by remember(sessionCwd) { mutableStateOf<List<String>>(emptyList()) }
     var searchError by remember(sessionCwd) { mutableStateOf<String?>(null) }
     var hasMore by remember(sessionCwd) { mutableStateOf(false) }
@@ -1315,7 +1534,7 @@ fun ChatSlashHost(
                 val items = result.optJSONArray("matches")
                 matches = if (items == null) emptyList() else (0 until items.length()).mapNotNull { items.optJSONObject(it)?.optString("path") }
                 hasMore = result.optBoolean("hasMore")
-            } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; searchError = e.message ?: "File search failed" }
+            } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; searchError = e.message ?: context.getString(R.string.chat_file_search_failed) }
         }
     }
     Box {
@@ -1334,7 +1553,7 @@ fun ChatSlashHost(
             Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 val commands = if (draft.startsWith("/")) slashCommands.filter { it.name.contains(draft.removePrefix("/").substringBefore(' '), ignoreCase = true) } else slashCommands
                 commands.forEach { command -> RuntimeChip("/${command.name}", onClick = { onInsertSlash("/${command.name} "); onDismiss() }) }
-                if (commands.isEmpty()) Text("No matching slash commands", color = OmpColors.TextMuted)
+                if (commands.isEmpty()) Text(stringResource(R.string.chat_no_commands), color = OmpColors.TextMuted)
             if (atQuery != null) Column(Modifier.fillMaxWidth()) {
                 searchError?.let { Text(it, color = OmpColors.StatusError) }
                 matches.forEach { path -> RuntimeChip(path, onClick = {
@@ -1342,7 +1561,7 @@ fun ChatSlashHost(
                     onInsertSlash(draft.dropLast(atQuery.length + 1) + token)
                     onDismiss()
                 }) }
-                if (hasMore) Text("More matches available; refine the file query.", color = OmpColors.TextMuted)
+                if (hasMore) Text(stringResource(R.string.chat_refine_file_query), color = OmpColors.TextMuted)
             }
             }
                 }
@@ -1354,7 +1573,7 @@ fun ChatSlashHost(
             if (draft.startsWith("/")) {
                 val commands = slashCommands.filter { it.name.contains(draft.removePrefix("/").substringBefore(' '), ignoreCase = true) }
                 commands.forEach { command -> RuntimeChip("/${command.name}", onClick = { onInsertSlash("/${command.name} ") }) }
-                if (commands.isEmpty()) Text("No matching slash commands", color = OmpColors.TextMuted)
+                if (commands.isEmpty()) Text(stringResource(R.string.chat_no_commands), color = OmpColors.TextMuted)
             }
             if (atQuery != null) {
                 searchError?.let { Text(it, color = OmpColors.StatusError) }
@@ -1362,7 +1581,7 @@ fun ChatSlashHost(
                     val token = if (path.any { it.isWhitespace() }) "@\"${path.replace("\"", "\\\"")}\" " else "@$path "
                     onInsertSlash(draft.dropLast(atQuery.length + 1) + token)
                 }) }
-                if (hasMore) Text("More matches available; refine the file query.", color = OmpColors.TextMuted)
+                if (hasMore) Text(stringResource(R.string.chat_refine_file_query), color = OmpColors.TextMuted)
             }
         }
     }
@@ -1403,8 +1622,8 @@ fun ApprovalBanner(
     ) {
         Text(message, fontSize = 13.sp, color = OmpColors.Text)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            RuntimeChip(label = "Approve", onClick = onApprove)
-            RuntimeChip(label = "Deny", onClick = onDeny)
+            RuntimeChip(label = stringResource(R.string.chat_approve), onClick = onApprove)
+            RuntimeChip(label = stringResource(R.string.chat_deny), onClick = onDeny)
         }
     }
 }
@@ -1424,7 +1643,7 @@ fun ExtensionNoticeList(notices: List<EventProjector.ChatNotice>, onDismiss: (St
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Notices · ${informational.size}", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = OmpColors.TextMuted)
+            Text(stringResource(R.string.chat_notices_count, informational.size), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = OmpColors.TextMuted)
             Text(informational.last().message, modifier = Modifier.weight(1f), fontSize = 12.sp,
                 color = OmpColors.TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("▸", fontSize = 13.sp, color = OmpColors.TextMuted)
@@ -1439,9 +1658,9 @@ fun ExtensionNoticeList(notices: List<EventProjector.ChatNotice>, onDismiss: (St
         ) {
             Column(Modifier.fillMaxWidth().weight(1f)) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Extension notices · ${informational.size}", modifier = Modifier.weight(1f), fontSize = 16.sp,
+                    Text(stringResource(R.string.chat_extension_notices_count, informational.size), modifier = Modifier.weight(1f), fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    IconButton(onClick = { detailsOpen = false }, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, "Close notices", tint = OmpColors.TextMuted) }
+                    IconButton(onClick = { detailsOpen = false }, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Close, stringResource(R.string.extension_close), tint = OmpColors.TextMuted) }
                 }
                 Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1477,17 +1696,9 @@ private fun ExtensionNoticeRow(notice: EventProjector.ChatNotice, onDismiss: (St
                 color = OmpColors.Text,
                 modifier = Modifier.weight(1f),
             )
-            Text(
-                "✕",
-                fontSize = 14.sp,
-                color = OmpColors.TextMuted,
-                modifier = Modifier
-                    .size(48.dp)
-                    .semantics { contentDescription = "Dismiss notice" }
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { onDismiss(notice.id) }
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-            )
+            IconButton(onClick = { onDismiss(notice.id) }, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Filled.Close, stringResource(R.string.chat_dismiss_notice), tint = OmpColors.TextMuted)
+            }
         }
 }
 
@@ -1499,7 +1710,7 @@ fun ExtensionDialogSheet(
     onConfirm: (JSONObject) -> Unit,
     onCancel: () -> Unit,
 ) {
-    var value by remember(request) {
+    var value by androidx.compose.runtime.saveable.rememberSaveable(request.id) {
         mutableStateOf(
             when (request) {
                 is EventProjector.ChatExtensionRequest.Editor -> request.prefill.orEmpty()
@@ -1507,19 +1718,14 @@ fun ExtensionDialogSheet(
             },
         )
     }
-    var choice by remember(request) { mutableStateOf<String?>(null) }
+    var choice by androidx.compose.runtime.saveable.rememberSaveable(request.id) { mutableStateOf<String?>(null) }
     AlertDialog(
         onDismissRequest = { if (!running) onCancel() },
         containerColor = OmpColors.BgPanel,
         title = {
             OmpDialogSystemBars()
             Text(
-                when (request) {
-                    is EventProjector.ChatExtensionRequest.Select -> request.title
-                    is EventProjector.ChatExtensionRequest.Confirm -> request.title
-                    is EventProjector.ChatExtensionRequest.Input -> request.title
-                    is EventProjector.ChatExtensionRequest.Editor -> request.title
-                },
+                request.title,
                 color = OmpColors.Text,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -1537,19 +1743,24 @@ fun ExtensionDialogSheet(
                         }
                     }
                     is EventProjector.ChatExtensionRequest.Select -> {
-                        request.options.forEach { option ->
+                        request.options.forEachIndexed { index, option ->
                             val selected = choice == option
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(if (selected) OmpColors.BgSelected else OmpColors.BgPanel)
-                                    .semantics { this.selected = selected }
-                                    .clickable(enabled = !running) { choice = option }.heightIn(min = 48.dp)
+                                    .semantics(mergeDescendants = true) { this.selected = selected }
+                                    .clickable(enabled = !running, role = androidx.compose.ui.semantics.Role.RadioButton) { choice = option }.heightIn(min = 48.dp)
                                     .padding(horizontal = 12.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(option, fontSize = 14.sp, color = OmpColors.Text, modifier = Modifier.weight(1f))
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(option, fontSize = 14.sp, color = OmpColors.Text)
+                                    request.optionDescriptions.getOrNull(index)?.let { description ->
+                                        Text(description, fontSize = 12.sp, color = OmpColors.TextMuted)
+                                    }
+                                }
                             }
                         }
                     }
@@ -1584,7 +1795,7 @@ fun ExtensionDialogSheet(
                 }
                 if (!running) {
                     Text(
-                        "The agent is waiting for your response.",
+                        stringResource(R.string.chat_waiting_response),
                         fontSize = 12.sp,
                         color = OmpColors.TextMuted,
                     )
@@ -1593,14 +1804,14 @@ fun ExtensionDialogSheet(
         },
         confirmButton = {
             Text(
-                "Send",
+                stringResource(R.string.chat_send),
                 color = OmpColors.Accent,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
                     .heightIn(min = 48.dp)
                     .clip(RoundedCornerShape(6.dp))
-                    .clickable(enabled = !running && (request !is EventProjector.ChatExtensionRequest.Select || choice != null)) {
+                    .clickable(enabled = !running && (request !is EventProjector.ChatExtensionRequest.Select || choice in request.options)) {
                         when (request) {
                             is EventProjector.ChatExtensionRequest.Select -> {
                                 val picked = choice ?: return@clickable
@@ -1619,7 +1830,7 @@ fun ExtensionDialogSheet(
         },
         dismissButton = {
             Text(
-                "Cancel",
+                stringResource(R.string.extension_cancel),
                 color = OmpColors.TextMuted,
                 fontSize = 14.sp,
                 modifier = Modifier

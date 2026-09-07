@@ -12,6 +12,8 @@ export interface RelayRequestContext {
   sessionId: string | null;
   /** Recheck transport authorization and selection before deferred mutations. */
   assertActive?: () => void;
+  /** Optional transport cancellation for finite requests. */
+  signal?: AbortSignal;
 }
 
 /**

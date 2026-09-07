@@ -80,6 +80,12 @@ import com.dbchbin.ompgui.remote.relay.ModelRef
 import com.dbchbin.ompgui.remote.relay.RelayArchive
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
 import com.dbchbin.ompgui.remote.relay.createCachedDownload
 import com.dbchbin.ompgui.remote.relay.shareFile
 import kotlinx.coroutines.launch
@@ -150,8 +156,15 @@ fun SessionListScreen(
     var projectsOpen by remember { mutableStateOf(false) }
     var worktreesOpen by remember { mutableStateOf(false) }
     var projectMenu by remember { mutableStateOf<String?>(null) }
-    var searchOpen by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
+    var bodySearch by rememberSaveable { mutableStateOf(false) }
+    val searchActive = query.isNotBlank()
+    val listState = rememberLazyListState()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    LaunchedEffect(query) {
+        listState.scrollToItem(0)
+    }
     var runningOnly by rememberSaveable { mutableStateOf(false) }
     var projectOrder by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var selectedProject by rememberSaveable { mutableStateOf<String?>(null) }
@@ -327,19 +340,51 @@ fun SessionListScreen(
         }
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.session_list_workspaces_header), color = OmpColors.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            IconButton(onClick = { searchOpen = !searchOpen; if (!searchOpen) query = "" }) {
-                Icon(Icons.Filled.Search, stringResource(R.string.search_sessions_placeholder), tint = if (searchOpen) OmpColors.Accent else OmpColors.TextMuted)
-            }
             Box {
                 IconButton(onClick = { projectsOpen = true }) {
                     Icon(Icons.Filled.MoreHoriz, stringResource(R.string.session_list_filter_manage_projects), tint = if (runningOnly || selectedProject != null) OmpColors.Accent else OmpColors.TextMuted)
                 }
             }
         }
-        if (searchOpen) {
-            OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true,
-                placeholder = { Text(stringResource(R.string.search_sessions_placeholder)) },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp))
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            singleLine = true,
+            label = { Text(stringResource(if (bodySearch) R.string.body_search_prompt else R.string.search_sessions_placeholder)) },
+            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, tint = OmpColors.TextMuted) },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = {
+                        query = ""
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                    }) {
+                        Icon(Icons.Filled.Close, stringResource(R.string.session_search_clear), tint = OmpColors.TextMuted)
+                    }
+                }
+            },
+            textStyle = TextStyle(fontSize = 16.sp),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = {
+                focusManager.clearFocus()
+                keyboardController?.hide()
+            }),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = OmpColors.Text,
+                unfocusedTextColor = OmpColors.Text,
+                focusedLabelColor = OmpColors.Text,
+                unfocusedLabelColor = OmpColors.TextMuted,
+                cursorColor = OmpColors.Text,
+            ),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        )
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { bodySearch = false }, modifier = Modifier.heightIn(min = 48.dp).semantics { selected = !bodySearch }) {
+                Text(stringResource(R.string.body_search_metadata), color = if (!bodySearch) OmpColors.Accent else OmpColors.TextMuted)
+            }
+            TextButton(onClick = { bodySearch = true; runningOnly = false }, modifier = Modifier.heightIn(min = 48.dp).semantics { selected = bodySearch }) {
+                Text(stringResource(R.string.body_search_body), color = if (bodySearch) OmpColors.Accent else OmpColors.TextMuted)
+            }
         }
         if (selectedProject != null || runningOnly) {
             TextButton(onClick = { selectedProject = null; runningOnly = false }, modifier = Modifier.fillMaxWidth()) {
@@ -348,7 +393,16 @@ fun SessionListScreen(
                 Text(stringResource(R.string.session_list_filter_chip, runningPrefix, projectLabel), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        PullToRefreshBox(
+        if (bodySearch) {
+            SessionBodySearch(
+                requester = requester,
+                query = query,
+                projectRoot = selectedProject,
+                onReset = { query = ""; selectedProject = null; runningOnly = false },
+                onOpen = onOpen,
+                modifier = Modifier.fillMaxWidth().weight(1f),
+            )
+        } else PullToRefreshBox(
             isRefreshing = refreshing,
             onRefresh = onRefresh,
             modifier = Modifier
@@ -357,19 +411,20 @@ fun SessionListScreen(
         ) {
             if (groups.isEmpty()) {
                 Text(
-                    stringResource(R.string.sessions_empty),
+                    stringResource(if (searchActive) R.string.session_search_no_matches else R.string.sessions_empty),
                     color = OmpColors.TextMuted,
                     fontSize = 14.sp,
                     modifier = Modifier.padding(24.dp),
                 )
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     items(groups, key = { it.key }) { group ->
-                        val expanded = group.key !in collapsed
+                        val expanded = searchActive || group.key !in collapsed
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -380,7 +435,7 @@ fun SessionListScreen(
                                     .fillMaxWidth()
                                     .background(if (selectedProject == group.key) OmpColors.BgHover else androidx.compose.ui.graphics.Color.Transparent)
                                     .semantics { selected = selectedProject == group.key }
-                                    .clickable {
+                                    .clickable(enabled = !searchActive) {
                                         collapsed = if (expanded) {
                                             collapsed + group.key
                                         } else {
@@ -490,6 +545,8 @@ fun SessionListScreen(
                                                     selectedIds + session.id
                                                 }
                                             } else {
+                                                focusManager.clearFocus()
+                                                keyboardController?.hide()
                                                 onOpen(session.id)
                                             }
                                         },
@@ -522,7 +579,7 @@ fun SessionListScreen(
             Box(Modifier.weight(1f)) { FooterNavRow(Icons.Filled.Speed, stringResource(R.string.session_list_usage)) { usageOpen = true; onOpenUsage() } }
         }
         if (projectsOpen) {
-            OmpModalSheet(onDismissRequest = { projectsOpen = false }, containerColor = OmpColors.Bg, dragHandle = { OmpSheetDragHandle() }) {
+            OmpModalSheet(onDismissRequest = { projectsOpen = false }, containerColor = OmpColors.Bg) {
                 OmpDialogSystemBars()
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 16.dp)) {
                     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -530,7 +587,7 @@ fun SessionListScreen(
                         IconButton(onClick = { projectsOpen = false }) { Icon(Icons.Filled.Close, stringResource(R.string.session_list_close_projects)) }
                     }
                     TextButton(onClick = { selectedProject = null; projectsOpen = false }) { Text(stringResource(R.string.session_list_all_projects)) }
-                    TextButton(onClick = { runningOnly = !runningOnly }) { Text(if (runningOnly) stringResource(R.string.session_list_show_all_sessions) else stringResource(R.string.session_list_show_running_only)) }
+                    TextButton(onClick = { runningOnly = !runningOnly }, enabled = !bodySearch) { Text(if (runningOnly) stringResource(R.string.session_list_show_all_sessions) else stringResource(R.string.session_list_show_running_only)) }
                     orderedProjects.forEach { project ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             TextButton(onClick = { selectedProject = project.path; onFetchWorktrees(project.path); projectsOpen = false }, modifier = Modifier.weight(1f)) {
@@ -561,7 +618,7 @@ fun SessionListScreen(
             }
         }
         if (worktreesOpen) {
-            OmpModalSheet(onDismissRequest = { worktreesOpen = false }, containerColor = OmpColors.Bg, dragHandle = { OmpSheetDragHandle() }) {
+            OmpModalSheet(onDismissRequest = { worktreesOpen = false }, containerColor = OmpColors.Bg) {
                 OmpDialogSystemBars()
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 16.dp)) {
                     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1147,7 +1204,6 @@ private fun WorktreeRemoveSheet(
         onDismissRequest = onDismiss,
         containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
-        dragHandle = { OmpSheetDragHandle() },
     ) {
         OmpDialogSystemBars()
         Column(
@@ -1266,7 +1322,6 @@ internal fun ArchivesSheet(
         onDismissRequest = onDismiss,
         containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
-        dragHandle = { OmpSheetDragHandle() },
     ) {
         OmpDialogSystemBars()
         Column(
@@ -1382,7 +1437,6 @@ private fun SessionActionSheet(
         onDismissRequest = onDismiss,
         containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
-        dragHandle = { OmpSheetDragHandle() },
     ) {
         OmpDialogSystemBars()
         Column(

@@ -47,9 +47,9 @@ class SubagentChipParseTest {
         )
         assertEquals(2, historical.size)
         assertFalse(historical[0].live)
-        assertEquals("unknown", historical[0].status)
+        assertEquals("recorded", historical[0].status)
         assertFalse(isSubagentLive(historical[0]))
-        // exitCode evidence may settle; bare started stays unknown, not completed.
+        // Startup is recorded, but completion requires terminal evidence.
         assertEquals("completed", historical[1].status)
         assertFalse(historical[1].live)
 
@@ -57,7 +57,7 @@ class SubagentChipParseTest {
         val merged = mergeSubagentChips(emptyList(), historical)
         assertEquals(0, merged.count(::isSubagentLive))
         assertEquals(setOf("h1", "h2"), merged.map { it.id }.toSet())
-        assertEquals("unknown", merged.first { it.id == "h1" }.status)
+        assertEquals("recorded", merged.first { it.id == "h1" }.status)
     }
 
     @Test
@@ -105,6 +105,54 @@ class SubagentChipParseTest {
         assertFalse(merged.first { it.id == "s1" }.live)
         assertFalse(merged.first { it.id == "ghost" }.live)
         assertEquals(0, merged.count(::isSubagentLive))
+    }
+
+    @Test
+    fun resultOnlyRowsPreserveTerminalEvidenceAndRejectInvalidExitCodes() {
+        val chips = parseSubagentChips(JSONArray("""[
+            {"id":"done","result":{"status":"completed"}},
+            {"id":"failed","status":"started","result":{"exitCode":1}},
+            {"id":"abort","result":{"aborted":true,"exitCode":0}},
+            {"id":"unavailable","result":{"exitCode":"invalid","error":null}}
+        ]"""), live = false)
+        assertEquals(listOf("completed", "failed", "aborted", "unknown"), chips.map { it.status })
+        assertEquals(0, chips.count(::isSubagentLive))
+        val refreshed = mergeSubagentChips(chips, parseSubagentChips(
+            JSONArray("""[{"id":"done","status":"started"}]"""), live = false,
+        ))
+        assertEquals("completed", refreshed.first { it.id == "done" }.status)
+    }
+
+    @Test
+    fun snapshotCannotUndoNewerTerminalButLaterAuthoritativeSnapshotCanRevive() {
+        val requested = listOf(SubagentChip("s1", "task", "running", "work", live = true))
+        val finished = EventProjector.applySubagentEvent(requested,
+            JSONObject("""{"type":"subagent_lifecycle","id":"s1","status":"completed"}"""),
+        )!!
+        val hydrated = reconcileSubagentChips(finished, requested, atRequest = requested)
+        assertEquals("completed", hydrated.single().status)
+        assertEquals(0, hydrated.count(::isSubagentLive))
+        val restarted = reconcileSubagentChips(hydrated, requested, atRequest = hydrated)
+        assertEquals("running", restarted.single().status)
+        assertEquals(1, restarted.count(::isSubagentLive))
+    }
+
+    @Test
+    fun resultProgressSettlesAndOnlyExplicitLifecycleStartRevives() {
+        val completed = EventProjector.applySubagentEvent(emptyList(),
+            JSONObject("""{"type":"subagent_progress","progress":{"id":"s1","status":"running","result":{"status":"failed"}}}"""),
+        )!!
+        assertEquals("failed", completed.single().status)
+        val stale = EventProjector.applySubagentEvent(completed,
+            JSONObject("""{"type":"subagent_progress","progress":{"id":"s1","status":"running"}}"""),
+        )!!
+        assertEquals("failed", stale.single().status)
+        assertEquals(0, stale.count(::isSubagentLive))
+        val restarted = EventProjector.applySubagentEvent(stale,
+            JSONObject("""{"type":"subagent_lifecycle","id":"s1","status":"started"}"""),
+        )!!
+        assertEquals("running", restarted.single().status)
+        assertEquals(1, restarted.count(::isSubagentLive))
     }
 
     @Test

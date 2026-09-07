@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -523,7 +524,9 @@ private fun MdOrdered(items: List<String>) {
             Row(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = "${index + 1}.",
-                    modifier = Modifier.width(24.dp),
+                    modifier = Modifier.widthIn(min = 24.dp).padding(end = 8.dp).alignByBaseline(),
+                    maxLines = 1,
+                    softWrap = false,
                     fontSize = 14.sp,
                     lineHeight = 22.sp,
                     fontWeight = FontWeight.Normal,
@@ -531,7 +534,7 @@ private fun MdOrdered(items: List<String>) {
                 )
                 InlineParagraph(
                     text = item,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).alignByBaseline(),
                     baseSize = 14.sp,
                     baseLineHeight = 22.sp,
                 )

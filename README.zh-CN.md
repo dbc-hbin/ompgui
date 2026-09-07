@@ -2,7 +2,7 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-> **Android APK（Android 12+）** — 使用 Kotlin 配套应用连接远程 ompgui 服务器，并查看最新会话的只读离线快照。[下载 ompgui Remote v0.7.3](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.3/ompgui-remote-v0.7.3.apk) · [发行说明](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.3)
+> **Android APK（Android 12+）** — 使用 Kotlin 配套应用连接远程 ompgui 服务器，并查看最新会话的只读离线快照。[下载 ompgui Remote v0.7.4](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.4/ompgui-remote-v0.7.4.apk) · [发行说明](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.4)
 
 > `android/` 中的实验性原生 Compose 客户端使用经过身份验证的 `/relay` WebSocket，提供会话/历史记录控制、带链接的消息、离线 Mermaid 图表与代码语法高亮，以及图片/PDF/音频/HTML/Markdown/DOCX 内联预览。文件仅在界面可见时自动刷新，并保留未保存的编辑；支持浏览允许访问的隐藏文件和搜索归档。模型与设置包括公开的 models.dev 目录、高级 OMP 设置，以及与配置状态分开显示的各会话实际 MCP 运行状态。附件通过流式传输暂存，而不是在手机端打包成一个巨大的 JSON：图片最多 10 个，每个 10 MiB；文本附件独立计数，最多 10 个，每个 256 KiB。OMP 自身的图像规范化处理和各提供商的图片数量限制仍然适用。
 >
@@ -156,6 +156,9 @@ ompgui 是一个由 Node 托管的 Next.js 应用，驱动你已安装的 `omp` 
 - **技能与插件**：扫描 omp 的技能目录（`~/.omp/agent/skills`、项目内 `.omp/skills` 及兼容目录），并调用 `omp plugin` 进行插件管理。
 - **文件访问**：文件浏览与预览仅限于所选项目目录以及会话中出现过的工作目录。
 - **分叉与会话内分支**：分叉会创建新的 `.jsonl` 文件；“从此处编辑”则在同一会话文件内创建另一个分支。
+
+- **待发送队列**：网页和当前 Android 客户端共用服务器内存队列。Android 通过 **Session controls → Queue** 主动打开，输入时不会自动出现 Execution/Queue 栏。发送前的条目可连同图片召回输入框、删除，或从后续消息提升为遵守安全发送时机的引导消息。图片原始字节私有保存，快照仅含元数据，并受容量限制。超过 15 MiB 的 Relay 召回在修改前被拒绝，并提示使用网页端。服务器进程重启不会保留队列。
+- **搜索与连接检查**：可选择元数据或正文搜索。私有 Node/SQLite 派生索引仅处理可见对话文本，不索引凭据或隐藏载荷；日期范围包含起点、不包含终点，匹配上下文为只读，不修改历史。配置验证不发起网络请求。实际连接测试需明确批准潜在费用，使用固定提示词、最多 32 个输出 token，每次最多发送一个供应商请求。仅支持使用字面值候选凭据的 OpenAI Chat Completions / Responses 与 Anthropic Messages API，不使用已存储的 OAuth 凭据。
 
 ## 开发
 

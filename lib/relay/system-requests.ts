@@ -8,8 +8,8 @@
  * `{op:'result',req,success:false,error:{code,message,...}}`.
  *
  * Reuses the exact desktop services/routes as authority:
- * - usage.get: `fetchCachedUsage` + `fetchUsagePayload` (mirrors
- *   `app/api/usage/route.ts`: 60s TTL, `refresh` invalidates via
+ * - usage.get: shared `getUsage` authority (also used by REST and legacy Relay:
+ *   60s TTL, `refresh` invalidates via
  *   `omp usage invalidate`, full UsageResponse incl. amounts,
  *   emptyReason, accountsWithoutUsage, disabledCredentials, capacity,
  *   generatedAt, cached, error codes — never fraction-only).
@@ -41,7 +41,7 @@
  * - settings.update {settings:object} -> {success:true,settings,application:{mode,restartRequired}}
  * - update {...any} -> throws update_disabled (400, never executes)
  */
-import { invalidateOmpCliCache, runOmpCli } from "../omp/omp-cli";
+import { invalidateOmpCliCache } from "../omp/omp-cli";
 import {
   filterNativeSettings,
   mergeNativeSettings,
@@ -54,7 +54,7 @@ import { assertNoAmbiguousModelScopes, type ModelScopeCandidate } from "../model
 import { invalidateModelsCache } from "../models-cache";
 import { disposeUtilityRpc, runUtilityCommand } from "../omp/rpc-utility";
 import { restartAllRpcSessions, getRpcSession } from "../rpc-manager";
-import { fetchCachedUsage, fetchUsagePayload, type UsageCacheState } from "../usage";
+import { getUsage as getSharedUsage, usageErrorCode } from "../usage";
 import type { UsageResponse } from "../api-types";
 import { listRelayDevices, revokeRelayDevice, type RelayDevicePublic } from "./registry";
 import type { RelayRequestContext } from "./request-types";
@@ -93,18 +93,6 @@ export class SystemRequestError extends Error {
 const DEVICE_ID_RE = /^d_[A-Za-z0-9_-]{16,64}$/;
 const DEVICE_ID_MAX = 128;
 const SESSION_ID_MAX = 128;
-const USAGE_CACHE_TTL_MS = 60_000;
-
-declare global {
-  var __ompgui_system_usage_cache: UsageCacheState | undefined;
-}
-
-function getSystemUsageState(): UsageCacheState {
-  if (!globalThis.__ompgui_system_usage_cache) {
-    globalThis.__ompgui_system_usage_cache = {};
-  }
-  return globalThis.__ompgui_system_usage_cache;
-}
 
 function usageToRecord(payload: UsageResponse): Record<string, unknown> {
   const record: Record<string, unknown> = {
@@ -180,31 +168,14 @@ function requireSessionId(value: unknown): string {
   return id;
 }
 
-function errorCodeForUsageStatus(status: number): string {
-  switch (status) {
-    case 503:
-      return "omp_not_found";
-    case 501:
-      return "usage_not_supported";
-    case 502:
-    default:
-      return "usage_fetch_failed";
-  }
-}
-
 async function getUsage(args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const refresh = optionalBoolean(args.refresh, "refresh") ?? false;
-  const state = getSystemUsageState();
-  const result = await fetchCachedUsage(state, refresh, {
-    fetch: () => fetchUsagePayload(),
-    invalidate: () => runOmpCli(["usage", "invalidate"], { timeout: 15_000 }),
-    ttlMs: USAGE_CACHE_TTL_MS,
-  });
+  const result = await getSharedUsage(refresh);
   if (result.ok) {
     return usageToRecord(result.payload);
   }
   throw new SystemRequestError(
-    errorCodeForUsageStatus(result.status),
+    usageErrorCode(result.status),
     result.error,
     undefined,
     result.status,

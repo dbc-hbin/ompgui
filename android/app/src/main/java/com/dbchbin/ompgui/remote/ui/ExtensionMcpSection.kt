@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -354,9 +356,9 @@ private fun McpEditor(requester: RelayRequester, cwd: String, initial: McpDraft,
                 Text(stringResource(R.string.extension_mcp_connection_options), style = MaterialTheme.typography.titleSmall, color = OmpColors.Text)
                 McpField(draft.serverCwd, { change(draft.copy(serverCwd = it)) }, stringResource(R.string.extension_mcp_server_cwd), !busy)
                 OutlinedTextField(value = draft.timeout, onValueChange = { change(draft.copy(timeout = it)) }, label = { Text(stringResource(R.string.extension_mcp_timeout)) }, enabled = !busy, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(value = draft.enabled, enabled = !busy, role = Role.Switch, onValueChange = { change(draft.copy(enabled = it)) }), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(stringResource(R.string.extension_mcp_enabled), modifier = Modifier.weight(1f))
-                    Switch(checked = draft.enabled, onCheckedChange = { change(draft.copy(enabled = it)) }, enabled = !busy)
+                    Switch(checked = draft.enabled, onCheckedChange = null, enabled = !busy)
                 }
                 McpChoices(stringResource(R.string.extension_mcp_request_id_format), listOf("", "number", "string"), draft.requestIdFormat, !busy) { change(draft.copy(requestIdFormat = it)) }
                 HorizontalDivider()

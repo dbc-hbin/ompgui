@@ -5,6 +5,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.dbchbin.ompgui.remote.net.ConnectionState
 import com.dbchbin.ompgui.remote.net.RelayClient
+import com.dbchbin.ompgui.remote.relay.RelayMessageQueue
+import com.dbchbin.ompgui.remote.relay.RelayRecalledDraft
 import com.dbchbin.ompgui.remote.relay.AttachmentSource
 import com.dbchbin.ompgui.remote.relay.DisplayMessage
 import com.dbchbin.ompgui.remote.relay.EventProjector
@@ -71,7 +73,9 @@ data class RemoteUiState(
     val chatNotices: List<EventProjector.ChatNotice> = emptyList(),
     val extensionStatus: Map<String, String> = emptyMap(),
     val extensionWidgets: Map<String, List<String>> = emptyMap(),
-    val queue: EventProjector.ChatQueue = EventProjector.ChatQueue(),
+    val messageQueue: RelayMessageQueue = RelayMessageQueue(),
+    val queueOperationPending: Boolean = false,
+    val recalledDraft: RelayRecalledDraft? = null,
 )
 
 /**
@@ -140,6 +144,16 @@ class RemoteViewModel(
     fun openSession(id: String) = client().openSession(id)
 
     fun closeSession() = client().closeSession()
+
+    fun refreshMessageQueue() = client().refreshMessageQueue()
+
+    suspend fun recallQueuedMessage(id: String): Boolean = client().recallQueuedMessage(id)
+
+    fun deleteQueuedMessage(id: String) = client().deleteQueuedMessage(id)
+
+    fun promoteQueuedMessage(id: String) = client().promoteQueuedMessage(id)
+
+    fun consumeRecalledDraft(id: String) = client().consumeRecalledDraft(id)
 
     fun sendPrompt() = client().sendPrompt()
 

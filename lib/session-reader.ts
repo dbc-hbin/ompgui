@@ -1024,9 +1024,8 @@ export function entryToUiMessage(
       const normalized = normalizeToolCalls(raw);
       const message = stripToolResultDetails(normalized);
       if (!options.deferThinking || message.role !== "assistant") return message;
-      // Guard like the loader does for bad lines: normalizeToolCalls passes
-      // non-array content through unchanged, so a string-content assistant
-      // entry must not 500 the whole context route.
+      // Legacy strings are normalized to text blocks; guard other malformed
+      // content shapes before applying thinking deferral.
       if (!Array.isArray(message.content)) return message;
       return {
         ...message,

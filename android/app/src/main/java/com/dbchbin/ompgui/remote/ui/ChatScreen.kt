@@ -82,9 +82,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
@@ -191,14 +189,14 @@ private fun readBounded(resolver: android.content.ContentResolver, uri: Uri, max
     }
 }
 
-private fun previewBitmap(resolver: android.content.ContentResolver, uri: Uri): ImageBitmap? {
+private fun previewBitmap(open: () -> java.io.InputStream?): ImageBitmap? {
     return try {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        open()?.use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         var sample = 1
         while (bounds.outWidth / sample > 96 || bounds.outHeight / sample > 96) sample *= 2
-        resolver.openInputStream(uri)?.use {
+        open()?.use {
             BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
         }
     } catch (_: Exception) { null }
@@ -255,7 +253,7 @@ private fun loadAttachment(context: Context, uri: Uri): AttachmentItem? {
                 source = AttachmentSource(mime, actualSize) {
                     resolver.openInputStream(uri) ?: throw java.io.IOException("Cannot reopen $name; select it again")
                 },
-                bitmap = previewBitmap(resolver, uri),
+                bitmap = previewBitmap { resolver.openInputStream(uri) },
             )
         } else if (isTextish(mime, name)) {
             val bytes = readBounded(resolver, uri, MAX_TEXT_BYTES) ?: return null
@@ -336,8 +334,6 @@ fun ChatScreen(
     branchLeafId: String? = null,
     onSetLeaf: (String, String) -> Unit = { _, _ -> },
     onFetchBranches: (String) -> Unit = {},
-    queueSteering: List<String> = emptyList(),
-    queueFollowUp: List<String> = emptyList(),
     fastMode: Boolean? = null,
     autoRetry: Boolean? = null,
     interruptMode: String? = null,
@@ -345,11 +341,28 @@ fun ChatScreen(
     steeringMode: String? = null,
     followUpMode: String? = null,
     onOpenPalette: () -> Unit,
+    messageQueue: com.dbchbin.ompgui.remote.relay.RelayMessageQueue,
+    queueOperationPending: Boolean,
+    recalledDraft: com.dbchbin.ompgui.remote.relay.RelayRecalledDraft?,
+    onRefreshQueue: () -> Unit,
+    onRecallQueuedMessage: suspend (String) -> Boolean,
+    onDeleteQueuedMessage: (String) -> Unit,
+    onPromoteQueuedMessage: (String) -> Unit,
+    onConsumeRecalledDraft: (String) -> Unit,
 ) {
+    var queueOpen by remember(sessionId) { mutableStateOf(false) }
+    var recallConfirmation by remember(sessionId) { mutableStateOf<String?>(null) }
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    fun openQueue() {
+        focusManager.clearFocus()
+        keyboardController?.hide()
+        queueOpen = true
+        onRefreshQueue()
+    }
     var historyOpen by remember(sessionId) { mutableStateOf(false) }
     var statsOpen by remember(sessionId) { mutableStateOf(false) }
     var commandsOpen by remember(sessionId) { mutableStateOf(false) }
-    var activityExpanded by remember(sessionId) { mutableStateOf(false) }
     var runtimeExpanded by remember(sessionId) { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val context = LocalContext.current
@@ -410,6 +423,33 @@ fun ChatScreen(
             commandError = failure.message ?: context.getString(R.string.chat_error_session_state)
         }
     }
+    LaunchedEffect(recalledDraft?.id) {
+        val recalled = recalledDraft ?: return@LaunchedEffect
+        try {
+            val restored = withContext(Dispatchers.IO) {
+                recalled.images.mapIndexed { index, image ->
+                    val bytes = android.util.Base64.decode(image.data, android.util.Base64.DEFAULT)
+                    AttachmentItem(
+                        name = context.getString(R.string.chat_queue_image_name, index + 1),
+                        isImage = true,
+                        mimeType = image.mimeType,
+                        sizeBytes = bytes.size.toLong(),
+                        source = AttachmentSource(image.mimeType, bytes.size.toLong()) { bytes.inputStream() },
+                        bitmap = previewBitmap { bytes.inputStream() },
+                    )
+                }
+            }
+            attachedFiles = restored
+            onDraftChange(recalled.text)
+            attachWarning = null
+            onConsumeRecalledDraft(recalled.id)
+            queueOpen = false
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            attachWarning = context.getString(R.string.chat_queue_restore_failed)
+        }
+    }
     val pickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetMultipleContents(),
     ) { uris ->
@@ -429,7 +469,7 @@ fun ChatScreen(
         }
     }
     val sendWithComposer: () -> Unit = {
-        if (!sending) {
+        if (!sending && !queueOperationPending && recalledDraft == null) {
             val commandType = when {
                 !running -> "prompt"
                 submitBehavior == com.dbchbin.ompgui.remote.store.AppPreferences.SUBMIT_QUEUE -> "follow_up"
@@ -468,9 +508,19 @@ fun ChatScreen(
             }
         }
     }
+    val results = remember(messages) { messages.filter { it.role == "toolResult" || it.role == "tool" }
+                .mapNotNull { result -> result.toolCallId?.let { it to result } }.toMap() }
+    val callIds = remember(messages) { messages.flatMap { message ->
+                val content = message.content
+                if (content == null) emptyList() else (0 until content.length()).mapNotNull { index ->
+                    content.optJSONObject(index)?.takeIf { it.optString("type") == "toolCall" }
+                        ?.optString("toolCallId")?.takeIf { it.isNotBlank() }
+                }
+            }.toSet() }
+    val transcriptMessages = remember(messages, callIds) { messages.filterNot { (it.role == "toolResult" || it.role == "tool") && it.toolCallId in callIds } }
     suspend fun scrollToLatest() {
-        if (messages.isEmpty()) return
-        listState.scrollToItem(messages.lastIndex)
+        if (transcriptMessages.isEmpty()) return
+        listState.scrollToItem(transcriptMessages.lastIndex)
         // A final message can be taller than the viewport: its top is not the end.
         val layout = listState.layoutInfo
         val lastItem = layout.visibleItemsInfo.lastOrNull() ?: return
@@ -494,26 +544,13 @@ fun ChatScreen(
         if (followLocked) scrollToLatest()
     }
 
-    BoxWithConstraints(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(OmpColors.Bg)
             .safeDrawingPadding()
             .imePadding(),
     ) {
-        val hasActivity = chatNotices.any { it.type == "info" } ||
-            running || queueSteering.isNotEmpty() || queueFollowUp.isNotEmpty()
-        val pinnedHeaderCount = (if (todos.isNotEmpty()) 1 else 0) +
-            (if (subagents.isNotEmpty()) 1 else 0) +
-            (if (hasActivity || activityExpanded) 1 else 0)
-        // Todo and subagent bodies use modal workspaces, never composer space.
-        // Only activity remains inline; reserve all pinned headers and input
-        // before allocating its viewport, including when the IME shrinks this box.
-        val activityViewportMax = minOf(
-            176.dp,
-            maxHeight * 0.4f,
-            (maxHeight - 192.dp - 52.dp * pinnedHeaderCount).coerceAtLeast(0.dp),
-        )
         Column(Modifier.fillMaxSize()) {
         ChatTopBar(
             title = title,
@@ -526,6 +563,7 @@ fun ChatScreen(
             onOpenCommands = { commandsOpen = true },
             runtimeEnabled = !historicalView,
             onOpenRuntime = { runtimeExpanded = true },
+            onOpenQueue = ::openQueue,
             onOpenBranches = {
                 if (sessionId.isNotBlank()) onFetchBranches(sessionId)
                 branchesOpen = true
@@ -573,17 +611,13 @@ fun ChatScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             itemsIndexed(
-                items = messages,
-                key = { index, message -> "${message.role}_${message.timestamp ?: index}_$index" },
+                items = transcriptMessages,
+                key = { index, message -> message.entryId ?: "${message.role}_${message.toolCallId ?: message.timestamp ?: index}_$index" },
             ) { _, message ->
                 if (message.role == "user") {
-                    UserMessage(message)
+                    UserMessage(message, requester, sessionId, branchLeafId)
                 } else {
-                    AssistantMessage(
-                        message = message,
-                        requester = requester,
-                        sessionId = sessionId,
-                    )
+                    AssistantMessage(message, requester, sessionId, branchLeafId, results)
                 }
             }
         }
@@ -623,56 +657,18 @@ fun ChatScreen(
         ) {
             ChatExtensionHost(
                 requester = requester, sessionId = sessionId,
-                requests = extensionDialogs, notices = chatNotices.filter { it.type != "info" },
+                requests = extensionDialogs, notices = chatNotices,
                 status = extensionStatus, widgets = extensionWidgets,
                 onDismissNotice = onDismissChatNotice,
                 onDismissRequest = onDismissExtensionDialog,
             )
-            // Pinned composer panels (web ComposerPanels parity): always visible
-            // collapsed headers — not buried inside the activity accordion.
+            // Todo and subagent details open in modal workspaces.
             TodoPanel(todos = todos)
             SubagentPanel(
                 requester = requester,
                 sessionId = sessionId,
                 subagents = subagents,
             )
-            if (hasActivity || activityExpanded) Row(
-                Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(8.dp))
-                    .clickable { activityExpanded = !activityExpanded }.padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val summary = buildList {
-                    if (chatNotices.any { it.type == "info" }) {
-                        add(context.getString(R.string.chat_activity_notices, chatNotices.count { it.type == "info" }))
-                    }
-                    if (running || queueSteering.isNotEmpty() || queueFollowUp.isNotEmpty()) {
-                        add(context.getString(R.string.chat_activity_run_queue))
-                    }
-                }.joinToString(" · ").ifBlank { context.getString(R.string.chat_activity) }
-                Text(summary, modifier = Modifier.weight(1f), fontSize = 12.sp, color = OmpColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Icon(
-                    if (activityExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                    stringResource(R.string.chat_activity_details),
-                    Modifier.size(18.dp),
-                    tint = OmpColors.TextMuted,
-                )
-            }
-            Column(
-                modifier = Modifier.fillMaxWidth().heightIn(max = if (activityExpanded) activityViewportMax else 0.dp)
-                    .then(if (activityExpanded) Modifier else Modifier.clearAndSetSemantics {})
-                    .clipToBounds().verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-            ExtensionNoticeList(chatNotices.filter { it.type == "info" }, onDismissChatNotice)
-            if (!historicalView) {
-            QueuePanel(
-                running = running,
-                steering = queueSteering,
-                followUp = queueFollowUp,
-
-            )
-            }
-            }
             RuntimePanel(
                 expanded = runtimeExpanded && !historicalView,
                 onExpandedChange = { runtimeExpanded = it },
@@ -719,6 +715,7 @@ fun ChatScreen(
                     }
                 },
                 onOpenPalette = onOpenPalette,
+                onOpenQueue = { runtimeExpanded = false; openQueue() },
                 onAbort = { execute(JSONObject().put("type", "abort")) },
             )
             ChatSlashHost(requester = requester, sessionCwd = sessionCwd, slashCommands = slashCommands, draft = draft, onInsertSlash = onDraftChange, expanded = commandsOpen, onDismiss = { commandsOpen = false })
@@ -737,13 +734,13 @@ fun ChatScreen(
                 attachedFiles = attachedFiles,
                 thinkingLevel = thinkingLevel,
                 usageFraction = usageFraction,
-                onDraftChange = { if (!sending) onDraftChange(it) },
-                sending = sending,
+                onDraftChange = { if (!sending && !queueOperationPending && recalledDraft == null) onDraftChange(it) },
+                sending = sending || queueOperationPending || recalledDraft != null,
                 onSend = sendWithComposer,
                 onAbort = onAbort,
                 onOpenPicker = onOpenPicker,
-                onPickFiles = { if (!sending) pickerLauncher.launch("*/*") },
-                onRemoveAttachment = { item -> if (!sending) attachedFiles = attachedFiles - item },
+                onPickFiles = { if (!sending && !queueOperationPending && recalledDraft == null) pickerLauncher.launch("*/*") },
+                onRemoveAttachment = { item -> if (!sending && !queueOperationPending && recalledDraft == null) attachedFiles = attachedFiles - item },
                 onOpenUsage = onOpenUsage,
                 onOpenThinkingPicker = { thinkingPickerOpen = true },
                 onCompact = { execute(JSONObject().put("type", "compact")) },
@@ -752,6 +749,40 @@ fun ChatScreen(
             }
         }
         }
+    }
+    if (queueOpen) {
+        QueueScreen(
+            queue = messageQueue,
+            busy = queueOperationPending || sending || recalledDraft != null || connection != ConnectionState.Connected,
+            error = error ?: attachWarning,
+            onDismiss = { queueOpen = false },
+            onRefresh = onRefreshQueue,
+            onRecall = { id ->
+                if (draft.isNotEmpty() || attachedFiles.isNotEmpty()) recallConfirmation = id
+                else commandScope.launch { onRecallQueuedMessage(id) }
+            },
+            onDelete = onDeleteQueuedMessage,
+            onPromote = onPromoteQueuedMessage,
+        )
+    }
+    recallConfirmation?.let { id ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { recallConfirmation = null },
+            containerColor = OmpColors.BgPanel,
+            title = { Text(stringResource(R.string.chat_queue_replace_title), color = OmpColors.Text) },
+            text = { Text(stringResource(R.string.chat_queue_replace_message), color = OmpColors.TextMuted) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    enabled = !queueOperationPending && !sending && recalledDraft == null && connection == ConnectionState.Connected,
+                    onClick = { recallConfirmation = null; commandScope.launch { onRecallQueuedMessage(id) } },
+                ) { Text(stringResource(R.string.chat_queue_replace)) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { recallConfirmation = null }) {
+                    Text(stringResource(R.string.chat_queue_cancel))
+                }
+            },
+        )
     }
     if (pickerOpen) {
         androidx.compose.runtime.key(sessionId) {
@@ -816,6 +847,7 @@ private fun ChatTopBar(
     onOpenStats: () -> Unit,
     onOpenCommands: () -> Unit,
     onOpenRuntime: () -> Unit,
+    onOpenQueue: () -> Unit,
     runtimeEnabled: Boolean,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -848,6 +880,7 @@ private fun ChatTopBar(
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_session_info)) }, leadingIcon = { Icon(Icons.Filled.Info, null, Modifier.size(20.dp)) }, onClick = { menuOpen = false; onOpenStats() })
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_commands)) }, leadingIcon = { Icon(Icons.Filled.Terminal, null, Modifier.size(20.dp)) }, onClick = { menuOpen = false; onOpenCommands() })
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_session_controls)) }, leadingIcon = { Icon(Icons.Filled.Tune, null, Modifier.size(20.dp)) }, enabled = runtimeEnabled, onClick = { menuOpen = false; onOpenRuntime() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.chat_queue_title)) }, enabled = runtimeEnabled, onClick = { menuOpen = false; onOpenQueue() })
                     HorizontalDivider(color = OmpColors.Border)
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_settings)) }, leadingIcon = { Icon(Icons.Filled.Settings, null, Modifier.size(20.dp)) }, onClick = { menuOpen = false; onOpenSettings() })
                 }
@@ -880,48 +913,24 @@ private fun AssistantMessage(
     message: DisplayMessage,
     requester: RelayRequester,
     sessionId: String,
+    leafId: String?,
+    results: Map<String, DisplayMessage>,
 ) {
     val stamp = remember(message.timestamp) { formatTimestamp(message.timestamp) }
-    val needsFull = remember(message.text) {
-        com.dbchbin.ompgui.remote.relay.EventProjector.needsFullText(message.text)
-    }
-    var expanded by remember(message.timestamp, message.role) { mutableStateOf(false) }
-    val toolOutput = message.role == "toolResult" || message.role == "tool"
-    Column(modifier = if (toolOutput) Modifier.fillMaxWidth()
-        .background(OmpColors.ToolBg, RoundedCornerShape(8.dp))
-        .border(1.dp, OmpColors.Border, RoundedCornerShape(8.dp)).padding(horizontal = 12.dp)
-        else Modifier.fillMaxWidth()) {
-        if (toolOutput) {
-            androidx.compose.material3.TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    if (expanded) stringResource(R.string.chat_tool_hide) else stringResource(R.string.chat_tool_show),
-                    fontSize = 13.sp,
-                    color = OmpColors.TextMuted,
-                    modifier = Modifier.weight(1f),
-                )
-                Icon(if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                    contentDescription = null, modifier = Modifier.size(18.dp), tint = OmpColors.TextMuted)
-            }
-        }
-        if (!toolOutput || expanded) {
-        if (needsFull) {
-            LongMessageText(message = message, requester = requester, sessionId = sessionId)
-        } else if (toolOutput) {
-            MarkdownText(text = message.text, modifier = Modifier.fillMaxWidth())
+    Column(Modifier.fillMaxWidth()) {
+        if (message.role == "toolResult" || message.role == "tool" || message.role == "bashExecution") {
+            TranscriptTool(requester, sessionId, leafId, null, message)
         } else {
-            MessageText(text = message.text, modifier = Modifier.fillMaxWidth())
+            TranscriptContent(requester, sessionId, leafId, message, results)
         }
-        }
-        if (stamp.isNotEmpty()) {
-            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                Text(stamp, fontSize = 12.sp, color = OmpColors.TextDim)
-            }
+        if (stamp.isNotEmpty()) Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+            Text(stamp, fontSize = 12.sp, color = OmpColors.TextDim)
         }
     }
 }
 
 @Composable
-private fun UserMessage(message: DisplayMessage) {
+private fun UserMessage(message: DisplayMessage, requester: RelayRequester, sessionId: String, leafId: String?) {
     val stamp = remember(message.timestamp) { formatTimestamp(message.timestamp) }
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val bubbleMax = maxWidth * 0.85f
@@ -937,7 +946,7 @@ private fun UserMessage(message: DisplayMessage) {
                     .border(1.dp, OmpColors.Border, RoundedCornerShape(12.dp))
                     .padding(horizontal = 14.dp, vertical = 10.dp),
             ) {
-                MessageText(text = message.text, plainText = true)
+                TranscriptContent(requester, sessionId, leafId, message)
             }
             if (stamp.isNotEmpty()) {
                 Text(
@@ -955,6 +964,7 @@ private fun UserMessage(message: DisplayMessage) {
 // Floating composer card.
 // ---------------------------------------------------------------------------
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ComposerCard(
     draft: String,
@@ -979,14 +989,14 @@ private fun ComposerCard(
     var utilitiesOpen by remember { mutableStateOf(false) }
     val utilitiesDesc = stringResource(R.string.chat_composer_utilities)
     val usageLabel = usageFraction?.let { "${(it.coerceIn(0.0, 1.0) * 100).toInt()}%" } ?: "—"
-    val shape = RoundedCornerShape(12.dp)
+    val shape = androidx.compose.material3.MaterialTheme.shapes.medium
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(OmpColors.BgPanel)
             .border(1.dp, OmpColors.Border, shape)
-            .padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
+            .padding(top = 8.dp, bottom = 4.dp),
     ) {
         if (attachedFiles.isNotEmpty()) {
             LazyRow(
@@ -1023,21 +1033,26 @@ private fun ComposerCard(
                 }
             },
         )
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        FlowRow(Modifier.fillMaxWidth()) {
             IconButton(onClick = onPickFiles, enabled = !sending, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Filled.AttachFile, stringResource(R.string.chat_composer_attach), Modifier.size(20.dp), tint = OmpColors.TextMuted)
             }
             Row(
-                Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(8.dp))
-                    .clickable(enabled = !running && !sending, onClick = onOpenPicker).padding(horizontal = 4.dp),
+                // FlowRow uses this intrinsic basis to wrap controls, then weight
+                // assigns the model all remaining space on its line.
+                Modifier.weight(1f).width(96.dp).heightIn(min = 48.dp)
+                    .clip(androidx.compose.material3.MaterialTheme.shapes.small)
+                    .clickable(enabled = !running && !sending, onClick = onOpenPicker),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(currentModel?.displayName() ?: stringResource(R.string.chat_model), modifier = Modifier.weight(1f), fontSize = 12.sp, color = OmpColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(currentModel?.displayName() ?: stringResource(R.string.chat_model), modifier = Modifier.weight(1f), style = androidx.compose.material3.MaterialTheme.typography.bodySmall, color = OmpColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Icon(Icons.Filled.KeyboardArrowDown, null, Modifier.size(16.dp), tint = OmpColors.TextMuted)
             }
-            Box(Modifier.width(64.dp).heightIn(min = 48.dp).clip(RoundedCornerShape(8.dp))
-                .clickable(enabled = !running && !sending, onClick = onOpenThinkingPicker).padding(horizontal = 4.dp), contentAlignment = Alignment.Center) {
-                Text("$thinkingLevel ▾", fontSize = 12.sp, color = OmpColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Box(Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                .clip(androidx.compose.material3.MaterialTheme.shapes.small)
+                .clickable(enabled = !running && !sending, onClick = onOpenThinkingPicker)
+                .padding(horizontal = 4.dp), contentAlignment = Alignment.Center) {
+                Text("$thinkingLevel ▾", style = androidx.compose.material3.MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted)
             }
             Box {
                 IconButton(onClick = { utilitiesOpen = true }, modifier = Modifier.size(48.dp)) {
@@ -1072,7 +1087,7 @@ private fun ComposerCard(
             androidx.compose.material3.TextButton(
                 onClick = { if (stop) onAbort() else onSend() },
                 enabled = active,
-                modifier = Modifier.heightIn(min = 48.dp),
+                modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
                 contentPadding = PaddingValues(horizontal = 8.dp),
             ) {
                 if (running && canSend) {

@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -90,13 +89,6 @@ private val RemoteShapes = Shapes(
     extraLarge = RoundedCornerShape(16.dp),
 )
 
-@Composable
-internal fun OmpSheetDragHandle() {
-    Box(Modifier.fillMaxWidth().height(20.dp), contentAlignment = Alignment.Center) {
-        Box(Modifier.size(32.dp, 4.dp).background(OmpColors.Border, RoundedCornerShape(2.dp)))
-    }
-}
-
 /**
  * Non-swipe modal sheet: native [Dialog] + bottom-aligned [Surface].
  *
@@ -114,7 +106,6 @@ fun OmpModalSheet(
     fullHeight: Boolean = false,
     containerColor: Color = OmpColors.Bg,
     contentColor: Color = OmpColors.Text,
-    dragHandle: @Composable (() -> Unit)? = { OmpSheetDragHandle() },
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Dialog(
@@ -161,7 +152,6 @@ fun OmpModalSheet(
                         else Modifier.heightIn(max = sheetHeight),
                     ),
                 ) {
-                    dragHandle?.invoke()
                     content()
                 }
             }
@@ -174,13 +164,16 @@ fun OmpModalSheet(
 internal fun OmpDialogSystemBars(edgeToEdgeSheet: Boolean = false) {
     val view = LocalView.current
     val dark = OmpColors.dark
-    SideEffect {
+    val window = remember(view) {
         var parent = view.parent
-        var window = (view as? DialogWindowProvider)?.window
-        while (window == null && parent != null) {
-            window = (parent as? DialogWindowProvider)?.window
+        var dialogWindow = (view as? DialogWindowProvider)?.window
+        while (dialogWindow == null && parent != null) {
+            dialogWindow = (parent as? DialogWindowProvider)?.window
             parent = parent.parent
         }
+        dialogWindow
+    }
+    DisposableEffect(window, edgeToEdgeSheet) {
         window?.let {
             if (edgeToEdgeSheet) {
                 // Floating dialogs otherwise fit their window to system bars even
@@ -197,10 +190,17 @@ internal fun OmpDialogSystemBars(edgeToEdgeSheet: Boolean = false) {
                 WindowCompat.setDecorFitsSystemWindows(it, false)
             }
             it.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
+        // The Dialog owns and disposes this window; no delayed exit keeps it alive.
+        onDispose { }
+    }
+    DisposableEffect(window, view, dark) {
+        window?.let {
             val controller = WindowCompat.getInsetsController(it, view)
             controller.isAppearanceLightStatusBars = !dark
             controller.isAppearanceLightNavigationBars = !dark
         }
+        onDispose { }
     }
 }
 

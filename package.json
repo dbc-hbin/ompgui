@@ -1,6 +1,6 @@
 {
   "name": "ompgui",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "description": "Web UI & Browser GUI for the oh-my-pi (omp) coding agent",
   "homepage": "https://github.com/dbc-hbin/ompgui#readme",
   "repository": {
@@ -45,7 +45,7 @@
     "dev": "next dev -H 127.0.0.1 -p 30178",
     "build": "next build --webpack",
     "start": "next start -H 127.0.0.1 -p 30177",
-    "test": "node --experimental-strip-types --test lib/*.test.mjs lib/omp/*.test.mjs lib/relay/*.test.mjs components/*.test.mjs components/ui/*.test.mjs hooks/*.test.mjs bin/*.test.mjs",
+    "test": "node --experimental-strip-types --test lib/*.test.mjs lib/omp/*.test.mjs lib/relay/*.test.mjs lib/i18n/*.test.mjs components/*.test.mjs components/ui/*.test.mjs hooks/*.test.mjs bin/*.test.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "prepack": "npm run build",

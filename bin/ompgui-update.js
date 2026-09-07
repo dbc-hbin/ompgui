@@ -18,18 +18,20 @@ async function checkReady({ hostname, port }) {
 }
 
 function normalizePath(value, platform) {
-  const normalized = path.normalize(value).replaceAll("\\", path.sep);
+  const paths = platform === "win32" ? path.win32 : path;
+  const normalized = paths.normalize(value);
   return platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 function detectInstallMethod(packageDir, env = process.env, homeDir = os.homedir(), platform = process.platform) {
+  const paths = platform === "win32" ? path.win32 : path;
   const normalized = normalizePath(packageDir, platform);
   const bunRoots = [
-    env.BUN_INSTALL ? path.join(env.BUN_INSTALL, "install", "global", "node_modules") : null,
-    path.join(env.USERPROFILE || env.HOME || homeDir, "node_modules"),
-    path.join(homeDir, ".bun", "install", "global", "node_modules"),
-  ].filter(Boolean).map((root) => normalizePath(root, platform));
-  return bunRoots.some((root) => normalized.startsWith(root + path.sep)) ? "bun" : "npm";
+    env.BUN_INSTALL ? paths.join(env.BUN_INSTALL, "install", "global", "node_modules") : null,
+    paths.join(env.USERPROFILE || env.HOME || homeDir, ".bun", "install", "global", "node_modules"),
+    paths.join(homeDir, ".bun", "install", "global", "node_modules"),
+  ].filter(Boolean).map((root) => normalizePath(paths.join(root, "ompgui"), platform));
+  return bunRoots.includes(normalized) ? "bun" : "npm";
 }
 
 function findNpmCli(nodePath = process.execPath, exists = fs.existsSync) {
@@ -54,6 +56,9 @@ function getInstallCommand(method, platform = process.platform, nodePath = proce
     throw new Error("Cannot safely update this installation layout. Reinstall ompgui with npm or Bun first.");
   }
   if (method === "bun") {
+    if (packageDir && (paths.basename(paths.dirname(modules)) !== "global" || paths.basename(paths.resolve(modules, "../..")) !== "install")) {
+      throw new Error("Cannot safely update this Bun installation layout. Reinstall ompgui with Bun first.");
+    }
     const target = packageDir ? ["--global-dir", paths.dirname(modules), "--global-bin-dir", platform === "win32" ? paths.join(paths.dirname(modules), ".bin") : paths.resolve(modules, "../../../bin")] : [];
     return { command: platform === "win32" ? "bun.exe" : "bun", args: ["add", "--global", ...target, "ompgui@latest"] };
   }

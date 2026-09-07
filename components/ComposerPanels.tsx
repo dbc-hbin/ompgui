@@ -1,8 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import type { SubagentInfo } from "@/hooks/useAgentSession";
-import type { SubagentActivityEvent } from "@/lib/subagent-types";
+import type { SubagentInfo, SubagentActivityEvent } from "@/lib/subagent-types";
 import type { TodoPhase } from "@/lib/pi-types";
 import { TodoList } from "./TodoList";
 import { SubagentHub } from "./SubagentHub";

@@ -1,0 +1,33 @@
+name: Android verification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: package.json
+          cache: npm
+      - run: npm ci
+      - run: python3 -m unittest discover -s android/scripts -p 'test_*.py'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Assemble, unit test and lint Android
+        working-directory: android
+        run: ./gradlew --no-daemon assembleDebug testDebugUnitTest lintDebug
+      - name: Verify debug APK contents and version
+        run: python3 android/scripts/verify-apk.py android/app/build/outputs/apk/debug/output-metadata.json --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner"

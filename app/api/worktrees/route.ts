@@ -1,10 +1,11 @@
+import { existsSync } from "node:fs";
 import { NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/api-utils";
-import { existsSync } from "fs";
-import { addWorktree, findCurrentWorktreePath, listWorktrees, removeWorktree, resolveProject } from "@/lib/worktree";
+import { addWorktree, findCurrentWorktreePath, listWorktrees, removeWorktree, resolveAllowedWorktreeListing } from "@/lib/worktree";
 import { allowFileRoot, getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 import { isPathWithinRoots } from "@/lib/path-security";
 import { projectIdentityKey } from "@/lib/project-identity";
+import type { WorktreeInfo } from "@/lib/worktree";
 
 /** Same gate as /api/files: only session cwds / project roots / explicitly
  *  allowed dirs may be inspected or mutated through this endpoint. */
@@ -34,17 +35,18 @@ export async function GET(req: Request) {
     if (!cwd) {
       return NextResponse.json({ error: "cwd is required", code: "cwd_required" }, { status: 400 });
     }
-    const denied = await checkCwdAllowed(cwd);
-    if (denied) return denied;
-
-    const project = await resolveProject(cwd);
-    let worktrees: Awaited<ReturnType<typeof listWorktrees>> = [];
+    const listing = await resolveAllowedWorktreeListing(cwd, await getAllowedFileRoots());
+    if (!listing) {
+      return NextResponse.json({ error: "Access denied", code: "access_denied" }, { status: 403 });
+    }
+    const { project, listingCwd } = listing;
+    let worktrees: WorktreeInfo[] = [];
     let currentWorktreePath: string | null = null;
     let isGit = true;
     try {
       // For a removed-worktree cwd (session of a deleted worktree), fall back
       // to the inferred project root so the switcher still shows the project.
-      worktrees = await listWorktrees(existsSync(cwd) ? cwd : project.projectRoot);
+      worktrees = await listWorktrees(listingCwd);
       currentWorktreePath = findCurrentWorktreePath(worktrees, cwd);
     } catch {
       isGit = false;

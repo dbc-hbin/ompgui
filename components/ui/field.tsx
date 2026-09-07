@@ -416,7 +416,6 @@ export function SecretInput({
 /* ─── Select ─── */
 
 export type SelectOptionItem = string | { value: string; label: ReactNode | string };
-export type SelectOption = SelectOptionItem;
 
 export interface SelectProps {
   value: string;
@@ -789,8 +788,6 @@ export function Button({
   );
 }
 
-export const PrimaryButton = Button;
-
 /* ──────────────────── Convenience hooks ──────────────────── */
 
 /**
@@ -807,7 +804,7 @@ export function useFieldValidation(validate: () => string | null) {
   }, []);
 
   const onChange = useCallback(() => {
-    setError((prev) => (prev === null ? null : null));
+    setError(null);
   }, []);
 
   const onSubmit = useCallback((): string | null => {

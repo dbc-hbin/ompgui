@@ -322,6 +322,13 @@ function withMcpConfigLock<T>(configPath: string, fn: () => T): T {
   }
 }
 
+export class McpServerConflictError extends Error {
+  constructor(name: string) {
+    super(`MCP server "${name}" already exists`);
+    this.name = "McpServerConflictError";
+  }
+}
+
 export function writeMcpServer(cwd: string, name: string, server: McpServer, previousName?: string): { path: string } {
   validateMcpServer(name, server);
   if (previousName !== undefined && !SERVER_NAME.test(previousName)) throw new Error("Invalid previous server name");
@@ -329,7 +336,11 @@ export function writeMcpServer(cwd: string, name: string, server: McpServer, pre
   return withMcpConfigLock(current.path, () => {
     // Re-read INSIDE the lock so a concurrent writer's mutation is not lost.
     const locked = readMcpConfig(cwd);
-    const servers = { ...(locked.config.mcpServers ?? {}) };
+    const storedServers = locked.config.mcpServers ?? {};
+    if (previousName !== undefined && previousName !== name && Object.hasOwn(storedServers, name)) {
+      throw new McpServerConflictError(name);
+    }
+    const servers = { ...storedServers };
     // The browser never receives existing credentials. Preserve them when an
     // edited server omits those fields, rather than deleting them on save.
     const existing = servers[previousName ?? name];

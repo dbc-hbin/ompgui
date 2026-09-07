@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -288,7 +289,6 @@ fun FileBrowserSheet(
 
     OmpModalSheet(
         onDismissRequest = { if (dirty || busy) { dismissAfterDiscard = true; discard = true } else onDismiss() },
-        dragHandle = { OmpSheetDragHandle() },
         containerColor = OmpColors.Bg,
     ) {
         OmpDialogSystemBars()
@@ -399,21 +399,24 @@ fun FileBrowserSheet(
                     Text(stringResource(R.string.file_browser_meta, file.optLong("size"), file.optString("mime", "application/octet-stream")),
                         style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted,
                         modifier = Modifier.padding(top = 8.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        if (file.optString("previewKind") == "text") {
+                    if (file.optString("previewKind") == "text") {
+                        Row(Modifier.fillMaxWidth().selectableGroup(), verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.weight(1f).heightIn(min = 48.dp)
                                 .selectable(previewMode, role = Role.Tab, onClick = { previewMode = true }), contentAlignment = Alignment.Center) {
-                                Text(stringResource(R.string.file_browser_preview), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                Text(stringResource(R.string.file_browser_preview), style = MaterialTheme.typography.labelLarge,
                                     modifier = Modifier.fillMaxWidth().background(if (previewMode) OmpColors.BgSelected else OmpColors.Bg, MaterialTheme.shapes.small)
                                         .padding(horizontal = 8.dp, vertical = 6.dp), textAlign = TextAlign.Center)
                             }
                             Box(Modifier.weight(1f).heightIn(min = 48.dp)
                                 .selectable(!previewMode, role = Role.Tab, onClick = { previewMode = false }), contentAlignment = Alignment.Center) {
-                                Text(stringResource(R.string.file_browser_source_edit), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                Text(stringResource(R.string.file_browser_source_edit), style = MaterialTheme.typography.labelLarge,
                                     modifier = Modifier.fillMaxWidth().background(if (!previewMode) OmpColors.BgSelected else OmpColors.Bg, MaterialTheme.shapes.small)
                                         .padding(horizontal = 8.dp, vertical = 6.dp), textAlign = TextAlign.Center)
                             }
-                        } else {
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                        if (file.optString("previewKind") != "text") {
                             Text(stringResource(R.string.file_browser_preview), style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
                         }
                         IconButton(modifier = Modifier.size(48.dp), enabled = !busy, onClick = {

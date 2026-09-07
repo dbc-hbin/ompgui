@@ -2,7 +2,7 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-> **Android APK (Android 12+)** — Kotlin 製のコンパニオンアプリでリモートの ompgui サーバーに接続し、最新セッションの読み取り専用オフラインスナップショットを利用できます。[ompgui Remote v0.7.3 をダウンロード](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.3/ompgui-remote-v0.7.3.apk) · [リリースノート](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.3)
+> **Android APK (Android 12+)** — Kotlin 製のコンパニオンアプリでリモートの ompgui サーバーに接続し、最新セッションの読み取り専用オフラインスナップショットを利用できます。[ompgui Remote v0.7.4 をダウンロード](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.4/ompgui-remote-v0.7.4.apk) · [リリースノート](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.4)
 
 > `android/` の実験的なネイティブ Compose クライアントは、認証済みの `/relay` WebSocket を使用し、セッション・履歴の操作、リンク付きメッセージ、オフラインの Mermaid 図とコードの構文強調、画像/PDF/音声/HTML/Markdown/DOCX のインラインプレビューを提供します。ファイルの自動更新は表示中のみ動作し、未保存の編集を保持します。許可された隠しファイルの閲覧とアーカイブ検索にも対応します。モデル・設定には公開 models.dev カタログ、高度な OMP 設定、構成とは別に表示されるセッションごとの実際の MCP 実行状態が含まれます。添付ファイルは端末上で巨大な単一 JSON にまとめず、ストリーミングでステージングします。画像は各 10 MiB で最大 10 件、テキスト添付は独立した枠で各 256 KiB、最大 10 件です。OMP 自体の画像正規化とプロバイダーごとの画像数制限は引き続き適用されます。
 >
@@ -156,6 +156,9 @@ ompgui は Node 上でホストされる Next.js アプリで、インストー�
 - **スキルとプラグイン**: omp のスキルディレクトリ（`~/.omp/agent/skills`、プロジェクトの `.omp/skills`、互換ディレクトリ）をスキャンし、プラグイン管理には `omp plugin` を呼び出します。
 - **ファイルアクセス**: ファイルの閲覧とプレビューは、選択したプロジェクトディレクトリとセッションに現れる作業ディレクトリに限定されます。
 - **フォークとセッション内ブランチの違い**: フォークは新しい `.jsonl` ファイルを作成します。「ここから編集」は同じセッションファイル内に別のブランチを作成します。
+
+- **送信待ちキュー**: Web と現在の Android はサーバーのメモリ内キューを共有します。Android は **Session controls → Queue** から明示的に開き、入力中に Execution/Queue バーを自動表示しません。送信前の項目は画像ごと入力欄へ戻す、削除する、後続メッセージから安全なタイミングでのステアリングへ昇格できます。画像本体は非公開で、スナップショットはメタデータのみです。容量制限があり、15 MiB 超の Relay 取り戻しは変更前に拒否し Web 利用を案内します。サーバー再起動でキューは失われます。
+- **検索と接続確認**: メタデータ検索と本文検索を選択できます。本文の非公開 Node/SQLite 索引は表示される会話のみを対象とし、認証情報や隠れたペイロードを含めません。開始日時を含み終了日時を含まない絞り込みと読み取り専用の一致文脈を提供し、履歴は変更しません。構成検証は通信を行いません。実接続テストは費用への明示的な承認後、固定プロンプト・最大出力 32 トークンで最大 1 回の要求を送信します。リテラルの候補認証情報による OpenAI Chat Completions / Responses と Anthropic Messages API のみ対応し、保存済み OAuth は使用しません。
 
 ## 開発
 

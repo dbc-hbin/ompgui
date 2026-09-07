@@ -36,6 +36,25 @@ test("targets the executing package rather than the PATH npm prefix", () => {
   assert.deepEqual(getInstallCommand("bun", "linux", undefined, undefined, "/home/me/.bun/install/global/node_modules/ompgui").args, ["add", "--global", "--global-dir", "/home/me/.bun/install/global", "--global-bin-dir", "/home/me/.bun/bin", "ompgui@latest"]);
 });
 
+test("HOME node_modules remains npm even when Bun is installed", () => {
+  const packageDir = "/home/me/node_modules/ompgui";
+  const method = detectInstallMethod(packageDir, { HOME: "/home/me", BUN_INSTALL: "/home/me/.bun" }, "/home/me", "linux");
+  assert.equal(method, "npm");
+  assert.deepEqual(getInstallCommand(method, "linux", undefined, undefined, packageDir).args, ["install", "--no-save", "--prefix", "/home/me", "ompgui@latest"]);
+  assert.throws(() => getInstallCommand("bun", "linux", undefined, undefined, packageDir), /installation layout/);
+  assert.equal(detectInstallMethod("C:\\Users\\me\\node_modules\\ompgui", { USERPROFILE: "C:\\Users\\me" }, "C:\\Users\\me", "win32"), "npm");
+});
+
+test("custom Bun roots and Windows paths retain their installation targets", () => {
+  const packageDir = "/opt/bun/install/global/node_modules/ompgui";
+  assert.equal(detectInstallMethod(packageDir, { BUN_INSTALL: "/opt/bun" }, "/home/me", "linux"), "bun");
+  assert.deepEqual(getInstallCommand("bun", "linux", undefined, undefined, packageDir).args, ["add", "--global", "--global-dir", "/opt/bun/install/global", "--global-bin-dir", "/opt/bun/bin", "ompgui@latest"]);
+  const windowsDir = "D:\\Bun\\install\\global\\node_modules\\ompgui";
+  assert.equal(detectInstallMethod(windowsDir, { BUN_INSTALL: "d:\\bun" }, "C:\\Users\\me", "win32"), "bun");
+  assert.deepEqual(getInstallCommand("bun", "win32", undefined, undefined, windowsDir), { command: "bun.exe", args: ["add", "--global", "--global-dir", "D:\\Bun\\install\\global", "--global-bin-dir", "D:\\Bun\\install\\global\\.bin", "ompgui@latest"] });
+  assert.equal(detectInstallMethod("/home/me/.bun/install/global/node_modules/another/node_modules/ompgui", {}, "/home/me", "linux"), "npm");
+});
+
 test("awaits stop before install and readiness before success", async (t) => {
   const f = await fixture(t);
   const stopped = Promise.withResolvers();

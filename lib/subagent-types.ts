@@ -307,8 +307,7 @@ export function parseSubagentActivityEvent(value: unknown): SubagentActivityEven
   return null;
 }
 
-// SubagentInfo is defined here so server-side history and the hook share the
-// same roster shape; hooks/useAgentSession re-exports it for components.
+// Server-side history, session hooks, and components import the same roster shape here.
 export interface SubagentInfo {
   id: string;
   agent: string;

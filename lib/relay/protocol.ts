@@ -125,6 +125,9 @@ export type RelayServerFrame =
       cwd?: string;
       leafId?: string | null;
       messages: RelayDisplayMessage[];
+      total?: number;
+      offset?: number;
+      hasMore?: boolean;
       agent: RelayAgentState;
     }
   | { op: "session.err"; id?: string; code: string; message: string }
@@ -278,9 +281,19 @@ export interface RelaySessionListItem {
 }
 
 export interface RelayDisplayMessage {
-  role: "user" | "assistant" | "custom";
+  role: string;
   text: string;
   timestamp?: number;
+  entryId?: string;
+  content?: Record<string, unknown>[];
+  toolCallId?: string;
+  toolName?: string;
+  isError?: boolean;
+  errorMessage?: string;
+  stopReason?: string;
+  details?: unknown;
+  deferredImages?: { entryId: string; count: number };
+  truncated?: boolean;
 }
 
 export interface RelayAgentState {

@@ -35,6 +35,20 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      - run: python3 -m unittest discover -s android/scripts -p 'test_*.py'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Assemble, unit test and lint Android
+        working-directory: android
+        run: ./gradlew --no-daemon assembleDebug testDebugUnitTest lintDebug
+      - name: Verify debug APK
+        run: python3 android/scripts/verify-apk.py android/app/build/outputs/apk/debug/output-metadata.json --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner"
 
       - name: Create draft GitHub Release
         env:
@@ -74,6 +88,19 @@ jobs:
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --notes-file release-notes.md --draft
           fi
 
+      - name: Download and verify locally signed release APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          ANDROID_EXPECTED_CERT_SHA256: ${{ vars.ANDROID_EXPECTED_CERT_SHA256 }}
+        run: |
+          APK="ompgui-remote-${TAG}.apk"
+          if ! gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$APK" --pattern "$APK.sha256" --dir "$RUNNER_TEMP/release-apk" || [ ! -f "$RUNNER_TEMP/release-apk/$APK" ] || [ ! -f "$RUNNER_TEMP/release-apk/$APK.sha256" ]; then
+            echo "Release blocked: build/sign $APK locally, upload it and $APK.sha256 to the draft release, then rerun. See docs/release.md. Signing keys must stay local." >&2
+            exit 1
+          fi
+          python3 android/scripts/verify-apk.py "$RUNNER_TEMP/release-apk/$APK" --sha256-file "$RUNNER_TEMP/release-apk/$APK.sha256" --check-history --release --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner"
+
       - name: Publish to npm
         run: |
           PACKAGE_NAME="$(node -p 'require("./package.json").name')"
@@ -88,4 +115,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+        run: |
+          if [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true ]; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+          fi

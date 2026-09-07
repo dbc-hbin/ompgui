@@ -14,15 +14,6 @@ object EventProjector {
         val type: String,
     )
 
-    /** Client-side mirror of queued steering/follow-up texts (server reports count only). */
-    data class ChatQueue(
-        val steering: List<String> = emptyList(),
-        val followUp: List<String> = emptyList(),
-    ) {
-        fun isEmpty(): Boolean = steering.isEmpty() && followUp.isEmpty()
-        fun size(): Int = steering.size + followUp.size
-    }
-
     /**
      * Native projection of streamed `extension_ui_request` frames.
      * Same supported desktop semantics as `handleExtensionUiRequest` in
@@ -32,27 +23,31 @@ object EventProjector {
      * state instead of a dialog.
      */
     sealed interface ChatExtensionRequest {
+        val id: String
+        val title: String
+
         data class Select(
-            val id: String,
-            val title: String,
+            override val id: String,
+            override val title: String,
             val options: List<String>,
+            val optionDescriptions: List<String?> = emptyList(),
         ) : ChatExtensionRequest
 
         data class Confirm(
-            val id: String,
-            val title: String,
+            override val id: String,
+            override val title: String,
             val message: String,
         ) : ChatExtensionRequest
 
         data class Input(
-            val id: String,
-            val title: String,
+            override val id: String,
+            override val title: String,
             val placeholder: String?,
         ) : ChatExtensionRequest
 
         data class Editor(
-            val id: String,
-            val title: String,
+            override val id: String,
+            override val title: String,
             val prefill: String?,
         ) : ChatExtensionRequest
     }
@@ -99,7 +94,11 @@ object EventProjector {
     /** Long assistant text stays fully accessible via bounded fetch/paging; never silently cut. */
     fun needsFullText(text: String): Boolean = text.length > FULL_TEXT_THRESHOLD
 
-    fun previewText(text: String): String = text.take(FULL_TEXT_THRESHOLD)
+    fun previewText(text: String): String {
+        if (text.length <= FULL_TEXT_THRESHOLD) return text
+        val boundary = text.lastIndexOfAny(charArrayOf(' ', '\n', '\t'), FULL_TEXT_THRESHOLD)
+        return text.substring(0, if (boundary > 0) boundary else FULL_TEXT_THRESHOLD).trimEnd() + "…"
+    }
 
     /**
      * Attachments over 128KiB must reject/warn, not prefix-as-complete.
@@ -116,6 +115,32 @@ object EventProjector {
     // Streamed extension_ui_request projection (desktop parity).
     // -----------------------------------------------------------------------
 
+    fun acceptsSessionEvent(
+        eventSessionId: String, openedSessionId: String?, awaitingSnapshot: Boolean,
+        historicalView: Boolean, payload: JSONObject,
+    ): Boolean {
+        if (eventSessionId != openedSessionId || historicalView) return false
+        if (!awaitingSnapshot) return true
+        val type = payload.optString("type")
+        return type == "extension_ui_request" || type == "extension_ui_pending"
+    }
+
+    fun applyExtensionDialogs(current: List<ChatExtensionRequest>, payload: JSONObject): List<ChatExtensionRequest> {
+        if (payload.optString("type") == "extension_ui_pending") {
+            val ids = payload.optJSONArray("ids") ?: return current
+            val pending = (0 until ids.length()).mapNotNull { ids.opt(it) as? String }.toSet()
+            return current.filter { it.id in pending }
+        }
+        if (payload.optString("type") == "extension_ui_request" && payload.optString("method") == "cancel") {
+            val target = payload.optString("targetId")
+            return current.filterNot { it.id == target }
+        }
+        val dialog = parseExtensionDialog(payload) ?: return current
+        return if (current.any { it.id == dialog.id }) {
+            current.map { if (it.id == dialog.id) dialog else it }
+        } else current + dialog
+    }
+
     /** Parse a blocking dialog request (select/confirm/input/editor). Null for other methods. */
     fun parseExtensionDialog(payload: JSONObject): ChatExtensionRequest? {
         if (payload.optString("type") != "extension_ui_request") return null
@@ -126,12 +151,18 @@ object EventProjector {
                 val title = payload.optString("title").trim().ifEmpty { return null }
                 val arr = payload.optJSONArray("options") ?: return null
                 val options = ArrayList<String>(arr.length())
+                val descriptions = ArrayList<String?>(arr.length())
+                val details = payload.optJSONArray("optionDetails")
                 for (i in 0 until arr.length()) {
-                    val opt = arr.optString(i).trim()
-                    if (opt.isNotEmpty()) options.add(opt)
+                    // RPC responses must echo the original label, including native ask's
+                    // recommendation suffix and multi-select checkmark prefix.
+                    val option = arr.opt(i) as? String ?: return null
+                    if (option.isBlank()) return null
+                    options.add(option)
+                    descriptions.add((details?.optJSONObject(i)?.opt("description") as? String)?.takeIf { it.isNotBlank() })
                 }
                 if (options.isEmpty()) return null
-                ChatExtensionRequest.Select(id = id, title = title, options = options)
+                ChatExtensionRequest.Select(id = id, title = title, options = options, optionDescriptions = descriptions)
             }
             "confirm" -> {
                 val title = payload.optString("title").trim().ifEmpty { return null }
@@ -298,56 +329,6 @@ object EventProjector {
     }
 
     // -----------------------------------------------------------------------
-    // Queue mirror (server reports count only; texts tracked client-side).
-    // -----------------------------------------------------------------------
-
-    fun queueAfterSend(queue: ChatQueue, text: String, steering: Boolean): ChatQueue {
-        val trimmed = text.trim()
-        if (trimmed.isEmpty()) return queue
-        return if (steering) {
-            queue.copy(steering = queue.steering + trimmed)
-        } else {
-            queue.copy(followUp = queue.followUp + trimmed)
-        }
-    }
-
-    /** Remove one delivered text from the mirror (desktop consumeQueuedMessage). */
-    fun queueAfterDelivered(queue: ChatQueue, text: String): ChatQueue {
-        val trimmed = text.trim()
-        if (trimmed.isEmpty()) return queue
-        val si = queue.steering.indexOf(trimmed)
-        if (si != -1) {
-            return queue.copy(steering = queue.steering.filterIndexed { i, _ -> i != si })
-        }
-        val fi = queue.followUp.indexOf(trimmed)
-        if (fi != -1) {
-            return queue.copy(followUp = queue.followUp.filterIndexed { i, _ -> i != fi })
-        }
-        return queue
-    }
-
-    fun queueRemove(queue: ChatQueue, text: String): ChatQueue = queueAfterDelivered(queue, text)
-
-    fun queuePromoteToSteer(queue: ChatQueue, text: String): ChatQueue {
-        val trimmed = text.trim()
-        val fi = queue.followUp.indexOf(trimmed)
-        if (fi == -1) return queue
-        return queue.copy(
-            steering = queue.steering + trimmed,
-            followUp = queue.followUp.filterIndexed { i, _ -> i != fi },
-        )
-    }
-
-    /**
-     * A server snapshot reporting zero queued messages clears the mirror,
-     * unless the client just mutated the queue (<5s ago, mirroring desktop's
-     * queueMutatedAtRef guard against lagging get_state snapshots).
-     */
-    fun queueAfterServerCount(queue: ChatQueue, serverCount: Int, mutatedAtMs: Long, nowMs: Long): ChatQueue {
-        if (serverCount != 0) return queue
-        if (nowMs - mutatedAtMs < 5_000) return queue
-        return ChatQueue()
-    }
 
     // -----------------------------------------------------------------------
     // Scroll / history helpers.
@@ -367,32 +348,87 @@ object EventProjector {
     }
 
     fun applyMessages(current: List<DisplayMessage>, payload: JSONObject): List<DisplayMessage> {
-        return when (payload.optString("type")) {
-            "message_start", "message_update" -> {
-                val message = payload.optJSONObject("message") ?: return current
-                val role = message.optString("role")
-                if (role == "user") return current
-                if (role != "assistant" && role != "custom") return current
-                val text = extractText(message)
-                upsertStreaming(current, role, text)
+        val type = payload.optString("type")
+        if (type.startsWith("tool_execution_")) {
+            if (type != "tool_execution_start" && type != "tool_execution_update" && type != "tool_execution_end") return current
+            val id = payload.optString("toolCallId").takeIf { it.isNotBlank() } ?: return current
+            val existingIndex = current.indexOfLast { it.role == "toolResult" && it.toolCallId == id }
+            val existing = current.getOrNull(existingIndex)
+            // Late progress must not turn an already completed result back into pending.
+            if (existing != null && !existing.streaming && (type != "tool_execution_end" || existing.entryId != null)) return current
+            val result = payload.optJSONObject("result") ?: payload.optJSONObject("partialResult")
+            val contentPending = payload.optBoolean("contentPending") || result?.optBoolean("contentPending") == true
+            val wire = JSONObject(result?.toString() ?: "{}").apply {
+                put("role", "toolResult")
+                put("toolCallId", id)
+                put("toolName", payload.optString("toolName").ifEmpty { existing?.toolName.orEmpty() })
+                if (payload.has("isError")) put("isError", payload.optBoolean("isError"))
+                if (payload.has("entryId")) put("entryId", payload.optString("entryId"))
             }
-            "message_end" -> {
-                val message = payload.optJSONObject("message") ?: return current
-                val role = message.optString("role")
-                if (role == "user") {
-                    val text = extractText(message)
-                    if (text.isEmpty()) return current
-                    return current + DisplayMessage(role = "user", text = text, streaming = false)
+            val parsed = parseDisplayMessage(wire, type != "tool_execution_end" || contentPending) ?: return current
+            val projected = parsed.copy(
+                entryId = parsed.entryId ?: existing?.entryId,
+                text = if (result == null) existing?.text.orEmpty() else parsed.text,
+                content = if (result == null) existing?.content else parsed.content,
+                details = parsed.details ?: existing?.details,
+                deferredImages = parsed.deferredImages ?: existing?.deferredImages,
+                truncated = parsed.truncated || (result == null && existing?.truncated == true),
+                isError = parsed.isError || (result == null && existing?.isError == true),
+            )
+            var messages = if (existingIndex < 0) current + projected else current.toMutableList().also { it[existingIndex] = projected }
+            // A call can begin before the assistant's complete content frame arrives.
+            val hasCall = messages.any { message ->
+                val blocks = message.content
+                blocks != null && (0 until blocks.length()).any { blocks.optJSONObject(it)?.optString("toolCallId") == id }
+            }
+            if (!hasCall && type == "tool_execution_start") {
+                val call = JSONObject().put("type", "toolCall").put("toolCallId", id)
+                    .put("toolName", payload.optString("toolName"))
+                    .put("input", payload.opt("args") ?: payload.opt("arguments") ?: JSONObject())
+                messages = messages.toMutableList().also {
+                    val resultIndex = it.indexOfFirst { row -> row.role == "toolResult" && row.toolCallId == id }
+                    it.add(resultIndex, DisplayMessage("assistant", "", content = org.json.JSONArray().put(call), entryId = "tool-call:$id"))
                 }
-                val text = extractText(message)
-                freezeStreaming(
-                    current,
-                    if (role == "assistant" || role == "custom") role else null,
-                    text.ifEmpty { null },
-                )
             }
-            else -> current
+            return messages
         }
+        if (type != "message_start" && type != "message_update" && type != "message_end") return current
+        val message = payload.optJSONObject("message") ?: return current
+        if (message.optString("role") == "user" && type != "message_end") return current
+        val parsed = parseDisplayMessage(message, type != "message_end") ?: return current
+        val incoming = parsed.copy(entryId = (payload.opt("entryId") as? String)?.takeIf { it.isNotBlank() } ?: parsed.entryId)
+        // Replace provisional call-only rows once the real assistant message carries them.
+        val callIds = buildSet {
+            incoming.content?.let { blocks -> for (i in 0 until blocks.length()) {
+                val block = blocks.optJSONObject(i) ?: continue
+                if (block.optString("type") == "toolCall") add(block.optString("toolCallId"))
+            } }
+        }
+        val messages = current.filterNot { it.entryId?.startsWith("tool-call:") == true && it.entryId.removePrefix("tool-call:") in callIds }
+        val index = when {
+            incoming.role == "toolResult" && incoming.toolCallId != null -> messages.indexOfLast { it.role == "toolResult" && it.toolCallId == incoming.toolCallId }
+            incoming.entryId != null -> messages.indexOfLast { it.entryId == incoming.entryId }.takeIf { it >= 0 }
+                ?: messages.indexOfLast { it.streaming && it.role == incoming.role }
+            incoming.role == "user" -> -1
+            else -> messages.indexOfLast { it.streaming && it.role == incoming.role }
+        }
+        if (index < 0) {
+            if (incoming.role != "user" && incoming.entryId == null && messages.lastOrNull()?.let { it.role == incoming.role && it.text == incoming.text && it.content?.toString() == incoming.content?.toString() } == true) return messages
+            return messages + incoming
+        }
+        val previous = messages[index]
+        val replacement = incoming.copy(
+            entryId = incoming.entryId ?: previous.entryId,
+            // An empty terminal envelope must not erase accumulated output/images.
+            text = incoming.text.ifEmpty { previous.text },
+            content = incoming.content?.takeIf { it.length() > 0 } ?: previous.content,
+            details = incoming.details ?: previous.details,
+            toolName = incoming.toolName ?: previous.toolName,
+            isError = incoming.isError || previous.isError,
+            deferredImages = incoming.deferredImages ?: previous.deferredImages,
+            truncated = incoming.truncated || (incoming.text.isEmpty() && incoming.content == null && previous.truncated),
+        )
+        return messages.toMutableList().also { it[index] = replacement }
     }
 
     /**
@@ -446,7 +482,7 @@ object EventProjector {
         return when (payload.optString("type")) {
             "subagent_lifecycle" -> {
                 val id = payload.optString("id").trim()
-                val status = normalizeSubagentStatus(payload.optString("status")) ?: return current
+                val status = subagentStatus(payload) ?: return current
                 if (id.isEmpty()) return current
                 upsertSubagentChip(
                     current,
@@ -465,10 +501,15 @@ object EventProjector {
                 val id = progress.optString("id").trim()
                     .ifEmpty { payload.optString("id").trim() }
                 if (id.isEmpty()) return current
-                val status = normalizeSubagentStatus(progress.optString("status"))
-                    ?: normalizeSubagentStatus(payload.optString("status"))
-                    ?: current.find { it.id == id }?.status
-                    ?: "running"
+                val existing = current.find { it.id == id }
+                val progressStatus = subagentStatus(progress)
+                val envelopeStatus = subagentStatus(payload)
+                val status = when {
+                    progressStatus != null && isSubagentTerminal(progressStatus) -> progressStatus
+                    envelopeStatus != null && isSubagentTerminal(envelopeStatus) -> envelopeStatus
+                    existing != null && isSubagentTerminal(existing.status) -> existing.status
+                    else -> progressStatus ?: envelopeStatus ?: "running"
+                }
                 upsertSubagentChip(
                     current,
                     SubagentChip(
@@ -495,55 +536,4 @@ object EventProjector {
         return current.toMutableList().also { it[index] = chip }
     }
 
-    private fun extractText(message: JSONObject): String {
-        if (message.has("text") && !message.isNull("text")) {
-            return message.optString("text")
-        }
-        val content = message.optJSONArray("content") ?: return ""
-        val builder = StringBuilder()
-        for (i in 0 until content.length()) {
-            val block = content.optJSONObject(i) ?: continue
-            if (block.optString("type") == "text") {
-                builder.append(block.optString("text"))
-            }
-        }
-        return builder.toString()
-    }
-
-    private fun upsertStreaming(
-        current: List<DisplayMessage>,
-        role: String,
-        text: String,
-    ): List<DisplayMessage> {
-        if (current.isNotEmpty()) {
-            val last = current.last()
-            if (last.streaming && (last.role == "assistant" || last.role == "custom")) {
-                return current.dropLast(1) + last.copy(role = role, text = text, streaming = true)
-            }
-        }
-        return current + DisplayMessage(role = role, text = text, streaming = true)
-    }
-
-    private fun freezeStreaming(
-        current: List<DisplayMessage>,
-        role: String?,
-        text: String?,
-    ): List<DisplayMessage> {
-        if (current.isEmpty()) {
-            return if (!role.isNullOrEmpty() && !text.isNullOrEmpty()) {
-                listOf(DisplayMessage(role = role, text = text, streaming = false))
-            } else {
-                current
-            }
-        }
-        val last = current.last()
-        if (!last.streaming) {
-            if (role.isNullOrEmpty() || text.isNullOrEmpty()) return current
-            if (last.role == role && last.text == text) return current
-            return current + DisplayMessage(role = role, text = text, streaming = false)
-        }
-        val frozenRole = role ?: last.role
-        val frozenText = if (!text.isNullOrEmpty()) text else last.text
-        return current.dropLast(1) + last.copy(role = frozenRole, text = frozenText, streaming = false)
-    }
 }

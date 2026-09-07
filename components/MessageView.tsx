@@ -14,6 +14,7 @@ import { Tooltip, Collapsible, CollapsibleTrigger, CollapsiblePanel } from "./ui
 import { useCopyFeedback } from "@/hooks/useCopyFeedback";
 import { SubagentStatusIcon } from "./SubagentStatusIcon";
 import { formatCost, formatDuration, formatTokens, shortModel } from "@/lib/subagent-format";
+import { taskResultUsageCost } from "@/lib/task-result-details";
 import { createVisibilityPausedInterval } from "@/lib/visibility-timers";
 import type {
   AgentMessage,
@@ -778,7 +779,7 @@ const ToolCallBlock = memo(function ToolCallBlock({ block, result, duration, isS
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(Boolean(isStreaming) && !defaultCollapsed);
   const isEditTool = isEditToolName(block.toolName);
-  const resultDiff = expanded && result && !result.isError ? getResultDiff(result) : null;
+  const resultDiff = expanded && result ? getResultDiff(result) : null;
   const deferred = result?.deferredImages;
 
   // Result display
@@ -917,7 +918,7 @@ const ToolCallBlock = memo(function ToolCallBlock({ block, result, duration, isS
         </CollapsibleTrigger>
 
         {/* ── Expanded: input args ── */}
-        {expanded && !isEditTool && (
+        {expanded && (!isEditTool || !resultDiff || isError) && (
           <pre
             style={{
               margin: 0,
@@ -943,11 +944,14 @@ const ToolCallBlock = memo(function ToolCallBlock({ block, result, duration, isS
               <PairedDiffResult
                 diff={resultDiff}
               />
+              {isError && (
+                <PairedResult text={resultText ?? ""} isEmpty={resultIsEmpty} isError />
+              )}
               <ToolResultImages images={toolImages} loading={toolLoading} failed={toolFailed} />
             </>
           ) : (
             <>
-              <TaskResultPanel details={result.details} />
+              {block.toolName === "task" && <TaskResultPanel details={result.details} />}
               {hasResultText && (
                 <PairedResult
                   text={resultText ?? ""}
@@ -1059,7 +1063,7 @@ export function TaskResultPanel({ details }: { details: unknown }) {
         ? [{ id: asyncInfo.jobId, agent: "task", status: "started", task: asyncInfo.jobId } as TaskResultRowLike]
         : [];
   const totalTokens = rows.reduce((sum, row) => sum + (typeof row.tokens === "number" ? row.tokens : 0), 0);
-  const totalCost = rows.reduce((sum, row) => sum + (typeof row.cost === "number" ? row.cost : 0), 0);
+  const totalCost = rows.reduce((sum, row) => sum + (typeof row.cost === "number" ? row.cost : taskResultUsageCost(row.usage) ?? 0), 0);
   const totalDurationMs = typeof details.totalDurationMs === "number" ? details.totalDurationMs : undefined;
   const totalTokensLabel = formatTokens(totalTokens);
   const totalParts = [
@@ -1095,7 +1099,7 @@ export function TaskResultPanel({ details }: { details: unknown }) {
         const rowTokens = formatTokens(typeof row.tokens === "number" ? row.tokens : undefined);
         const rowParts = [
           rowTokens ? t("chatWindow.tokensUnit", { count: rowTokens }) : null,
-          formatCost(typeof row.cost === "number" ? row.cost : undefined),
+          formatCost(typeof row.cost === "number" ? row.cost : taskResultUsageCost(row.usage)),
           status !== "started" ? formatDuration(typeof row.durationMs === "number" ? row.durationMs : undefined) : null,
           shortModel(typeof row.resolvedModel === "string" ? row.resolvedModel : undefined),
         ].filter(Boolean);
@@ -1712,12 +1716,10 @@ function getToolPreview(block: ToolCallContent): string {
   const keys = Object.keys(input);
   if (keys.length === 0) return "";
 
-  // Common tool input patterns
-  if ("command" in input) return String(input.command).slice(0, 120);
-  if ("path" in input) return String(input.path).slice(0, 120);
-  if ("file_path" in input) return String(input.file_path).slice(0, 120);
-  if ("pattern" in input) return String(input.pattern).slice(0, 120);
-  if ("query" in input) return String(input.query).slice(0, 120);
+  // Explicit intent is more useful than dumping structured tool arguments.
+  for (const key of ["i", "intent", "command", "path", "file_path", "pattern", "query"]) {
+    if (typeof input[key] === "string" && input[key]) return input[key].slice(0, 120);
+  }
   if ("input" in input && typeof input.input === "string") {
     const patchHeader = input.input.match(/\*\*\*\s*(?:Update|Add|Delete)\s*File:\s*([^\r\n]+)/i);
     if (patchHeader) return patchHeader[1].trim();
@@ -1725,7 +1727,18 @@ function getToolPreview(block: ToolCallContent): string {
     if (diffHeader) return diffHeader[1].trim();
   }
 
+  const key = keys[0].slice(0, 60);
   const first = input[keys[0]];
+  if (Array.isArray(first)) return `${key}: ${first.length} items`;
+  if (first !== null && typeof first === "object") {
+    const fields: string[] = [];
+    for (const field in first) {
+      if (!Object.hasOwn(first, field)) continue;
+      fields.push(field.slice(0, 20));
+      if (fields.length === 3) break;
+    }
+    return `${key}: {${fields.join(", ")}}`.slice(0, 120);
+  }
   return String(first).slice(0, 120);
 }
 

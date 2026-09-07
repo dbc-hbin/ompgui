@@ -63,7 +63,7 @@ import {
   toggleRelaySkill,
   upsertRelayMcp,
 } from "./extensions";
-import { fetchUsagePayload, type UsageFetchResult } from "../usage";
+import { getUsage, type UsageFetchResult } from "../usage";
 import { invalidateModelsCache } from "../models-cache";
 import { disposeUtilityRpc } from "../omp/rpc-utility";
 import { mergeNativeSettings, readNativeSettings, writeNativeSettings, type NativeSettings } from "../omp/settings-config";
@@ -142,7 +142,7 @@ const defaultDeps: RelayConnectionDeps = {
   authenticate: authenticateRelayHello,
   listSessions: listRelaySessions,
   listModels: async () => relayModelsFrame((await getModelsCatalog()).models).models,
-  fetchUsage: fetchUsagePayload,
+  fetchUsage: getUsage,
   openSession: openRelaySession,
   sendCommand: sendRelayCommand,
   createSession: createRelaySession,
@@ -209,6 +209,15 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
   let openedSessionId: string | null = null;
   let disposeSession: (() => void) | null = null;
   let handling = Promise.resolve();
+  let requestAbort = new AbortController();
+
+  const advanceEpoch = (): number => {
+    epoch++;
+    const previous = requestAbort;
+    if (!closed) requestAbort = new AbortController();
+    previous.abort();
+    return epoch;
+  };
 
   const send = (frame: RelayServerFrame, allowRevoked = false): boolean => {
     if (closed) return false;
@@ -254,7 +263,7 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
     cancel(helloTimer);
     cancel(revocationTimer);
     chunks.clear();
-    epoch++;
+    advanceEpoch();
     if (deviceId) {
       const connections = deviceConnections.get(deviceId);
       connections?.delete(revoke);
@@ -315,7 +324,7 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
           const navigation = sessionAction && (frame.action === "leaf" || (frame.action === "command" && commandType === "fork")
             || ((frame.action === "delete" || frame.action === "archive") && frame.args.id === openedSessionId));
           if (navigation) {
-            epoch++;
+            advanceEpoch();
             selectedLeaf = frame.action === "leaf";
             disposeSession?.(); disposeSession = null; coalescer.reset();
             if (frame.action === "delete" || frame.action === "archive") openedSessionId = null;
@@ -326,6 +335,7 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
           const data = await handlers[frame.domain](frame.action, frame.args, {
             deviceId,
             sessionId: openedSessionId,
+            signal: requestAbort.signal,
             assertActive: () => {
               if (!authorized(requestDeviceId)) {
                 revoke();
@@ -372,7 +382,7 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
         return;
       }
       case "session.close":
-        epoch++;
+        advanceEpoch();
         selectedLeaf = false;
         disposeSession?.();
         disposeSession = null;
@@ -572,7 +582,7 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
       }
       case "session.leaf": {
         try {
-          const navigationEpoch = ++epoch;
+          const navigationEpoch = advanceEpoch();
           selectedLeaf = true;
           coalescer.reset();
           disposeSession?.();
@@ -700,7 +710,7 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
           disposeSession = null;
           coalescer.reset();
           openedSessionId = created.sessionId;
-          const navigationEpoch = ++epoch;
+          const navigationEpoch = advanceEpoch();
           selectedLeaf = false;
           const opened = await resolved.openSession(created.sessionId, (event) => {
             if (!closed && epoch === navigationEpoch && !selectedLeaf) coalescer.push(event);
@@ -722,7 +732,7 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
           });
         } catch (error) {
           openedSessionId = null;
-          epoch++;
+          advanceEpoch();
           coalescer.reset();
           const message = error instanceof Error ? error.message : String(error);
           const code = error && typeof error === "object" && "code" in error && typeof error.code === "string"
@@ -876,7 +886,7 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
         return;
       }
       case "session.open": {
-        const navigationEpoch = ++epoch;
+        const navigationEpoch = advanceEpoch();
         selectedLeaf = false;
         disposeSession?.();
         disposeSession = null;
@@ -912,7 +922,7 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
           }
         } catch (error) {
           openedSessionId = null;
-          epoch++;
+          advanceEpoch();
           coalescer.reset();
           const message = error instanceof Error ? error.message : String(error);
           const code = error && typeof error === "object" && "code" in error && typeof error.code === "string"

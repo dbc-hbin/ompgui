@@ -16,7 +16,8 @@ import {
   CHAT_BASE_HORIZONTAL_PADDING,
   CHAT_DESKTOP_MINIMAP_WIDTH,
 } from "@/lib/chat-layout";
-import { useAgentSession, type AgentPhase, type NoticeItem, type SubagentInfo } from "@/hooks/useAgentSession";
+import { useAgentSession, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
+import type { SubagentInfo } from "@/lib/subagent-types";
 import { useAudio } from "@/hooks/useAudio";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -231,7 +232,7 @@ const CommittedTranscript = memo(function CommittedTranscript({
     commitResolvedRenderWindow(resolvedWindowRef, resolvedWindow);
   }, [resolvedWindow]);
 
-  const attachVisibleRef = (idx: number, refIndex: number) => (el: HTMLDivElement | null) => {
+  const attachVisibleRef = (refIndex: number) => (el: HTMLDivElement | null) => {
     messageRefs.current[refIndex] = el;
   };
 
@@ -280,7 +281,7 @@ const CommittedTranscript = memo(function CommittedTranscript({
     );
     if (!isVisible || options.attachRef === false || currentRefIdx === undefined) return view;
     return (
-      <div key={`${keyPrefix}-${idx}`} ref={attachVisibleRef(idx, currentRefIdx)}>
+      <div key={`${keyPrefix}-${idx}`} ref={attachVisibleRef(currentRefIdx)}>
         {view}
       </div>
     );

@@ -1,10 +1,14 @@
+import type { SessionEntry } from "../types";
+import { onlineMessage, projectOnlineTranscript } from "./online-transcript";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { allowFileRoot, getAllowedFileRoots, isExistingFilePathAllowed } from "../file-access";
-import { ToolResultImagesTooLargeError, validateAgentImages } from "../image-attachments";
+import { collectToolResultImages, ToolResultImagesTooLargeError, validateAgentImages } from "../image-attachments";
 import { SubagentArtifactForbiddenError, extractSubagentHistory, readCompletionArtifact, readSubagentTranscriptPage, resolveSubagentArtifact } from "../subagent-history";
 import { deriveSessionTitleFromFirstMessage, sanitizeSessionTitle } from "../session-title";
+import { searchSessions, searchSessionContext, SessionSearchError } from "../session-search";
+import type { SessionSearchArgs } from "../session-search-types";
 import { getRpcSession, mapPresetToolNames, startRpcSession, WebRpcError } from "../rpc-manager";
 import { RpcCommandError } from "../omp/rpc-process";
 import {
@@ -56,6 +60,11 @@ export const SESSIONS_COMMAND_ALLOWLIST = [
   "prompt",
   "steer",
   "follow_up",
+  "enqueue_message",
+  "get_message_queue",
+  "recall_queued_message",
+  "delete_queued_message",
+  "promote_queued_message",
   "abort",
   "abort_and_prompt",
   "get_state",
@@ -106,6 +115,8 @@ const UNSUPPORTED_COMMANDS: Record<string, string> = {
 
 export const SESSIONS_REQUEST_ACTIONS = [
   "list",
+  "search",
+  "searchContext",
   "create",
   "delete",
   "archive",
@@ -116,6 +127,7 @@ export const SESSIONS_REQUEST_ACTIONS = [
   "branches",
   "leaf",
   "history",
+  "content",
   "thinking",
   "media",
   "subagents",
@@ -210,6 +222,43 @@ async function handleList(args: Record<string, unknown>): Promise<Record<string,
   return { sessions: page, runningIds: listed.runningIds, total, offset, limit, hasMore: offset + page.length < total };
 }
 
+async function handleSearch(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (typeof args.query !== "string") fail("invalid_search", "query must be a string");
+  const input: SessionSearchArgs = { query: args.query };
+  for (const key of ["projectRoot", "from", "to", "cursor"] as const) {
+    const value = args[key];
+    if (value !== undefined) {
+      if (typeof value !== "string") fail("invalid_search", `${key} must be a string`);
+      input[key] = value;
+    }
+  }
+  if (args.limit !== undefined) {
+    if (typeof args.limit !== "number") fail("invalid_search", "limit must be a number");
+    input.limit = args.limit;
+  }
+  try {
+    return { ...(await searchSessions(input)) };
+  } catch (error) {
+    if (error instanceof SessionSearchError) {
+      fail(error.status === 400 ? "invalid_search" : "search_unavailable", error.message);
+    }
+    throw error;
+  }
+}
+
+async function handleSearchContext(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const id = needId(args.id);
+  if (typeof args.entryId !== "string") fail("invalid_search", "entryId must be a string");
+  try {
+    return { ...(await searchSessionContext({ id, entryId: args.entryId })) };
+  } catch (error) {
+    if (error instanceof SessionSearchError) {
+      fail(error.status === 404 ? "not_found" : error.status === 400 ? "invalid_search" : "search_unavailable", error.message);
+    }
+    throw error;
+  }
+}
+
 async function handleCreate(args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const rawCwd = asString(args.cwd)?.trim();
   if (!rawCwd) fail("cwd_required", "cwd is required");
@@ -261,7 +310,64 @@ async function handleCreate(args: Record<string, unknown>): Promise<Record<strin
   fail("session_create_failed", "unreachable");
 }
 
+async function onlineContext(args: Record<string, unknown>) {
+  const id = needId(args.id);
+  const leaf = args.leafId == null ? undefined : asString(args.leafId)?.trim();
+  if (args.leafId != null && (!leaf || leaf.length > 200)) fail("invalid_leaf", "leafId is invalid");
+  const filePath = await resolveSessionPath(id);
+  if (filePath) {
+    const document = getSessionDocument(filePath);
+    if (document.error === "too_large") fail("session_file_too_large", "Session file is too large");
+    if (!document.header) fail("session_file_malformed", "Session file is missing or malformed");
+    if (leaf && !document.entries.some(entry => entry.id === leaf)) fail("unknown_leaf", "Unknown conversation branch");
+    const leafId = leaf ?? getLeafEntryId(document.entries);
+    const context = buildSessionContext(document.entries, leafId, { deferThinking: false, deferToolResultImages: false });
+    return { id, leafId, messages: context.messages as readonly unknown[], entryIds: context.entryIds, filePath, entries: document.entries };
+  }
+  if (leaf) fail("unknown_leaf", "Unknown conversation branch");
+  const live = getRpcSession(id);
+  if (!live?.isAlive()) fail("session_not_found", "Session not found");
+  const result = await live.send({ type: "get_messages" });
+  if (!live.isAlive() || getRpcSession(id) !== live || live.sessionId !== id) fail("session_not_found", "Session not found");
+  if (typeof result !== "object" || result === null || !("messages" in result) || !Array.isArray(result.messages)) fail("rpc_command_failed", "Live transcript unavailable");
+  const messages: readonly unknown[] = result.messages;
+  return { id, leafId: null, messages, entryIds: messages.map(message => onlineMessage(message)?.entryId ?? ""), filePath: undefined, entries: [] };
+}
+
+function onlineEntryIndex(entryId: string | undefined, entryIds: readonly string[], messages: readonly unknown[], entries: readonly SessionEntry[]): number {
+  if (!entryId) return -1;
+  const index = entryIds.indexOf(entryId);
+  if (index >= 0) return index;
+  if (!entryId.startsWith("live:")) return -1;
+  const byId = new Map(entries.map(entry => [entry.id, entry]));
+  for (let i = 0; i < entryIds.length; i++) {
+    const entry = byId.get(entryIds[i]);
+    const message = entry && "message" in entry ? entry.message : messages[i];
+    if (onlineMessage(message)?.entryId === entryId) return i;
+  }
+  return -1;
+}
+
+async function handleContent(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const context = await onlineContext(args);
+  const entryId = asString(args.entryId);
+  const index = onlineEntryIndex(entryId, context.entryIds, context.messages, context.entries);
+  if (index < 0) fail("entry_not_found", "Entry is not part of this conversation branch");
+  const message = onlineMessage(context.messages[index], entryId);
+  if (!message) fail("entry_not_found", "Entry is not visible in this conversation");
+  const text = JSON.stringify(message);
+  const offset = asOffset(args.offset, 0);
+  const limit = asLimit(args.limit, 32000, 64000);
+  const nextOffset = Math.min(text.length, offset + limit);
+  return { text: text.slice(offset, nextOffset), encoding: "json", total: text.length, offset, nextOffset, hasMore: nextOffset < text.length };
+}
+
 async function handleHistory(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (args.online === true) {
+    const context = await onlineContext(args);
+    const page = projectOnlineTranscript(context.messages, context.entryIds, asOffset(args.offset, 0), asLimit(args.limit, 100, 500));
+    return { id: context.id, leafId: context.leafId, ...page };
+  }
   const id = needId(args.id);
   const filePath = await resolveSessionPath(id);
   if (!filePath) fail("session_not_found", "Session not found");
@@ -341,21 +447,43 @@ async function handleThinking(args: Record<string, unknown>): Promise<Record<str
   return { thinking: block.thinking };
 }
 
+function mediaPage(images: readonly unknown[], missingCount: number, args: Record<string, unknown>): Record<string, unknown> {
+  const offset = asOffset(args.offset, 0);
+  const limit = asLimit(args.limit, 10, 10);
+  const page: unknown[] = [];
+  let bytes = 0;
+  for (const image of images.slice(offset, offset + limit)) {
+    const size = Buffer.byteLength(JSON.stringify(image));
+    if (bytes + size > 14 * 1024 * 1024 && page.length > 0) break;
+    if (size > 14 * 1024 * 1024) fail("tool_result_images_too_large", "Image exceeds supported size");
+    bytes += size;
+    page.push(image);
+  }
+  const nextOffset = offset + page.length;
+  return { images: page, missingCount, total: images.length, offset, nextOffset, hasMore: nextOffset < images.length };
+}
+
 async function handleMedia(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const id = needId(args.id);
+  const context = await onlineContext(args);
   const entryId = asString(args.entryId)?.trim();
   if (!entryId || entryId.length > 200) fail("invalid_entry", "entryId is required");
-  const filePath = await resolveSessionPath(id);
-  if (!filePath) fail("session_not_found", "Session not found");
-  try {
-    const media = getToolResultImagesForEntry(filePath, entryId);
-    if (!media) fail("tool_result_images_not_found", "Tool result images not found");
-    return { images: media.images, missingCount: media.missingCount };
-  } catch (error) {
-    if (error instanceof ToolResultImagesTooLargeError) fail(error.code, error.message);
-    throw error;
+  const index = onlineEntryIndex(entryId, context.entryIds, context.messages, context.entries);
+  if (index < 0 || !onlineMessage(context.messages[index], entryId)) fail("entry_not_found", "Entry is not part of this conversation branch");
+  if (context.filePath) {
+    try {
+      const media = getToolResultImagesForEntry(context.filePath, context.entryIds[index]);
+      if (media) return mediaPage(media.images, media.missingCount, args);
+    } catch (error) {
+      if (error instanceof ToolResultImagesTooLargeError) fail(error.code, error.message);
+      throw error;
+    }
   }
-  fail("media_failed", "unreachable");
+  const entry = context.entries.find(candidate => candidate.id === context.entryIds[index]);
+  const materialized = entry ? materializeSessionEntries([entry])[0] : undefined;
+  const message: unknown = materialized && "message" in materialized ? materialized.message : context.messages[index];
+  if (typeof message !== "object" || message === null || !("content" in message) || !Array.isArray(message.content)) return { images: [], missingCount: 0 };
+  const images = collectToolResultImages({ content: message.content, details: "details" in message ? message.details : undefined });
+  return mediaPage(images, 0, args);
 }
 
 async function handleSubagents(args: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -542,15 +670,31 @@ async function handleCommand(args: Record<string, unknown>, context: RelayReques
   if (!type) fail("command_type_required", "command type is required");
   if (UNSUPPORTED_COMMANDS[type]) fail("unsupported_command", UNSUPPORTED_COMMANDS[type]);
   if (!COMMAND_SET.has(type)) fail("unsupported_command", `Unsupported command: ${type}`);
+  command.type = type;
+  if (type === "recall_queued_message") {
+    // Leave 1MiB for the Relay envelope beneath the 16MiB logical frame cap.
+    // This private budget must never be controlled by the remote caller.
+    command.__relayRecallMaxBytes = 15 * 1024 * 1024;
+  }
+  const acceptsImages = type === "prompt" || type === "abort_and_prompt" || type === "steer" || type === "follow_up" || type === "enqueue_message";
   const hasAttachments = command.attachmentIds !== undefined;
-  if (hasAttachments && type !== "prompt" && type !== "abort_and_prompt" && type !== "steer" && type !== "follow_up") fail("invalid_attachment", "This command does not accept attachmentIds");
+  if (hasAttachments && !acceptsImages) fail("invalid_attachment", "This command does not accept attachmentIds");
+  if (type === "enqueue_message" && command.lane !== "steer" && command.lane !== "followUp") {
+    fail("invalid_command", "enqueue_message requires lane steer or followUp");
+  }
+  if (type === "recall_queued_message" || type === "delete_queued_message" || type === "promote_queued_message") {
+    if (typeof command.id !== "string" || !command.id.trim()) fail("invalid_command", `${type} requires id`);
+    if (typeof command.expectedRevision !== "number" || !Number.isSafeInteger(command.expectedRevision) || command.expectedRevision < 0) {
+      fail("invalid_command", `${type} requires a nonnegative safe integer expectedRevision`);
+    }
+  }
   if (hasAttachments && command.images !== undefined) fail("invalid_images", "Do not combine images and attachmentIds");
-  if (type === "prompt" || type === "abort_and_prompt" || type === "steer" || type === "follow_up") {
+  if (acceptsImages) {
     if (typeof command.message !== "string" || command.message.length > RELAY_MAX_PROMPT_CHARS) {
       fail("invalid_command", "A prompt message of at most 3Mi characters is required");
     }
   }
-  if ((type === "prompt" || type === "abort_and_prompt" || type === "steer" || type === "follow_up") && command.images !== undefined) {
+  if (acceptsImages && command.images !== undefined) {
     const images = command.images;
     if (!Array.isArray(images)) fail("invalid_images", "images must be an array");
     const normalized = images.map((image) => {
@@ -589,6 +733,7 @@ async function handleCommand(args: Record<string, unknown>, context: RelayReques
   if (type === "extension_ui_response") {
     const responseId = asString(command.id)?.trim();
     if (!responseId) fail("invalid_command", "extension_ui_response requires id");
+    if (context.sessionId !== id) fail("invalid_session", "Open the target session before answering its dialog");
   }
   if (hasAttachments) {
     if (context.sessionId !== id) fail("invalid_session", "Open the target session before sending attachments");
@@ -700,6 +845,12 @@ export async function handleSessionsRequest(
       if (!leafId) fail("invalid_leaf", "leafId is required");
       return { ...(await snapshotRelayLeaf(id, leafId)) };
     }
+    case "search":
+      return handleSearch(safeArgs);
+    case "searchContext":
+      return handleSearchContext(safeArgs);
+    case "content":
+      return handleContent(safeArgs);
     case "history":
       return handleHistory(safeArgs);
     case "thinking":

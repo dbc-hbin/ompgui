@@ -180,6 +180,7 @@ export type ExtensionUiRequest =
       method: "select";
       title: string;
       options: string[];
+      optionDetails?: { description?: string }[];
       timeout?: number;
       expiresAt?: number;
     }

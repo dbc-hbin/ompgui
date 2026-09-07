@@ -10,10 +10,14 @@ import type {
   ExtensionWidgetItem,
   SessionInfo,
   SessionTreeNode,
+  ToolResultMessage,
 } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
 import type { ThinkingModelMeta } from "@/lib/thinking-levels";
 import { sendAgentCommand } from "@/lib/agent-client";
+import type { AttachedImage, SessionFeatureContext } from "@/lib/agent-session-types";
+import { useSessionMessageQueue } from "@/hooks/useSessionMessageQueue";
+import { useSessionSubagents } from "@/hooks/useSessionSubagents";
 import { translate } from "@/lib/i18n";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { createMessageUpdateCoalescer, type MessageUpdateCoalescer } from "@/lib/message-update-coalescer";
@@ -30,16 +34,7 @@ import { toast } from "@/components/ui/toast";
 import { expandWebSlashCommand } from "@/lib/web-slash-commands";
 import { createActiveGoal, parseActiveGoal, type ActiveGoal, type ActivePlan } from "@/lib/web-mode-state";
 import { deriveContextUsage, mergeContextUsage, resolveContextWindow } from "@/lib/context-usage";
-import { matchesSessionLoadGeneration, matchesStateLoadFence, matchesQueueRevision } from "@/lib/session-load-fence";
-import {
-  EMPTY_QUEUE_SNAPSHOT,
-  parseMessageQueueSnapshot,
-  parseRecallQueuedMessageResult,
-  snapshotFromAgentState,
-  type MessageQueueLane,
-  type MessageQueueSnapshot,
-  type QueueMutationResult,
-} from "@/lib/message-queue";
+import { matchesSessionLoadGeneration, matchesStateLoadFence } from "@/lib/session-load-fence";
 import { getRemoteReplicaOrigin, loadRemoteReplicaSnapshot, persistRemoteReplicaSnapshot, projectRemoteReplica } from "@/lib/remote-replica";
 import type { RemoteReplicaSnapshot } from "@/lib/remote-replica";
 import { loadClientModels } from "@/lib/client-model-store";
@@ -58,31 +53,7 @@ import {
   type FollowScrollIntent,
 } from "@/lib/chat-follow-scroll";
 import type { HostToolDefinition, HostUriSchemeDefinition, RpcAvailableSlashCommand, SessionStatsInfo, TodoPhase } from "@/lib/pi-types";
-import { asNumber, isRecord } from "@/lib/type-guards";
-import {
-  parseSubagentActivityEvent,
-  parseSubagentLifecycle,
-  parseSubagentProgress,
-  parseSubagentSnapshot,
-  type SubagentActivityEvent,
-  type SubagentHistoryEntry,
-  type SubagentInfo,
-  type SubagentProgress,
-  type SubagentSnapshotLike,
-} from "@/lib/subagent-types";
-import {
-  createSubagentFromProgress,
-  getSubagentFreshness,
-  mergeSubagentRoster,
-  progressStatusToSubagentStatus,
-  reconcileSubagentRosterSnapshot,
-  SUBAGENT_RECONCILE_INTERVAL_MS,
-} from "@/lib/subagent-hub-state";
-
-// SubagentInfo lives in lib/subagent-types (shared with the server-side
-// history module); keep the export path stable for components.
-export type { SubagentInfo } from "@/lib/subagent-types";
-
+import { isRecord } from "@/lib/type-guards";
 export type SessionReadinessState = "idle" | "loading" | "ready" | "error";
 
 export interface SessionReadiness {
@@ -135,92 +106,6 @@ interface AgentEvent {
   [key: string]: unknown;
 }
 
-const SUBAGENT_ACTIVITY_BUFFER_MAX = 50;
-// Distinct subagent ids retained in the activity/version maps. Each per-id
-// array is already capped, but a long turn can spawn unbounded ids (repeated
-// or recursive task calls) — the OUTER maps must be bounded too.
-const SUBAGENT_ACTIVITY_MAX_IDS = 64;
-
-/** Keep only the most recently inserted entries of an id-keyed map. */
-function pruneSubagentIdMap<T>(map: Record<string, T>): Record<string, T> {
-  const keys = Object.keys(map);
-  if (keys.length <= SUBAGENT_ACTIVITY_MAX_IDS) return map;
-  const next = { ...map };
-  let over = keys.length - SUBAGENT_ACTIVITY_MAX_IDS;
-  // JS orders integer-like keys (e.g. a digits-only subagent id "12345")
-  // numerically before string keys, so insertion order only holds for the
-  // non-integer keys. Evict those oldest-first; integer-like keys — whose
-  // relative age is unknowable from a plain object — are evicted last so an
-  // actively-updated digits-only id is never wrongly pruned.
-  const ordered = keys.filter((key) => !/^(?:0|[1-9]\d*)$/.test(key));
-  for (const key of ordered) {
-    if (over <= 0) break;
-    delete next[key];
-    over -= 1;
-  }
-  if (over > 0) {
-    for (const key of keys) {
-      if (over <= 0) break;
-      if (next[key] === undefined) continue;
-      delete next[key];
-      over -= 1;
-    }
-  }
-  return next;
-}
-
-function hasSubagentRosterReconcileNeed(rows: SubagentInfo[], now = Date.now()): boolean {
-  return rows.some((subagent) => {
-    if (subagent.source === "history" || subagent.status !== "started") return false;
-    return getSubagentFreshness(subagent, now) === "stale"
-      || (subagent.missingSnapshots ?? 0) > 0
-      || subagent.missingSince !== undefined;
-  });
-}
-
-function hasLiveStartedSubagent(rows: SubagentInfo[]): boolean {
-  return rows.some((subagent) => subagent.source !== "history" && subagent.status === "started");
-}
-
-/** Convert a recovered on-disk history entry into roster form. */
-function historyEntryToSubagentInfo(entry: SubagentHistoryEntry): SubagentInfo {
-  const info: SubagentInfo = {
-    id: entry.id,
-    agent: entry.agent,
-    agentSource: entry.agentSource,
-    description: entry.description,
-    status: entry.status,
-    task: entry.task,
-    assignment: entry.assignment,
-    index: entry.index,
-    sessionFile: entry.sessionFile,
-    source: "history",
-    detached: entry.detached,
-    result: entry.result,
-  };
-  const progress: SubagentProgress = {
-    status: entry.status === "started" ? "running" : entry.status,
-    task: entry.task,
-    assignment: entry.assignment,
-    description: entry.description,
-    lastIntent: entry.lastIntent,
-    toolCount: entry.toolCount,
-    requests: entry.requests,
-    tokens: entry.tokens,
-    contextTokens: entry.contextTokens,
-    contextWindow: entry.contextWindow,
-    cost: entry.cost,
-    durationMs: entry.durationMs,
-    modelOverride: entry.modelOverride,
-    modelRole: entry.modelRole,
-    resolvedModel: entry.resolvedModel,
-    resolvedModelIsFallback: entry.resolvedModelIsFallback,
-    retryFailure: entry.retryFailure,
-  };
-  info.progress = progress;
-  return info;
-}
-
 interface CompactCommandResult {
   tokensBefore?: number;
   estimatedTokensAfter?: number;
@@ -254,20 +139,6 @@ type AgentStateResponse = {
   messageQueue?: unknown;
   todoPhases?: TodoPhase[];
 };
-
-function resetQueueSnapshot(): MessageQueueSnapshot {
-  return { ...EMPTY_QUEUE_SNAPSHOT, items: [], nativeQueuedCount: undefined };
-}
-
-/** Command results are `{ queue, recalled? }`. Unwrap `.queue`; recall acks
- * require `recalled` via parseRecallQueuedMessageResult. Not an SSE event. */
-function unwrapQueueCommandResult(value: unknown): QueueMutationResult | null {
-  if (!isRecord(value)) return null;
-  const queue = parseMessageQueueSnapshot(value.queue);
-  if (!queue) return null;
-  if (value.recalled === undefined || value.recalled === null) return { queue };
-  return parseRecallQueuedMessageResult(value);
-}
 
 function normalizeThinkingLevel(level: string | undefined): ThinkingLevelOption {
   // omp's "inherit" sentinel means "no explicit selection" — show as auto.
@@ -552,12 +423,6 @@ export interface ChatInputHandle {
   addFiles: (files: File[]) => void;
 }
 
-export interface AttachedImage {
-  data: string;
-  mimeType: string;
-  previewUrl: string;
-}
-
 type SelectedModel = { provider: string; modelId: string };
 type ModelEntry = { id: string; name: string; provider: string; supportsFastMode?: boolean; contextWindow?: number };
 
@@ -676,14 +541,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [extensionCustomUi, setExtensionCustomUi] = useState<ExtensionUiCustomRequest | null>(null);
   const [extensionStatuses, setExtensionStatuses] = useState<ExtensionStatusItem[]>([]);
   const [extensionWidgets, setExtensionWidgets] = useState<ExtensionWidgetItem[]>([]);
-  const [queuedMessages, setQueuedMessages] = useState<MessageQueueSnapshot>(resetQueueSnapshot);
-  const [subagents, setSubagents] = useState<SubagentInfo[]>([]);
-  const [subagentEvents, setSubagentEvents] = useState<Record<string, SubagentActivityEvent[]>>({});
-  const [subagentTranscriptVersions, setSubagentTranscriptVersions] = useState<Record<string, number>>({});
   const [todoPhases, setTodoPhases] = useState<TodoPhase[]>([]);
   const [activeGoal, setActiveGoal] = useState<ActiveGoal | null>(null);
   const [activePlan, setActivePlan] = useState<ActivePlan | null>(null);
-  const activeSubagentCount = subagents.filter((subagent) => subagent.source !== "history" && subagent.status === "started").length;
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const eventConnectionManagerRef = useRef<EventStreamConnectionManager<EventSource> | null>(null);
@@ -721,13 +581,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // aborted turn's terminal agent_end must not tear down the new run that is
   // starting. Cleared on the new run's agent_start (or the intercept itself).
   const interruptReplyPendingRef = useRef(false);
-  // Last applied authoritative queue revision. -1 means no snapshot yet, so
-  // the first fetch/event can land even at revision 0. Revisions are per
-  // wrapper and may restart at 0 after reconnect — queueRequestFenceRef drops
-  // in-flight responses from the previous epoch.
-  const queueRevisionRef = useRef(-1);
-  const queueRequestFenceRef = useRef(0);
-  const [queueEnqueuePending, setQueueEnqueuePending] = useState(false);
   const agentRunningRef = useRef(false);
   const bashRunningRef = useRef(false);
   const bashRecoveryIdRef = useRef(0);
@@ -742,35 +595,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const ensuringNewSessionRef = useRef<Promise<string | null> | null>(null);
   const newSessionPromotedRef = useRef(false);
-  // Raw child-session events stream at token rate; coalesce the per-subagent
-  // revision bumps to one per animation frame so an open dialog only re-pages
-  // once per frame instead of per event.
-  const subagentVersionFlushRef = useRef<Set<string> | null>(null);
-  const subagentActivityFlushRef = useRef<Map<string, SubagentActivityEvent[]> | null>(null);
-  const subagentVersionFlushFrameRef = useRef<number | null>(null);
-  // Delayed live-roster hydration after mount/reconnect and the bounded stale
-  // reconciliation loop share one timer so refreshes cannot overlap.
-  const rosterRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const rosterRefreshTimerKindRef = useRef<"initial" | "reconcile" | null>(null);
-  const rosterRefreshDeferredRef = useRef(false);
-  const rosterRefreshInFlightRef = useRef<Promise<boolean> | null>(null);
-  const rosterRefreshRequestIdRef = useRef(0);
-  const refreshSubagentRosterRef = useRef<((sid: string) => Promise<boolean>) | null>(null);
-  const subagentsRef = useRef<SubagentInfo[]>([]);
-  subagentsRef.current = subagents;
-  // This generation belongs to the selected session/roster, not to a parent
-  // prompt. Detached children remain in this roster after agent_end; it is
-  // bumped only when a session switch clears the roster.
   const promptRunIdRef = useRef(0);
+  const partialToolResultsRef = useRef(new WeakSet<ToolResultMessage>());
   // Last quota-like error seen during the current run, and whether the run
   // produced any assistant content. Used to surface a persistent error when
   // the agent stops without a visible failure.
   const lastQuotaErrorRef = useRef<string | null>(null);
   const runHadContentRef = useRef(false);
-  // In-flight roster/history responses and deferred child-event flushes are
-  // fenced by the selected session and this generation. Parent prompt turns do
-  // not advance it: detached children outlive agent_end.
-  const subagentRosterGenerationRef = useRef(0);
   const optimisticUserMessageKeyRef = useRef<string | null>(null);
   const eventCoalescerRef = useRef<MessageUpdateCoalescer | null>(null);
 
@@ -781,7 +612,42 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     return !!sid && sessionIdRef.current === sid && runtimeReadyRef.current;
   }, [isNew]);
 
-  const beginSessionLoad = useCallback((sid: string, includeState: boolean): number => {
+  const addNotice = useCallback((notice: { id?: string; message: string; type?: NoticeType }) => {
+    const message = notice.message.trim();
+    if (!message) return;
+    dispatchNotice({
+      type: "add",
+      notice: {
+        id: notice.id ?? createNoticeId(),
+        message,
+        type: notice.type ?? "info",
+      },
+    });
+  }, []);
+
+  const getSessionContext = useCallback((): SessionFeatureContext => ({
+    sessionId: sessionIdRef.current,
+    loadGeneration: sessionLoadGenerationRef.current,
+    runtimeGeneration: runtimeLoadGenerationRef.current,
+    alive: hookAliveRef.current,
+    runtimeReady: runtimeReadyRef.current,
+  }), []);
+
+  const {
+    queuedMessages, queueEnqueuePending, beginQueueEpoch, disposeQueue,
+    applyQueueFromAgentState, fetchMessageQueue, handleQueueEvent, enqueueMessage,
+    handleRecallQueuedMessage, handleDeleteQueuedMessage, handlePromoteQueuedMessage,
+  } = useSessionMessageQueue({ getSessionContext, canMutateSession, addNotice });
+
+  const {
+    subagents, subagentEvents, subagentTranscriptVersions, activeSubagentCount,
+    handleEvent: handleSubagentEvent, reset: resetSubagentRoster, dispose: disposeSubagents,
+    refreshHistory: refreshSubagentHistory, refreshRoster: refreshSubagentRoster,
+    scheduleInitialRosterRefresh, pauseHiddenTimers: pauseSubagentTimers,
+    resumeVisibleSession: resumeSubagents,
+  } = useSessionSubagents({ getSessionContext, canMutateSession });
+
+  const beginSessionLoad = useCallback((includeState: boolean): number => {
     const generation = loadGenerationCounterRef.current + 1;
     loadGenerationCounterRef.current = generation;
     sessionLoadGenerationRef.current = generation;
@@ -970,181 +836,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     return null;
   }, [todoPhases]);
 
-  // Merge a batch of roster entries through the shared precedence/fence
-  // implementation. `skipNewerThan` protects live frames observed after a
-  // point-in-time get_subagents request.
-  const mergeSubagents = useCallback((incoming: SubagentInfo[], options?: {
-    skipNewerThan?: number;
-    sessionId?: string;
-    rosterGeneration?: number;
-  }) => {
-    setSubagents((prev) => {
-      if (
-        options?.sessionId !== undefined
-        && (
-          !hookAliveRef.current
-          || sessionIdRef.current !== options.sessionId
-          || (options.rosterGeneration !== undefined && subagentRosterGenerationRef.current !== options.rosterGeneration)
-        )
-      ) return prev;
-      const next = mergeSubagentRoster(prev, incoming, options);
-      subagentsRef.current = next;
-      return next;
-    });
-  }, []);
-
-  // Recover the ON-DISK roster from the parent session's task toolResults.
-  // Survives page reloads and shows finished runs from previous sessions.
-  const refreshSubagentHistory = useCallback(async (sid: string, loadGeneration = sessionLoadGenerationRef.current): Promise<boolean> => {
-    const generation = subagentRosterGenerationRef.current;
-    try {
-      const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/subagents`);
-      if (!res.ok) return false;
-      const data = await res.json() as { subagents?: SubagentHistoryEntry[] };
-      // Fence AFTER the awaited json: the session or roster generation may
-      // have changed while the response was in flight.
-      if (
-        sessionIdRef.current !== sid
-        || subagentRosterGenerationRef.current !== generation
-        || (loadGeneration !== undefined && sessionLoadGenerationRef.current !== loadGeneration)
-      ) return false;
-      const entries = (data.subagents ?? []).map(historyEntryToSubagentInfo);
-      mergeSubagents(entries, { sessionId: sid, rosterGeneration: generation });
-      return true;
-    } catch {
-      // Best effort; live frames take precedence while a run is active.
-      return false;
-    }
-  }, [mergeSubagents]);
-
-  // Schedule at most one bounded reconciliation timer while a live started
-  // row is stale or has been absent from an authoritative snapshot. The
-  // callback uses a ref because refreshSubagentRoster is declared below.
-  const scheduleSubagentRosterReconcile = useCallback((sid: string) => {
-    if (
-      !hookAliveRef.current
-      || sessionIdRef.current !== sid
-      || !runtimeReadyRef.current
-      || !hasLiveStartedSubagent(subagentsRef.current)
-      || isDocumentHidden()
-    ) return;
-    if (rosterRefreshTimerRef.current || rosterRefreshInFlightRef.current) return;
-
-    const generation = subagentRosterGenerationRef.current;
-    rosterRefreshTimerKindRef.current = "reconcile";
-    rosterRefreshTimerRef.current = setTimeout(() => {
-      rosterRefreshTimerRef.current = null;
-      rosterRefreshTimerKindRef.current = null;
-      if (
-        !hookAliveRef.current
-        || sessionIdRef.current !== sid
-        || subagentRosterGenerationRef.current !== generation
-        || isDocumentHidden()
-      ) return;
-      if (hasSubagentRosterReconcileNeed(subagentsRef.current)) {
-        void refreshSubagentRosterRef.current?.(sid);
-      } else {
-        scheduleSubagentRosterReconcile(sid);
-      }
-    }, SUBAGENT_RECONCILE_INTERVAL_MS);
-  }, []);
-
-  // Hydrate the LIVE roster from get_subagents. The registry only holds
-  // currently-running subagents, so this fills gaps after an SSE reconnect or
-  // a missed lifecycle frame; it never reports finished runs.
-  const refreshSubagentRoster = useCallback((sid: string): Promise<boolean> => {
-    if (!canMutateSession(sid)) return Promise.resolve(false);
-    const inFlight = rosterRefreshInFlightRef.current;
-    if (inFlight) return inFlight;
-
-    const requestedAt = Date.now();
-    const generation = subagentRosterGenerationRef.current;
-    const requestId = ++rosterRefreshRequestIdRef.current;
-    const requestPromise = (async () => {
-      try {
-        const result = await sendAgentCommand<{ subagents?: SubagentSnapshotLike[] }>(sid, { type: "get_subagents" });
-        // Fence: the request may resolve after the user switched sessions or
-        // the roster was cleared. Parent prompts do not fence this snapshot:
-        // detached children and their registry remain authoritative after
-        // agent_end.
-        if (
-          !hookAliveRef.current
-          || sessionIdRef.current !== sid
-          || subagentRosterGenerationRef.current !== generation
-        ) return false;
-        const snapshots = (result?.subagents ?? [])
-          .map(parseSubagentSnapshot)
-          .filter((subagent): subagent is SubagentInfo => subagent !== undefined);
-        // The snapshot is a point-in-time view: never overwrite entries that
-        // live frames updated after the request was made (their state is newer).
-        const liveIds = new Set(snapshots.map((s) => s.id));
-        const now = Date.now();
-        setSubagents((prev) => {
-          if (
-            !hookAliveRef.current
-            || sessionIdRef.current !== sid
-            || subagentRosterGenerationRef.current !== generation
-          ) return prev;
-          const merged = mergeSubagentRoster(prev, snapshots, { skipNewerThan: requestedAt });
-          const next = reconcileSubagentRosterSnapshot(merged, liveIds, requestedAt, now);
-          subagentsRef.current = next;
-          return next;
-        });
-        // Mid-run disk history can gain completed task calls that live frames
-        // missed (a child finishing before the subscription attached is deleted
-        // from the registry) — re-check so such children appear before agent_end.
-        void refreshSubagentHistory(sid);
-        return true;
-      } catch {
-        // Request failures must not advance absence metadata; the next
-        // scheduled tick retries through the same refresh machinery.
-        return false;
-      } finally {
-        if (rosterRefreshRequestIdRef.current === requestId) {
-          rosterRefreshInFlightRef.current = null;
-          scheduleSubagentRosterReconcile(sid);
-        }
-      }
-    })();
-    rosterRefreshInFlightRef.current = requestPromise;
-    return requestPromise;
-  }, [canMutateSession, refreshSubagentHistory, scheduleSubagentRosterReconcile]);
-  refreshSubagentRosterRef.current = refreshSubagentRoster;
-
-  // State updates from lifecycle/progress frames can make a row stale or
-  // expose absence metadata without a registry refresh of their own.
-  useEffect(() => {
-    const sid = sessionIdRef.current;
-    if (sid && hasLiveStartedSubagent(subagents)) {
-      scheduleSubagentRosterReconcile(sid);
-    } else if (rosterRefreshTimerKindRef.current === "reconcile" && rosterRefreshTimerRef.current) {
-      clearTimeout(rosterRefreshTimerRef.current);
-      rosterRefreshTimerRef.current = null;
-      rosterRefreshTimerKindRef.current = null;
-    }
-  }, [scheduleSubagentRosterReconcile, subagents]);
-
-  // Activity is scoped to the selected session rather than a parent prompt.
-  // A detached child may continue emitting frames after agent_end, so only a
-  // session switch/unmount clears this bounded UI cache.
-  const resetSubagentActivityState = useCallback(() => {
-    if (subagentVersionFlushFrameRef.current !== null) {
-      cancelAnimationFrame(subagentVersionFlushFrameRef.current);
-      subagentVersionFlushFrameRef.current = null;
-    }
-    subagentVersionFlushRef.current = null;
-    subagentActivityFlushRef.current = null;
-    setSubagentEvents({});
-    setSubagentTranscriptVersions({});
-  }, []);
-
-  const resetSubagentRoster = useCallback(() => {
-    subagentsRef.current = [];
-    setSubagents([]);
-    subagentRosterGenerationRef.current += 1;
-    resetSubagentActivityState();
-  }, [resetSubagentActivityState]);
-
   // Monotonic sequence for authoritative model syncs. Every async sync
   // (state fetch, model_changed GET) captures a token at START and only
   // applies its snapshot if it is still the newest — a slow stale response
@@ -1209,98 +900,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [applyAuthoritativeModel, beginAuthoritativeModelSync, canMutateSession, applySnapshotThinkingLevel]);
 
-  const beginQueueEpoch = useCallback(() => {
-    queueRequestFenceRef.current += 1;
-    queueRevisionRef.current = -1;
-    setQueuedMessages(resetQueueSnapshot());
-  }, []);
-
-  const applyQueueSnapshot = useCallback((
-    snapshot: MessageQueueSnapshot,
-    sid: string,
-    sessionLoadGeneration: number,
-    connectionFence: number,
-    mode: "event" | "fetch" | "reset",
-    nativeQueuedCount?: number,
-  ): boolean => {
-    if (!hookAliveRef.current) return false;
-    if (mode === "reset") {
-      if (sessionIdRef.current !== sid && sid !== "") return false;
-      beginQueueEpoch();
-      return true;
-    }
-    if (
-      !matchesQueueRevision(
-        sessionIdRef.current,
-        sid,
-        sessionLoadGenerationRef.current,
-        sessionLoadGeneration,
-        queueRequestFenceRef.current,
-        connectionFence,
-        queueRevisionRef.current,
-        snapshot.revision,
-        mode,
-      )
-    ) return false;
-    queueRevisionRef.current = snapshot.revision;
-    const overlayNative = nativeQueuedCount ?? snapshot.nativeQueuedCount;
-    setQueuedMessages({
-      ...snapshot,
-      nativeQueuedCount: overlayNative,
-    });
-    return true;
-  }, [beginQueueEpoch]);
-
-  const applyNativeQueuedCount = useCallback((
-    count: number | undefined,
-    sid: string,
-    sessionLoadGeneration: number,
-    connectionFence: number,
-  ) => {
-    if (count === undefined || !hookAliveRef.current) return;
-    if (sessionIdRef.current !== sid) return;
-    if (sessionLoadGenerationRef.current !== sessionLoadGeneration) return;
-    if (queueRequestFenceRef.current !== connectionFence) return;
-    setQueuedMessages((prev) => {
-      if (prev.nativeQueuedCount === count) return prev;
-      return { ...prev, nativeQueuedCount: count };
-    });
-  }, []);
-
-  const applyQueueFromAgentState = useCallback((
-    state: AgentStateResponse | undefined,
-    sid: string,
-    sessionLoadGeneration: number,
-    connectionFence: number,
-  ) => {
-    const nativeQueuedCount = asNumber(state?.queuedMessageCount);
-    const snapshot = snapshotFromAgentState(state);
-    if (snapshot) {
-      applyQueueSnapshot(snapshot, sid, sessionLoadGeneration, connectionFence, "fetch", nativeQueuedCount);
-      return;
-    }
-    applyNativeQueuedCount(nativeQueuedCount, sid, sessionLoadGeneration, connectionFence);
-  }, [applyNativeQueuedCount, applyQueueSnapshot]);
-
-  const fetchMessageQueue = useCallback(async (sid: string) => {
-    const sessionLoadGeneration = sessionLoadGenerationRef.current;
-    const runtimeLoadGeneration = runtimeLoadGenerationRef.current;
-    const connectionFence = queueRequestFenceRef.current;
-    try {
-      const data = await sendAgentCommand<unknown>(sid, { type: "get_message_queue" });
-      if (
-        !hookAliveRef.current
-        || !matchesSessionLoadGeneration(sessionIdRef.current, sid, sessionLoadGenerationRef.current, sessionLoadGeneration)
-        || runtimeLoadGenerationRef.current !== runtimeLoadGeneration
-        || queueRequestFenceRef.current !== connectionFence
-      ) return;
-      const result = unwrapQueueCommandResult(data);
-      if (result) applyQueueSnapshot(result.queue, sid, sessionLoadGeneration, connectionFence, "fetch");
-    } catch {
-      // Older runtimes without get_message_queue keep get_state's native count.
-    }
-  }, [applyQueueSnapshot]);
-
   const applyLoadedAgentState = useCallback((
     sid: string,
     agentState: { running: boolean; state?: AgentStateResponse },
@@ -1343,7 +942,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (liveState.extensionStatuses !== undefined) setExtensionStatuses(liveState.extensionStatuses ?? []);
       if (liveState.extensionWidgets !== undefined) setExtensionWidgets(liveState.extensionWidgets ?? []);
       if (liveState.todoPhases !== undefined) setTodoPhases(liveState.todoPhases ?? []);
-      applyQueueFromAgentState(liveState, sid, sessionLoadGeneration, queueRequestFenceRef.current);
+      applyQueueFromAgentState(liveState, sid, sessionLoadGeneration);
     } else {
       // No live wrapper: the ring and compaction state must not freeze on the
       // last live snapshot. The derived message usage remains authoritative.
@@ -1395,7 +994,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false, fenceRunId?: number) => {
     const hadAuthoritativeHistory = sessionReadinessRef.current.history === "ready";
-    const loadGeneration = beginSessionLoad(sid, includeState);
+    const loadGeneration = beginSessionLoad(includeState);
     if (showLoading) setLoading(true);
     if (!hadAuthoritativeHistory) {
       const origin = getRemoteReplicaOrigin();
@@ -1881,19 +1480,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [canMutateSession]);
 
-  const addNotice = useCallback((notice: { id?: string; message: string; type?: NoticeType }) => {
-    const message = notice.message.trim();
-    if (!message) return;
-    dispatchNotice({
-      type: "add",
-      notice: {
-        id: notice.id ?? createNoticeId(),
-        message,
-        type: notice.type ?? "info",
-      },
-    });
-  }, []);
-
   const dismissNotice = useCallback((id: string) => {
     dispatchNotice({ type: "remove", id });
   }, []);
@@ -2021,7 +1607,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // registry and durable history so children that outlive this prompt can
       // still be discovered/settled without fabricating a lost state.
       if (sid) {
-        void refreshSubagentRosterRef.current?.(sid);
+        void refreshSubagentRoster(sid);
         void refreshSubagentHistory(sid);
       }
       dispatch({ type: "end" });
@@ -2029,7 +1615,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       lastQuotaErrorRef.current = null;
       onAgentEnd?.();
     }
-  }, [addNotice, loadSession, onAgentEnd, refreshSubagentHistory]);
+  }, [addNotice, loadSession, onAgentEnd, refreshSubagentHistory, refreshSubagentRoster]);
 
   const waitForPromptSettlement = useCallback(async (sid: string, runId?: number) => {
     await delayWhileDocumentVisible(
@@ -2113,34 +1699,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [loadSession]);
 
-  const scheduleInitialRosterRefresh = useCallback((sid: string) => {
-    if (rosterRefreshTimerRef.current) {
-      clearTimeout(rosterRefreshTimerRef.current);
-      rosterRefreshTimerRef.current = null;
-    }
-    if (
-      !hookAliveRef.current
-      || sessionIdRef.current !== sid
-      || !runtimeReadyRef.current
-    ) return;
-    if (isDocumentHidden()) {
-      rosterRefreshDeferredRef.current = true;
-      return;
-    }
-    rosterRefreshDeferredRef.current = false;
-    rosterRefreshTimerKindRef.current = "initial";
-    rosterRefreshTimerRef.current = setTimeout(() => {
-      rosterRefreshTimerRef.current = null;
-      rosterRefreshTimerKindRef.current = null;
-      if (isDocumentHidden()) {
-        rosterRefreshDeferredRef.current = true;
-        return;
-      }
-      if (sessionIdRef.current !== sid || !runtimeReadyRef.current) return;
-      void refreshSubagentRoster(sid);
-    }, 600);
-  }, [refreshSubagentRoster]);
-
   const restoreRuntimeFromState = useCallback((sid: string, agentState: { running: boolean; state?: AgentStateResponse }) => {
     if (!hookAliveRef.current || sessionIdRef.current !== sid || !runtimeReadyRef.current) return;
     const liveState = agentState.state;
@@ -2164,7 +1722,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setBashRunning(true);
       void waitForBashSettlement(sid);
     }
-    if (liveState) applyQueueFromAgentState(liveState, sid, sessionLoadGenerationRef.current, queueRequestFenceRef.current);
+    if (liveState) applyQueueFromAgentState(liveState, sid, sessionLoadGenerationRef.current);
     void fetchMessageQueue(sid);
   }, [applyQueueFromAgentState, connectEvents, fetchMessageQueue, registerHostTools, registerHostUriSchemes, scheduleInitialRosterRefresh, waitForBashSettlement, waitForPromptSettlement]);
 
@@ -2210,7 +1768,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setIsCompacting(state?.isCompacting ?? false);
       // Also mid-run: this poll is the only todo-phase refresh while streaming.
       if (state?.todoPhases !== undefined) setTodoPhases(state.todoPhases ?? []);
-      applyQueueFromAgentState(state, sid, sessionLoadGenerationRef.current, queueRequestFenceRef.current);
+      applyQueueFromAgentState(state, sid, sessionLoadGenerationRef.current);
       // And the only reliable re-sync for a missed subagent lifecycle frame.
       void refreshSubagentRoster(sid);
       const busy = data.running && state
@@ -2250,14 +1808,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
       }
-      if (rosterRefreshTimerRef.current) {
-        if (rosterRefreshTimerKindRef.current === "initial") {
-          rosterRefreshDeferredRef.current = true;
-        }
-        clearTimeout(rosterRefreshTimerRef.current);
-        rosterRefreshTimerRef.current = null;
-        rosterRefreshTimerKindRef.current = null;
-      }
+      pauseSubagentTimers();
     };
     const resumeVisibleSession = () => {
       if (isDocumentHidden()) return;
@@ -2281,8 +1832,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         ) return;
         await reconcileAgentState(sid);
       })();
-      scheduleSubagentRosterReconcile(sid);
-      if (rosterRefreshDeferredRef.current) scheduleInitialRosterRefresh(sid);
+      resumeSubagents(sid);
     };
     const onVisible = () => {
       if (document.visibilityState === "visible") resumeVisibleSession();
@@ -2295,7 +1845,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("online", resumeVisibleSession);
     };
-  }, [ensureEventsConnected, eventConnectionManager, reconcileAgentState, scheduleInitialRosterRefresh, scheduleSubagentRosterReconcile]);
+  }, [ensureEventsConnected, eventConnectionManager, reconcileAgentState, pauseSubagentTimers, resumeSubagents]);
 
   useEffect(() => {
     agentRunningRef.current = agentRunning;
@@ -2304,6 +1854,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const handleAgentEvent = useCallback((event: AgentEvent) => {
     switch (event.type) {
       case "agent_start":
+        // Explicit sends already advance this fence. Automatic queue delivery
+        // must do so too, but a duplicate start must not reset live content.
+        if (!agentRunningRef.current) promptRunIdRef.current += 1;
+        else if (!interruptReplyPendingRef.current) break;
         interruptReplyPendingRef.current = false;
         agentRunningRef.current = true;
         setAgentRunning(true);
@@ -2361,7 +1915,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setRetryInfo(null);
         // agent_end terminates only the parent turn. Detached children keep
         // their selected-session roster/activity alive and may settle later.
-        if (endedSid) void refreshSubagentRosterRef.current?.(endedSid);
+        if (endedSid) void refreshSubagentRoster(endedSid);
         dispatch({ type: "end" });
         // Reset per-run trackers after dispatch so fallback above can read them.
         runHadContentRef.current = false;
@@ -2393,7 +1947,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               if (d.state?.extensionStatuses !== undefined) setExtensionStatuses(d.state.extensionStatuses ?? []);
               if (d.state?.extensionWidgets !== undefined) setExtensionWidgets(d.state.extensionWidgets ?? []);
               if (d.state?.todoPhases !== undefined) setTodoPhases(d.state.todoPhases ?? []);
-              applyQueueFromAgentState(d.state, endedSid, sessionLoadGenerationRef.current, queueRequestFenceRef.current);
+              applyQueueFromAgentState(d.state, endedSid, sessionLoadGenerationRef.current);
               void fetchMessageQueue(endedSid);
             })
             .catch(() => {});
@@ -2401,21 +1955,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         onAgentEnd?.();
         break;
       }
-      case "message_queue_update": {
-        const sid = sessionIdRef.current;
-        if (!sid) break;
-        const snapshot = parseMessageQueueSnapshot(event.queue);
-        if (snapshot) {
-          applyQueueSnapshot(
-            snapshot,
-            sid,
-            sessionLoadGenerationRef.current,
-            queueRequestFenceRef.current,
-            "event",
-          );
-        }
+      case "message_queue_update":
+        handleQueueEvent(event.queue);
         break;
-      }
+
       case "prompt_result":
         // A prompt handled entirely by a builtin/extension slash command:
         // no agent_start/agent_end pair will follow.
@@ -2569,6 +2112,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             }
             return [...prev, delivered];
           });
+        } else if (completed?.role === "toolResult") {
+          setMessages((prev) => {
+            const index = prev.findIndex((message) => message.role === "toolResult" && message.toolCallId === completed.toolCallId);
+            if (index < 0) return [...prev, completed];
+            const next = [...prev];
+            next[index] = completed;
+            return next;
+          });
         } else if (completed?.role === "custom" && (completed as CustomMessage).customType === "xdev-mount-notice") {
           toast.info("MCP tools updated", describeMcpMountNotice(completed as CustomMessage), { clamp: true });
         } else if (completed) {
@@ -2578,7 +2129,42 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setAgentPhase({ kind: "waiting_model" });
         break;
       }
+      case "tool_execution_update": {
+        if (!agentRunningRef.current || typeof event.toolCallId !== "string") break;
+        const partial = event.partialResult;
+        if (typeof partial !== "object" || partial === null || !("content" in partial) || !Array.isArray(partial.content)) break;
+        const content: ToolResultMessage["content"] = [];
+        const blocks: unknown[] = partial.content;
+        for (const block of blocks) {
+          if (typeof block !== "object" || block === null || !("type" in block)) continue;
+          if (block.type === "text" && "text" in block && typeof block.text === "string") {
+            content.push({ type: "text", text: block.text });
+          } else if (block.type === "image" && "data" in block && typeof block.data === "string" && "mimeType" in block && typeof block.mimeType === "string") {
+            content.push({ type: "image", data: block.data, mimeType: block.mimeType });
+          }
+        }
+        const result: ToolResultMessage = {
+          role: "toolResult",
+          toolCallId: event.toolCallId,
+          toolName: typeof event.toolName === "string" ? event.toolName : undefined,
+          content,
+          ...("details" in partial ? { details: partial.details } : {}),
+        };
+        partialToolResultsRef.current.add(result);
+        setMessages((prev) => {
+          const index = prev.findIndex((message) => message.role === "toolResult" && message.toolCallId === result.toolCallId);
+          if (index < 0) return [...prev, result];
+          const existing = prev[index];
+          // Final SSE/history results always win over late progress frames.
+          if (existing.role !== "toolResult" || !partialToolResultsRef.current.has(existing)) return prev;
+          const next = [...prev];
+          next[index] = result;
+          return next;
+        });
+        break;
+      }
       case "tool_execution_start": {
+        if (!agentRunningRef.current) break;
         const id = event.toolCallId as string;
         const name = event.toolName as string;
         runHadContentRef.current = true;
@@ -2630,22 +2216,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           if (sessionIdRef.current) loadSession(sessionIdRef.current);
         }
         break;
-      case "subagent_lifecycle": {
-        // Child lifecycle frames are session-scoped, not parent-turn-scoped:
-        // detached children can settle after the parent's agent_end. Capture
-        // the selected-session roster generation so a queued frame from a
-        // previous session cannot repopulate a cleared roster.
-        const eventSessionId = sessionIdRef.current;
-        const eventRosterGeneration = subagentRosterGenerationRef.current;
-        if (!hookAliveRef.current || !eventSessionId) break;
-        // Roster fed by omp's subagent_lifecycle frames. Payload mirrors
-        // SubagentLifecyclePayload (oh-my-pi task/types.ts); defensive
-        // parsing degrades to ignoring the frame, never breaking the run.
-        const info = parseSubagentLifecycle(event.payload);
-        if (!info) break;
-        mergeSubagents([info], { sessionId: eventSessionId, rosterGeneration: eventRosterGeneration });
-        break;
-      }
       case "host_tool_call": {
         // The wrapper only forwards REGISTERED host tools (see rpc-manager),
         // so a frame here is always one this UI can answer.
@@ -2664,209 +2234,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (id && url) void handleHostUriRequest(id, operation, url, content);
         break;
       }
-      case "subagent_progress": {
-        // Progress frames are session-scoped, not parent-turn-scoped. Detached
-        // children can continue after agent_end, while this fence rejects a
-        // queued frame from a session/roster that has since been cleared.
-        const eventSessionId = sessionIdRef.current;
-        const eventRosterGeneration = subagentRosterGenerationRef.current;
-        if (!hookAliveRef.current || !eventSessionId) break;
-        // Progress frames carry the full AgentProgress snapshot (throttled to
-        // one per 150ms and flushed at terminal). The reliable key is
-        // progress.id; parentToolCallId/index are fallbacks.
-        const payload = event.payload as {
-          index?: unknown;
-          agent?: unknown;
-          agentSource?: unknown;
-          task?: unknown;
-          assignment?: unknown;
-          description?: unknown;
-          parentToolCallId?: unknown;
-          sessionFile?: unknown;
-          detached?: unknown;
-          progress?: unknown;
-        } | undefined;
-        const progress = parseSubagentProgress(payload?.progress);
-        const progressId = progress?.id;
-        const index = typeof payload?.index === "number" && Number.isFinite(payload.index)
-          ? payload.index
-          : (progress?.index ?? -1);
-        const parentToolCallId = typeof payload?.parentToolCallId === "string" ? payload.parentToolCallId : null;
-        const task = typeof payload?.task === "string" && payload.task.trim() ? payload.task : (progress?.task ?? null);
-        const assignment = typeof payload?.assignment === "string" ? payload.assignment : progress?.assignment;
-        if (!progressId && !task && !parentToolCallId && index < 0) break;
-        setSubagents((prev) => {
-          if (
-            !hookAliveRef.current
-            || sessionIdRef.current !== eventSessionId
-            || subagentRosterGenerationRef.current !== eventRosterGeneration
-          ) return prev;
-          let target = -1;
-          if (progressId) {
-            // A valid progress frame names its subagent; if that id is gone,
-            // recover it directly rather than falling back to a different
-            // child that happens to share a parent or index.
-            target = prev.findIndex((subagent) => subagent.id === progressId);
-            if (target === -1 && progress) {
-              const recovered = createSubagentFromProgress({
-                index: typeof payload?.index === "number" && Number.isFinite(payload.index) ? payload.index : undefined,
-                agent: typeof payload?.agent === "string" ? payload.agent : undefined,
-                agentSource:
-                  typeof payload?.agentSource === "string"
-                    && (payload.agentSource === "bundled" || payload.agentSource === "user" || payload.agentSource === "project")
-                    ? payload.agentSource
-                    : undefined,
-                task: typeof payload?.task === "string" ? payload.task : undefined,
-                assignment,
-                description: typeof payload?.description === "string" ? payload.description : undefined,
-                parentToolCallId: parentToolCallId ?? undefined,
-                sessionFile: typeof payload?.sessionFile === "string" ? payload.sessionFile : undefined,
-                detached: typeof payload?.detached === "boolean" ? payload.detached : undefined,
-              }, progress);
-              return recovered ? mergeSubagentRoster(prev, [recovered]) : prev;
-            }
-          } else {
-            // ID-less fallback frames: prefer the exact (parent, index) pair
-            // (batch children share parentToolCallId), then each key alone.
-            if (parentToolCallId && index >= 0) {
-              target = prev.findIndex((subagent) => subagent.parentToolCallId === parentToolCallId && subagent.index === index);
-            }
-            if (target === -1 && parentToolCallId) target = prev.findIndex((subagent) => subagent.parentToolCallId === parentToolCallId);
-            if (target === -1 && index >= 0) target = prev.findIndex((subagent) => subagent.index === index);
-          }
-          if (target === -1) return prev;
-          const current = prev[target];
-          // A delayed running/pending snapshot must not resurrect a child
-          // whose lifecycle/history already supplied a terminal outcome.
-          const nextStatus = progressStatusToSubagentStatus(progress?.status, current.status);
-          if (current.status !== "started" && nextStatus === "started") return prev;
-          const nextEntry: SubagentInfo = {
-            ...current,
-            // Progress snapshots own lifecycle state once a row exists. A
-            // frame without status is a partial update and must preserve the
-            // current row status instead of fabricating a transition.
-            status: nextStatus,
-            agent: typeof payload?.agent === "string" ? payload.agent : current.agent,
-            // The snapshot's agent-source literal lives in payload.agentSource,
-            // not payload.agent (which holds the agent name).
-            agentSource:
-              typeof payload?.agentSource === "string"
-                && (payload.agentSource === "bundled" || payload.agentSource === "user" || payload.agentSource === "project")
-                ? payload.agentSource
-                : current.agentSource,
-            ...(typeof payload?.sessionFile === "string" ? { sessionFile: payload.sessionFile } : {}),
-            ...(typeof payload?.detached === "boolean" ? { detached: payload.detached } : {}),
-            ...(task ? { task } : {}),
-            ...(assignment !== undefined ? { assignment } : {}),
-            ...(progress ? { progress } : {}),
-            lastUpdate: Date.now(),
-            source: current.source === "history" && current.status !== "started" ? "history" : "live",
-          };
-          // Progress frames arrive every ~150ms; skip rerender when no displayed field changed.
-          // Avoid double JSON.stringify on hot path — field compare is cheaper than serializing whole entries.
-          if (
-            current.agent === nextEntry.agent &&
-            current.agentSource === nextEntry.agentSource &&
-            current.sessionFile === nextEntry.sessionFile &&
-            current.detached === nextEntry.detached &&
-            current.task === nextEntry.task &&
-            current.assignment === nextEntry.assignment &&
-            JSON.stringify(current.progress) === JSON.stringify(nextEntry.progress)
-          ) return prev;
-          const next = [...prev];
-          next[target] = nextEntry;
-          return next;
-        });
+      case "subagent_lifecycle":
+      case "subagent_progress":
+      case "subagent_event":
+        handleSubagentEvent(event);
         break;
-      }
-      case "subagent_event": {
-        // Child-session activity is session-scoped, not parent-turn-scoped.
-        // Keep collecting detached-child events after agent_end, while the
-        // selected-session roster generation fences queued flush callbacks.
-        const eventSessionId = sessionIdRef.current;
-        const eventRosterGeneration = subagentRosterGenerationRef.current;
-        if (!hookAliveRef.current || !eventSessionId) break;
-        // An events-level subscription embeds raw child-session events here.
-        // The transcript remains paged on the server; a per-child revision
-        // tells an open dialog to fetch only the appended byte range. Also
-        // keep a bounded live-activity buffer for the transcript dialog.
-        const payload = event.payload as { id?: unknown; event?: unknown } | undefined;
-        const subagentId = typeof payload?.id === "string" ? payload.id : null;
-        if (subagentId) {
-          const pendingVersions = subagentVersionFlushRef.current ?? (subagentVersionFlushRef.current = new Set());
-          pendingVersions.add(subagentId);
-
-          const activity = parseSubagentActivityEvent(payload);
-          if (activity) {
-            const pendingActivities = subagentActivityFlushRef.current ?? (subagentActivityFlushRef.current = new Map());
-            const queuedEvents = pendingActivities.get(subagentId);
-            if (queuedEvents) {
-              if (queuedEvents.length >= SUBAGENT_ACTIVITY_BUFFER_MAX) queuedEvents.shift();
-              queuedEvents.push(activity);
-              // Re-key so the pending map preserves updated-id recency for the
-              // outer 64-id prune when the frame is eventually flushed.
-              pendingActivities.delete(subagentId);
-              pendingActivities.set(subagentId, queuedEvents);
-            } else {
-              pendingActivities.set(subagentId, [activity]);
-            }
-          }
-
-          if (subagentVersionFlushFrameRef.current === null) {
-            subagentVersionFlushFrameRef.current = requestAnimationFrame(() => {
-              subagentVersionFlushFrameRef.current = null;
-              if (
-                !hookAliveRef.current
-                || sessionIdRef.current !== eventSessionId
-                || subagentRosterGenerationRef.current !== eventRosterGeneration
-              ) {
-                subagentVersionFlushRef.current = null;
-                subagentActivityFlushRef.current = null;
-                return;
-              }
-              const queuedVersions = subagentVersionFlushRef.current;
-              subagentVersionFlushRef.current = null;
-              const queuedActivities = subagentActivityFlushRef.current;
-              subagentActivityFlushRef.current = null;
-              const hasVersions = queuedVersions !== null && queuedVersions.size > 0;
-              const hasActivities = queuedActivities !== null && queuedActivities.size > 0;
-              if (!hasVersions && !hasActivities) return;
-
-              if (queuedVersions && queuedVersions.size > 0) {
-                setSubagentTranscriptVersions((prev) => {
-                  let next = prev;
-                  for (const id of queuedVersions) next = { ...next, [id]: (next[id] ?? 0) + 1 };
-                  return pruneSubagentIdMap(next);
-                });
-              }
-              if (queuedActivities && queuedActivities.size > 0) {
-                setSubagentEvents((prev) => {
-                  let next = prev;
-                  for (const [id, activities] of queuedActivities) {
-                    const existing = prev[id] ?? [];
-                    const combined = existing.length === 0
-                      ? (activities.length <= SUBAGENT_ACTIVITY_BUFFER_MAX ? activities : activities.slice(-SUBAGENT_ACTIVITY_BUFFER_MAX))
-                      : [...existing, ...activities].slice(-SUBAGENT_ACTIVITY_BUFFER_MAX);
-                    if (next === prev) next = { ...prev };
-                    // Re-key first so pruning evicts the LEAST recently UPDATED
-                    // ids (a plain spread keeps an existing key at its original
-                    // position and can evict an actively-updated early id).
-                    delete next[id];
-                    next[id] = combined;
-                  }
-                  return pruneSubagentIdMap(next);
-                });
-              }
-            });
-          }
-        }
-        break;
-      }
       case "extension_ui_request":
         handleExtensionUiRequest(event as unknown as IncomingExtensionUiRequest);
         break;
     }
-  }, [addNotice, applyQueueFromAgentState, applyQueueSnapshot, fetchMessageQueue, finishPromptWithoutStream, handleExtensionUiRequest, handleHostToolCall, handleHostUriRequest, loadSession, mergeSubagents, onAgentEnd, reconcileAgentState, applyAuthoritativeModel, beginAuthoritativeModelSync, refreshSubagentHistory, setContextUsage, applySnapshotThinkingLevel, setThinkingLevelTracked]);
+  }, [addNotice, applyQueueFromAgentState, handleQueueEvent, fetchMessageQueue, finishPromptWithoutStream, handleExtensionUiRequest, handleHostToolCall, handleHostUriRequest, loadSession, handleSubagentEvent, onAgentEnd, reconcileAgentState, applyAuthoritativeModel, beginAuthoritativeModelSync, refreshSubagentHistory, refreshSubagentRoster, setContextUsage, applySnapshotThinkingLevel, setThinkingLevelTracked]);
   handleAgentEventRef.current = handleAgentEvent;
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]): Promise<boolean> => {
@@ -3467,166 +2844,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [addNotice, canMutateSession, ensureNewSession, handleSend, isCompacting, loadModels, loadSession, loadSlashCommands, promoteNewSession, onOpenSettingsTab, onSessionStatsPanelOpen, runtimeError]);
 
-  // Queued (undelivered) messages live in the queue panel only; the chat gets
-  // the real user message when pi delivers it (user message_end event). An
-  // optimistic chat bubble here would duplicate the queue panel and turn into
-  // a ghost message if the queue is recalled.
-  const handlePromptWithStreamingBehavior = useCallback(async (
+  const handlePromptWithStreamingBehavior = useCallback((
     message: string,
     behavior: "steer" | "followUp",
     images?: AttachedImage[],
-  ) => {
-    const sid = sessionIdRef.current;
-    if (!sid || !canMutateSession(sid)) return;
-    if (images && images.length > 0) {
-      addNotice({ type: "error", message: translate("chatInput.imagesCannotQueue") });
-      opts.chatInputRef?.current?.insertIfEmpty(message);
-      return;
-    }
-    const lane: MessageQueueLane = behavior === "steer" ? "steer" : "followUp";
-    setQueueEnqueuePending(true);
-    try {
-      await ensureEventsConnected(sid);
-      const sessionLoadGeneration = sessionLoadGenerationRef.current;
-      const connectionFence = queueRequestFenceRef.current;
-      if (
-        !matchesSessionLoadGeneration(sessionIdRef.current, sid, sessionLoadGenerationRef.current, sessionLoadGeneration)
-        || !canMutateSession(sid)
-      ) return;
-      const data = await sendAgentCommand<unknown>(sid, {
-        type: "enqueue_message",
-        message,
-        lane,
-      });
-      if (queueRequestFenceRef.current !== connectionFence) {
-        void fetchMessageQueue(sid);
-        return;
-      }
-      const result = unwrapQueueCommandResult(data);
-      if (result) applyQueueSnapshot(result.queue, sid, sessionLoadGeneration, connectionFence, "fetch");
-      else await fetchMessageQueue(sid);
-    } catch (e) {
-      console.error("Failed to queue prompt:", e);
-      addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
-      opts.chatInputRef?.current?.insertIfEmpty(message);
-      void fetchMessageQueue(sid);
-    } finally {
-      setQueueEnqueuePending(false);
-    }
-  }, [addNotice, applyQueueSnapshot, canMutateSession, ensureEventsConnected, fetchMessageQueue, opts.chatInputRef]);
-
-  const failQueueMutation = useCallback((sid: string, error: unknown) => {
-    addNotice({
-      type: "error",
-      message: error instanceof Error ? error.message : translate("chatInput.queuedOpFailed"),
-    });
-    void fetchMessageQueue(sid);
-  }, [addNotice, fetchMessageQueue]);
-
-  const handleRecallQueuedMessage = useCallback(async (id: string): Promise<string | null> => {
-    const sid = sessionIdRef.current;
-    if (!sid || !id || !canMutateSession(sid)) return null;
-    const sessionLoadGeneration = sessionLoadGenerationRef.current;
-    const connectionFence = queueRequestFenceRef.current;
-    const expectedRevision = queueRevisionRef.current;
-    if (expectedRevision < 0) {
-      failQueueMutation(sid, new Error(translate("chatInput.queuedOpFailed")));
-      return null;
-    }
-    try {
-      const data = await sendAgentCommand<unknown>(sid, {
-        type: "recall_queued_message",
-        id,
-        expectedRevision,
-      });
-      if (
-        !matchesSessionLoadGeneration(sessionIdRef.current, sid, sessionLoadGenerationRef.current, sessionLoadGeneration)
-        || queueRequestFenceRef.current !== connectionFence
-      ) {
-        return null;
-      }
-      const result = parseRecallQueuedMessageResult(data);
-      if (!result) {
-        failQueueMutation(sid, new Error(translate("chatInput.queuedOpFailed")));
-        return null;
-      }
-      applyQueueSnapshot(result.queue, sid, sessionLoadGeneration, connectionFence, "fetch");
-      return result.recalled.text;
-    } catch (e) {
-      failQueueMutation(sid, e);
-      return null;
-    }
-  }, [applyQueueSnapshot, canMutateSession, failQueueMutation]);
-
-  const handleDeleteQueuedMessage = useCallback(async (id: string): Promise<boolean> => {
-    const sid = sessionIdRef.current;
-    if (!sid || !id || !canMutateSession(sid)) return false;
-    const sessionLoadGeneration = sessionLoadGenerationRef.current;
-    const connectionFence = queueRequestFenceRef.current;
-    const expectedRevision = queueRevisionRef.current;
-    if (expectedRevision < 0) {
-      failQueueMutation(sid, new Error(translate("chatInput.queuedOpFailed")));
-      return false;
-    }
-    try {
-      const data = await sendAgentCommand<unknown>(sid, {
-        type: "delete_queued_message",
-        id,
-        expectedRevision,
-      });
-      if (
-        !matchesSessionLoadGeneration(sessionIdRef.current, sid, sessionLoadGenerationRef.current, sessionLoadGeneration)
-        || queueRequestFenceRef.current !== connectionFence
-      ) {
-        return false;
-      }
-      const result = unwrapQueueCommandResult(data);
-      if (!result) {
-        failQueueMutation(sid, new Error(translate("chatInput.queuedOpFailed")));
-        return false;
-      }
-      applyQueueSnapshot(result.queue, sid, sessionLoadGeneration, connectionFence, "fetch");
-      return true;
-    } catch (e) {
-      failQueueMutation(sid, e);
-      return false;
-    }
-  }, [applyQueueSnapshot, canMutateSession, failQueueMutation]);
-
-  const handlePromoteQueuedMessage = useCallback(async (id: string): Promise<boolean> => {
-    const sid = sessionIdRef.current;
-    if (!sid || !id || !canMutateSession(sid)) return false;
-    const sessionLoadGeneration = sessionLoadGenerationRef.current;
-    const connectionFence = queueRequestFenceRef.current;
-    const expectedRevision = queueRevisionRef.current;
-    if (expectedRevision < 0) {
-      failQueueMutation(sid, new Error(translate("chatInput.queuedOpFailed")));
-      return false;
-    }
-    try {
-      const data = await sendAgentCommand<unknown>(sid, {
-        type: "promote_queued_message",
-        id,
-        expectedRevision,
-      });
-      if (
-        !matchesSessionLoadGeneration(sessionIdRef.current, sid, sessionLoadGenerationRef.current, sessionLoadGeneration)
-        || queueRequestFenceRef.current !== connectionFence
-      ) {
-        return false;
-      }
-      const result = unwrapQueueCommandResult(data);
-      if (!result) {
-        failQueueMutation(sid, new Error(translate("chatInput.queuedOpFailed")));
-        return false;
-      }
-      applyQueueSnapshot(result.queue, sid, sessionLoadGeneration, connectionFence, "fetch");
-      return true;
-    } catch (e) {
-      failQueueMutation(sid, e);
-      return false;
-    }
-  }, [applyQueueSnapshot, canMutateSession, failQueueMutation]);
+  ): Promise<boolean> => enqueueMessage(message, behavior, images, ensureEventsConnected), [enqueueMessage, ensureEventsConnected]);
 
   const handleAbortCompaction = useCallback(async () => {
     const sid = sessionIdRef.current;
@@ -3726,26 +2948,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       reconnectTimerRef.current = null;
     }
     reconnectAttemptRef.current = 0;
-    if (rosterRefreshTimerRef.current) {
-      clearTimeout(rosterRefreshTimerRef.current);
-      rosterRefreshTimerRef.current = null;
-    }
-    rosterRefreshTimerKindRef.current = null;
-    rosterRefreshInFlightRef.current = null;
-    rosterRefreshRequestIdRef.current += 1;
+    disposeSubagents();
     visibilityDelayAbortRef.current.abort();
     visibilityDelayAbortRef.current = new AbortController();
-    if (subagentVersionFlushFrameRef.current !== null) {
-      cancelAnimationFrame(subagentVersionFlushFrameRef.current);
-      subagentVersionFlushFrameRef.current = null;
-    }
-    subagentVersionFlushRef.current = null;
-    subagentActivityFlushRef.current = null;
-    queueRequestFenceRef.current += 1;
-    queueRevisionRef.current = -1;
-    setQueuedMessages(resetQueueSnapshot());
-    setQueueEnqueuePending(false);
-  }, [eventConnectionManager]);
+    disposeQueue();
+  }, [disposeQueue, disposeSubagents, eventConnectionManager]);
 
   // Keep callback identities out of this lifecycle boundary. In particular,
   // promoteNewSession changes isNew, which necessarily changes loadSession and

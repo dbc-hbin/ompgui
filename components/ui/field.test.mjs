@@ -10,7 +10,6 @@ const jiti = createJiti(import.meta.url, {
 });
 const {
   Button,
-  PrimaryButton,
   ConfirmDialog,
   Field,
   SecretInput,
@@ -97,10 +96,6 @@ test("Button renders secondary variant with border and transparent background", 
   assert.match(html, /background:transparent/);
   assert.match(html, /border:1px solid var\(--border\)/);
   assert.match(html, /Cancel/);
-});
-
-test("Button alias PrimaryButton is available and functions identically", () => {
-  assert.equal(PrimaryButton, Button);
 });
 
 test("Switch renders role=switch and maintains >=44px touch hit area", () => {

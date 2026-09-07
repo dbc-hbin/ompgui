@@ -4,13 +4,13 @@ import { deleteMcpServer, mergeMcpServers, parseMcpListOutput, readDiscoveredMcp
 import { readSessionHeader, resolveSessionPath } from "@/lib/session-reader";
 import { getRpcSession, resolveSpawnCwdResult, startRpcSession } from "@/lib/rpc-manager";
 import { parseJsonWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
-import { redactMcpServer } from "@/lib/omp/mcp-config";
+import { McpServerConflictError, redactMcpServer } from "@/lib/omp/mcp-config";
 
 export const dynamic = "force-dynamic";
 const MAX_MCP_REQUEST_BYTES = 1024 * 1024;
 
 function mcpErrorResponse(error: unknown) {
-  const status = error instanceof RequestBodyTooLargeError ? 413 : 400;
+  const status = error instanceof RequestBodyTooLargeError ? 413 : error instanceof McpServerConflictError ? 409 : 400;
   return NextResponse.json({ error: error instanceof RequestBodyTooLargeError ? "MCP request is too large" : error instanceof Error ? error.message : String(error) }, { status });
 }
 

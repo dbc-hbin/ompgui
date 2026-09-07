@@ -8,6 +8,8 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { getBase64DecodedByteLength, validateAgentImages } from "./image-attachments";
+import type { MessageQueueImage, RecalledMessageQueueItem } from "./message-queue";
 import {
   EMPTY_QUEUE_SNAPSHOT,
   type MessageQueueItem,
@@ -53,6 +55,9 @@ export const QUEUE_ERROR_INVALID = "queue_invalid";
 export const SESSION_QUEUE_MAX_ITEMS = 32;
 export const SESSION_QUEUE_MAX_ITEM_BYTES = 256 * 1024;
 export const SESSION_QUEUE_MAX_TOTAL_BYTES = 1024 * 1024;
+/** Decoded bytes; preserves the existing ten 10MiB images per-message allowance. */
+export const SESSION_QUEUE_MAX_IMAGE_BYTES = 100 * 1024 * 1024;
+export const QUEUE_ERROR_IMAGES_TOO_LARGE = "queue_images_too_large";
 export const QUEUE_FORWARD_TIMEOUT_MS = 30_000;
 
 export const QUEUE_UNCERTAIN_HANDOFF =
@@ -93,7 +98,7 @@ export function toQueueSnapshotEvent(snapshot: MessageQueueSnapshot): SessionQue
 
 export function toQueueMutationResult(
   snapshot: MessageQueueSnapshot,
-  recalled?: MessageQueueItem,
+  recalled?: RecalledMessageQueueItem,
 ): QueueMutationResult {
   return recalled ? { queue: snapshot, recalled } : { queue: snapshot };
 }
@@ -113,6 +118,7 @@ function freezeItem(item: MessageQueueItem): MessageQueueItem {
     lane: item.lane,
     status: item.status,
     ...(item.error ? { error: item.error } : {}),
+    ...(item.attachments ? { attachments: Object.freeze(item.attachments.map((attachment) => Object.freeze({ ...attachment }))) } : {}),
   };
   Object.freeze(next);
   return next;
@@ -127,6 +133,8 @@ function cloneItems(items: readonly MessageQueueItem[]): readonly MessageQueueIt
 export class SessionMessageQueue {
   private revision = 0;
   private items: MessageQueueItem[] = [];
+  private readonly imagePayloads = new Map<string, readonly MessageQueueImage[]>();
+  private imageBytes = 0;
   private snapshot: MessageQueueSnapshot = EMPTY_QUEUE_SNAPSHOT;
 
   getSnapshot(): MessageQueueSnapshot {
@@ -142,11 +150,37 @@ export class SessionMessageQueue {
     return this.items.find((item) => item.status === "queued" && item.lane === lane);
   }
 
-  enqueue(input: { lane: MessageQueueLane; text: string }): MessageQueueSnapshot {
+  /** Private payload access for the canonical dispatcher only. */
+  getImages(id: string): readonly MessageQueueImage[] | undefined {
+    return this.imagePayloads.get(id);
+  }
+
+  enqueue(input: { lane: MessageQueueLane; text: string; images?: unknown }): MessageQueueSnapshot {
     if (!isSessionQueueKind(input.lane)) {
       throw new SessionQueueError("lane must be steer or followUp", QUEUE_ERROR_INVALID);
     }
-    const text = this.assertText(input.text);
+    const imageError = validateAgentImages(input.images);
+    if (imageError) throw new SessionQueueError(imageError, QUEUE_ERROR_INVALID);
+    const images: MessageQueueImage[] = [];
+    const attachments: { mimeType: string; bytes: number }[] = [];
+    let imageBytes = 0;
+    if (Array.isArray(input.images)) {
+      for (const image of input.images) {
+        if (typeof image !== "object" || image === null || !("data" in image) || !("mimeType" in image)
+          || typeof image.data !== "string" || typeof image.mimeType !== "string") {
+          throw new SessionQueueError("Each attachment must be an image", QUEUE_ERROR_INVALID);
+        }
+        const bytes = getBase64DecodedByteLength(image.data);
+        if (bytes === null) throw new SessionQueueError("Invalid image data", QUEUE_ERROR_INVALID);
+        imageBytes += bytes;
+        images.push(Object.freeze({ type: "image", data: image.data, mimeType: image.mimeType }));
+        attachments.push({ mimeType: image.mimeType, bytes });
+      }
+    }
+    if (this.imageBytes + imageBytes > SESSION_QUEUE_MAX_IMAGE_BYTES) {
+      throw new SessionQueueError("Queue image capacity exceeds 100MiB; remove or recall queued images first", QUEUE_ERROR_IMAGES_TOO_LARGE);
+    }
+    const text = this.assertText(input.text, images.length > 0);
     if (this.items.length >= SESSION_QUEUE_MAX_ITEMS) {
       throw new SessionQueueError(
         `The queue already holds ${SESSION_QUEUE_MAX_ITEMS} messages`,
@@ -159,7 +193,10 @@ export class SessionMessageQueue {
       lane: input.lane,
       text,
       status: "queued",
+      ...(attachments.length ? { attachments } : {}),
     });
+    if (images.length) this.imagePayloads.set(item.id, Object.freeze(images));
+    this.imageBytes += imageBytes;
     this.items = [...this.items, item];
     return this.publish();
   }
@@ -175,14 +212,34 @@ export class SessionMessageQueue {
     return this.publish();
   }
 
-  recall(id: string, expectedRevision: number): { item: MessageQueueItem; snapshot: MessageQueueSnapshot } {
+  recall(id: string, expectedRevision: number, maxResponseBytes?: number): { item: RecalledMessageQueueItem; snapshot: MessageQueueSnapshot } {
     const item = this.requireMutable(id, expectedRevision);
+    const images = this.imagePayloads.get(id);
+    if (maxResponseBytes !== undefined) {
+      if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes <= 0) {
+        throw new SessionQueueError("Invalid recall response capacity", QUEUE_ERROR_INVALID);
+      }
+      // The pre-removal snapshot is a conservative upper bound. Count base64
+      // directly (ASCII with no JSON escapes), never serialize its large payload.
+      let responseBytes = utf8Bytes(JSON.stringify({ queue: this.snapshot, recalled: item })) + 256;
+      for (const image of images ?? []) {
+        responseBytes += image.data.length + utf8Bytes(JSON.stringify({ type: "image", data: "", mimeType: image.mimeType })) + 1;
+      }
+      if (responseBytes > maxResponseBytes) {
+        throw new SessionQueueError(
+          "These queued images exceed the remote recall transfer limit. Recall them from the web app instead; the queued message has not changed.",
+          "queue_recall_too_large",
+        );
+      }
+    }
+    this.releaseImages(item);
     this.items = this.items.filter((entry) => entry.id !== id);
-    return { item, snapshot: this.publish() };
+    return { item: images ? { ...item, images } : item, snapshot: this.publish() };
   }
 
   delete(id: string, expectedRevision: number): MessageQueueSnapshot {
-    this.requireMutable(id, expectedRevision);
+    const item = this.requireMutable(id, expectedRevision);
+    this.releaseImages(item);
     this.items = this.items.filter((entry) => entry.id !== id);
     return this.publish();
   }
@@ -207,7 +264,9 @@ export class SessionMessageQueue {
   }
 
   remove(id: string): MessageQueueSnapshot {
-    if (!this.items.some((entry) => entry.id === id)) return this.snapshot;
+    const item = this.items.find((entry) => entry.id === id);
+    if (!item) return this.snapshot;
+    this.releaseImages(item);
     this.items = this.items.filter((entry) => entry.id !== id);
     return this.publish();
   }
@@ -221,10 +280,17 @@ export class SessionMessageQueue {
   }
 
   reset(): MessageQueueSnapshot {
+    this.imagePayloads.clear();
+    this.imageBytes = 0;
     this.items = [];
     this.revision = 0;
     this.snapshot = EMPTY_QUEUE_SNAPSHOT;
     return this.snapshot;
+  }
+
+  private releaseImages(item: MessageQueueItem): void {
+    if (!this.imagePayloads.delete(item.id)) return;
+    for (const attachment of item.attachments ?? []) this.imageBytes -= attachment.bytes;
   }
 
   private requireMutable(id: string, expectedRevision: number): MessageQueueItem {
@@ -245,11 +311,11 @@ export class SessionMessageQueue {
     }
   }
 
-  private assertText(value: unknown): string {
+  private assertText(value: unknown, hasImages: boolean): string {
     if (typeof value !== "string") {
       throw new SessionQueueError("Message text is required", QUEUE_ERROR_INVALID);
     }
-    if (value.length === 0 || value.trim().length === 0) {
+    if (!hasImages && value.trim().length === 0) {
       throw new SessionQueueError("Message text cannot be empty", QUEUE_ERROR_INVALID);
     }
     const bytes = utf8Bytes(value);

@@ -99,6 +99,8 @@ state.
 Models and allow-listed OMP settings use surgical YAML updates that preserve
 unrelated content. Plugin operations run the installed `omp plugin` CLI. MCP
 configuration is project-local, validated before writing, and saved atomically.
+Renaming a server to an existing name returns HTTP 409 without overwriting either
+configuration.
 Configuration replacements use exclusive, owner-only temporary files. Project
 configuration targets are checked through symlinks before creating directories.
 
@@ -113,7 +115,12 @@ visibly. `get_state` and SSE `message_queue_update` events (including replay to 
 new listener) are the reconnect source of truth.
 Item IDs are unique across wrapper lifetimes. This is an in-memory queue:
 browser reloads recover pending work, but a server-process restart does not
-persist it to disk.
+persist it to disk. Image bytes stay in private wrapper storage; public queue
+snapshots carry attachment metadata, not image payloads. Image count, byte, and
+aggregate queue-memory limits are enforced before mutation. Recall restores the
+text and attachments to the composer and removes the item only after preflight;
+a Relay recall exceeding 15 MiB is refused without changing the queue and directs
+the user to the web client.
 
 Scheduling stays on that wrapper. Follow-ups dispatch one at a time, and only
 when the current run, shell, compaction, native in-flight work, and any
@@ -142,6 +149,22 @@ child replacement bump an epoch so a stale async forward cannot land on the
 wrong session or resurrect a discarded queue; teardown may cancel leftover
 items with a notice.
 
+### Session search and provider checks
+
+Metadata search and indexed body search are distinct modes. Body search uses a
+private, derived Node/SQLite index of visible conversation text, not credentials,
+hidden reasoning, or opaque payloads. Date filters use an inclusive `from` and
+exclusive `to`. Match context is a read-only preview: search does not rewrite
+session history or turn a result into a full-history mutation API. The index and
+snippets contain private conversation data and stay within authenticated access.
+
+Model configuration checks validate configuration without contacting a provider.
+A real connectivity test requires explicit cost approval and makes at most one
+provider request using a fixed prompt and a 32-token output limit. Only OpenAI
+Chat Completions, OpenAI Responses, and Anthropic Messages API shapes with literal
+candidate credentials are supported; stored OAuth credentials are not used.
+Passing a configuration check does not prove connectivity or account access.
+
 ## Security contract
 
 - Bind loopback-only by default. A non-loopback hostname is an explicit opt-in.
@@ -169,7 +192,12 @@ items with a notice.
   Pairing secrets and tokens are never logged. After authenticated hello,
   correlated domain requests expose a finite, validated action set for
   `sessions`, `files`, `models`, `extensions`, and `system`, alongside session
-  snapshots and live events. This is not arbitrary RPC forwarding. Large
+  snapshots and live events. Online transcripts are independent of the protected
+  offline replica and include tool calls, results, errors, and media references.
+  Bounded snapshot previews do not impose a 4,000-character transcript limit:
+  `sessions.content` retrieves full text in bounded pages, and media references
+  are paginated separately. Offline cache privacy restrictions remain unchanged.
+  This is not arbitrary RPC forwarding. Large
   messages use bounded chunk transport; file transfers also enforce ownership,
   size limits, and expiry. Deferred mutations recheck device authorization and
   connection/session selection before committing, rather than trusting only
@@ -189,12 +217,18 @@ items with a notice.
 
 - The session sidebar is the durable navigation model: projects, sessions,
   branches, worktrees, and files must agree about the selected workspace.
-- Pre-dispatch prompts are owned by ompgui until they are forwarded. Browser
-  edits mutate the server queue (stable ids, monotonic revision, compare-and-
-  mutate). OMP receives a message at most once, through `prompt` (active
-  steering uses `streamingBehavior: "steer"`), and only after the wrapper has
-  marked that item sending. Native
-  `prompt` / `steer` / `follow_up` remain for older and Android callers.
+- Pre-dispatch prompts are owned by ompgui until they are forwarded. Web and
+  current Android clients use the canonical server queue (stable ids, monotonic
+  revision, compare-and-mutate). OMP receives a message at most once through
+  `prompt` (active steering uses `streamingBehavior: "steer"`), only after the
+  wrapper marks it sending. Legacy `prompt` / `steer` / `follow_up` entry points
+  remain for deployed older clients.
+- Android opens the queue explicitly through **Session controls → Queue**;
+  typing does not insert an automatic Execution/Queue bar into the composer.
+  Eligible queued items can be recalled with their images, deleted, or promoted
+  from follow-up to steering. Sending entries cannot be edited; promotion still
+  observes the scheduler's tool-execution safety boundary. Role-specific menus
+  and the visible home Search entry remain separate from the session controls.
 - Streaming state is explicit. The web UI reconciles Server-Sent Events with
   RPC state so a background tab cannot remain falsely “running”. The native
   client reconciles relay snapshots and live events for the selected session;
@@ -207,6 +241,10 @@ items with a notice.
   shared design tokens and UI primitives rather than one-off colors or controls.
 - Expensive rendering is deferred until needed; responsiveness and initial
   bundle size are part of the product contract.
+- Internally, `useAgentSession` composes `useSessionMessageQueue` and
+  `useSessionSubagents` rather than owning both feature implementations inline.
+  The feature hooks receive session context and mutation eligibility explicitly;
+  this separation does not move authoritative queue ownership out of the server.
 
 ## Upstream and release strategy
 
@@ -223,6 +261,13 @@ Releases are independent:
 3. Publish `ompgui@<version>` only from an npm account authorized for that
    package.
 4. Tag and release the repository that owns this downstream project.
+
+Android release signing is local-only: hosted CI receives no private signing
+keys. Publication requires uploading the locally signed, versioned APK and its
+`.sha256` checksum first; CI verifies those supplied artifacts rather than signing
+a replacement. Release verification uses `--release` to reject debuggable APKs
+and Android debug certificates, and requires the APK versionCode to match the
+source configuration exactly. See `docs/release.md` for the distribution procedure.
 
 ## Non-goals
 

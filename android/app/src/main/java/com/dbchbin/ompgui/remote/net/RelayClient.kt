@@ -9,6 +9,10 @@ import com.dbchbin.ompgui.remote.R
 import com.dbchbin.ompgui.remote.notify.AppForeground
 import com.dbchbin.ompgui.remote.notify.RelayForegroundService
 import com.dbchbin.ompgui.remote.notify.RelayNotifications
+import com.dbchbin.ompgui.remote.relay.RelayMessageQueue
+import com.dbchbin.ompgui.remote.relay.parseMessageQueue
+import com.dbchbin.ompgui.remote.relay.parseRecalledDraft
+import com.dbchbin.ompgui.remote.relay.reconcileMessageQueue
 import com.dbchbin.ompgui.remote.relay.AttachmentSource
 import com.dbchbin.ompgui.remote.relay.AttachmentTransfer
 import com.dbchbin.ompgui.remote.relay.ClientFrame
@@ -22,6 +26,7 @@ import com.dbchbin.ompgui.remote.relay.expandWebSlashCommand
 import com.dbchbin.ompgui.remote.relay.model
 import com.dbchbin.ompgui.remote.relay.parseModelRef
 import com.dbchbin.ompgui.remote.relay.parsePairingUri
+import com.dbchbin.ompgui.remote.relay.SubagentChip
 import com.dbchbin.ompgui.remote.relay.parseSubagentChips
 import com.dbchbin.ompgui.remote.relay.mergeSubagentChips
 import com.dbchbin.ompgui.remote.relay.reconcileSubagentChips
@@ -40,6 +45,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -156,6 +162,12 @@ class RelayClient private constructor(
     suspend fun request(domain: String, action: String, args: JSONObject): JSONObject =
         withContext(Dispatchers.Main.immediate) {
             val requestGeneration = sessionGeneration
+            val command = args.optJSONObject("command")
+            if (domain == "sessions" && action == "command" && command?.optString("type") == "extension_ui_response") {
+                if (args.optString("id") != openedSessionId || historicalView || awaitingSnapshot) {
+                    throw RelayRequestException("session_changed", app.getString(R.string.chat_response_failed))
+                }
+            }
             withTimeout<JSONObject>(300_000L) {
                 suspendCancellableCoroutine { continuation ->
                     if (connection.state != ConnectionState.Connected) {
@@ -177,34 +189,91 @@ class RelayClient private constructor(
             }.also { result ->
                 if (requestGeneration == sessionGeneration && domain == "sessions" && action == "command" &&
                     args.optString("id") == openedSessionId) {
-                    val command = args.optJSONObject("command")
-                    val type = command?.optString("type")
-                    val behavior = command?.optString("streamingBehavior")
-                    val steering = type == "steer" || (type == "prompt" && behavior == "steer")
-                    val followUp = type == "follow_up" || (type == "prompt" && behavior == "followUp")
-                    if (steering || followUp) {
-                        queueMutatedAtMs = android.os.SystemClock.elapsedRealtime()
-                        _ui.update { it.copy(queue = EventProjector.queueAfterSend(it.queue, command?.optString("message").orEmpty(), steering)) }
-                    }
-                    if (type == "get_state") applyQueueCount(result.optJSONObject("result") ?: result)
+                    applyMessageQueue(result.optJSONObject("result") ?: result)
                 }
             }
         }
 
-    private var queueMutatedAtMs = 0L
+    // Retain the visible queue across reconnect, but the server may have recreated its
+    // wrapper. The first valid current-generation snapshot establishes its revision
+    // domain. An event arriving before get_state consumes this allowance, so a late
+    // acknowledgement cannot overwrite that event with an older snapshot.
+    private var queueBaselinePending = true
 
-    private fun applyQueueCount(data: JSONObject) {
-        val count = if (data.has("queuedMessageCount")) data.optInt("queuedMessageCount", -1) else -1
-        if (count < 0) return
-        val now = android.os.SystemClock.elapsedRealtime()
-        _ui.update { it.copy(queue = EventProjector.queueAfterServerCount(it.queue, count, queueMutatedAtMs, now)) }
+    private fun applyMessageQueue(data: JSONObject) {
+        val incoming = parseMessageQueue(data.optJSONObject("messageQueue") ?: data.optJSONObject("queue")) ?: return
+        val establishBaseline = queueBaselinePending
+        queueBaselinePending = false
+        _ui.update { it.copy(messageQueue = reconcileMessageQueue(it.messageQueue, incoming, establishBaseline)) }
+    }
+
+    fun refreshMessageQueue() {
+        val session = openedSessionId ?: return
+        scopedRequest("sessions", "command", JSONObject().put("id", session)
+            .put("command", JSONObject().put("type", "get_message_queue"))) { result ->
+            applyMessageQueue(result.optJSONObject("result") ?: result)
+        }
+    }
+
+    fun consumeRecalledDraft(id: String) {
+        _ui.update { if (it.recalledDraft?.id == id) it.copy(recalledDraft = null) else it }
+    }
+
+    suspend fun recallQueuedMessage(id: String): Boolean =
+        requestScope.async { mutateQueue("recall_queued_message", id) }.await()
+
+    fun deleteQueuedMessage(id: String) {
+        requestScope.launch { mutateQueue("delete_queued_message", id) }
+    }
+
+    fun promoteQueuedMessage(id: String) {
+        requestScope.launch { mutateQueue("promote_queued_message", id) }
+    }
+
+    private suspend fun mutateQueue(type: String, id: String): Boolean = withContext(Dispatchers.Main.immediate) {
+        val session = openedSessionId ?: return@withContext false
+        val state = _ui.value
+        val item = state.messageQueue.items.firstOrNull { it.id == id } ?: return@withContext false
+        if (state.queueOperationPending || promptSending || awaitingSnapshot || queueBaselinePending || historicalView ||
+            state.recalledDraft != null || item.status == "sending" || state.messageQueue.revision < 0 ||
+            (type == "promote_queued_message" && item.lane != "followUp")) return@withContext false
+        val generation = sessionGeneration
+        _ui.update { it.copy(queueOperationPending = true) }
+        try {
+            val response = request("sessions", "command", JSONObject().put("id", session).put("command",
+                JSONObject().put("type", type).put("id", id).put("expectedRevision", state.messageQueue.revision)))
+            if (generation != sessionGeneration) return@withContext false
+            val data = response.optJSONObject("result") ?: response
+            applyMessageQueue(data)
+            if (type == "recall_queued_message") {
+                val recalled = parseRecalledDraft(data.optJSONObject("recalled"))
+                    ?: throw IllegalStateException("Relay returned an invalid recalled message")
+                check(recalled.id == id) { "Relay returned a different recalled message" }
+                _ui.update { it.copy(recalledDraft = recalled) }
+            }
+            clearUiErrors(setOf(RelayUiErrorKind.Request))
+            true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            if (generation == sessionGeneration) {
+                setUiError(error, RelayUiErrorKind.Request)
+                if ((error as? RelayRequestException)?.code == "queue_stale_revision") refreshMessageQueue()
+            }
+            false
+        } finally {
+            if (generation == sessionGeneration) _ui.update { it.copy(queueOperationPending = false) }
+        }
     }
 
     private fun invalidateRequests(code: String, message: String) {
         sessionGeneration++
+        queueBaselinePending = true
+        _ui.update { it.copy(queueOperationPending = false) }
         val pending = pendingRequests.values.toList()
         pendingRequests.clear()
         pendingCmds.clear()
+        pendingSubagentRosters.clear()
         for (request in pending) {
             if (request.continuation.isActive) {
                 request.continuation.resumeWithException(RelayRequestException(code, message))
@@ -214,6 +283,7 @@ class RelayClient private constructor(
 
     private fun resetSessionState() {
         historicalView = false
+        requestedLeafId = null
         invalidateRequests("session_changed", "The selected session changed")
         _ui.update { it.copy(
             messages = emptyList(), running = false, draft = "", chatTitle = "",
@@ -223,10 +293,12 @@ class RelayClient private constructor(
             worktrees = emptyList(), worktreesGit = false, worktreesError = null,
             fileMatches = emptyList(), creatingSession = false,
             extensionDialogs = emptyList(), chatNotices = emptyList(),
-            extensionStatus = emptyMap(), extensionWidgets = emptyMap(), queue = EventProjector.ChatQueue(),
+            extensionStatus = emptyMap(), extensionWidgets = emptyMap(), messageQueue = RelayMessageQueue(),
+            recalledDraft = null, queueOperationPending = false,
         ) }
     }
     private var historicalView = false
+    private var requestedLeafId: String? = null
     private var awaitingSnapshot = false
     private var openedSessionId: String? = null
     private var pendingSessionId: String? = null
@@ -236,6 +308,7 @@ class RelayClient private constructor(
     private var pairingAttempt = false
     /** req -> cmd type for in-flight session commands. */
     private val pendingCmds = mutableMapOf<Int, String>()
+    private val pendingSubagentRosters = mutableMapOf<Int, List<SubagentChip>>()
     private var fileMatchQuery = ""
 
     init {
@@ -245,7 +318,7 @@ class RelayClient private constructor(
                     invalidateRequests("disconnected", "Relay connection changed")
                     pendingSessionId = openedSessionId
                     awaitingSnapshot = openedSessionId != null
-                    _ui.update { it.copy(extensionDialogs = emptyList(), extensionStatus = emptyMap(), extensionWidgets = emptyMap()) }
+                    _ui.update { it.copy(extensionStatus = emptyMap(), extensionWidgets = emptyMap()) }
                 }
                 _ui.update { it.copy(connection = state) }
                 when (state) {
@@ -297,19 +370,12 @@ class RelayClient private constructor(
         _ui.update { it.copy(draft = value) }
     }
 
-    private fun dialogId(dialog: EventProjector.ChatExtensionRequest): String = when (dialog) {
-        is EventProjector.ChatExtensionRequest.Select -> dialog.id
-        is EventProjector.ChatExtensionRequest.Confirm -> dialog.id
-        is EventProjector.ChatExtensionRequest.Input -> dialog.id
-        is EventProjector.ChatExtensionRequest.Editor -> dialog.id
-    }
-
     fun dismissChatNotice(id: String) {
         _ui.update { state -> state.copy(chatNotices = state.chatNotices.filterNot { it.id == id }) }
     }
 
     fun dismissExtensionDialog(id: String) {
-        _ui.update { state -> state.copy(extensionDialogs = state.extensionDialogs.filterNot { dialogId(it) == id }) }
+        _ui.update { state -> state.copy(extensionDialogs = state.extensionDialogs.filterNot { it.id == id }) }
     }
 
     fun consumePairingUri(raw: String?, autoConnect: Boolean = false) {
@@ -372,6 +438,7 @@ class RelayClient private constructor(
         openedSessionId = id
         pendingSessionId = null
         pendingCmds.clear()
+        pendingSubagentRosters.clear()
         clearUiErrors()
         _ui.update {
             it.copy(
@@ -425,7 +492,8 @@ class RelayClient private constructor(
             val session = openedSessionId ?: return@withContext false
             val generation = sessionGeneration
             val originalDraft = _ui.value.draft
-            if (promptSending || (commandType == "prompt" && _ui.value.running)) return@withContext false
+            if (promptSending || _ui.value.queueOperationPending || _ui.value.recalledDraft != null || awaitingSnapshot || historicalView) return@withContext false
+            val enqueue = _ui.value.running || commandType == "steer" || commandType == "follow_up"
             val trimmed = text.trim()
             if (trimmed.isEmpty() && images.isEmpty()) return@withContext false
             val staged = mutableListOf<String>()
@@ -460,7 +528,9 @@ class RelayClient private constructor(
                 clearUiErrors(setOf(RelayUiErrorKind.Request, RelayUiErrorKind.Session))
                 _ui.update { it.copy(error = null) }
                 request("sessions", "command", JSONObject().put("id", session).put("command",
-                    JSONObject().put("type", commandType).put("message", outgoing).put("attachmentIds", org.json.JSONArray(staged))))
+                    JSONObject().put("type", if (enqueue) "enqueue_message" else "prompt")
+                        .apply { if (enqueue) put("lane", if (commandType == "follow_up") "followUp" else "steer") }
+                        .put("message", outgoing).put("attachmentIds", org.json.JSONArray(staged))))
                 checkSession()
                 accepted = true
                 clearUiErrors(setOf(RelayUiErrorKind.Request, RelayUiErrorKind.Session))
@@ -594,7 +664,7 @@ class RelayClient private constructor(
                 }
             }
             _ui.update { it.copy(branches = branches,
-                branchLeafId = result.optString("leafId").takeIf { leaf -> leaf.isNotBlank() && leaf != "null" }) }
+                branchLeafId = requestedLeafId ?: result.optString("leafId").takeIf { leaf -> leaf.isNotBlank() && leaf != "null" }) }
         }
     }
 
@@ -603,7 +673,11 @@ class RelayClient private constructor(
         val leaf = leafId.trim()
         if (sessionId.isEmpty() || leaf.isEmpty()) return
         if (sessionId == openedSessionId && connection.send(ClientFrame.SessionLeaf(sessionId, leaf))) {
+            invalidateRequests("session_changed", "The selected branch changed")
+            requestedLeafId = leaf
             historicalView = true
+            awaitingSnapshot = true
+            _ui.update { it.copy(messages = emptyList(), branchLeafId = leaf) }
         }
     }
 
@@ -651,8 +725,10 @@ class RelayClient private constructor(
         }
         val subReq = nextReq++
         pendingCmds[subReq] = "get_subagents"
+        pendingSubagentRosters[subReq] = _ui.value.subagents
         if (!connection.send(ClientFrame.Cmd(req = subReq, type = "get_subagents"))) {
             pendingCmds.remove(subReq)
+            pendingSubagentRosters.remove(subReq)
         }
     }
 
@@ -668,6 +744,7 @@ class RelayClient private constructor(
         pairingServerId = null
         pairingAttempt = false
         pendingCmds.clear()
+        pendingSubagentRosters.clear()
         uiErrorKind = null
         uiErrorCode = null
         if (opened != null) RelayNotifications.cancelAgentDone(app, opened)
@@ -681,6 +758,7 @@ class RelayClient private constructor(
         val pending = pendingSessionId ?: return
         pendingSessionId = null
         connection.send(ClientFrame.SessionOpen(pending))
+        requestedLeafId?.let { connection.send(ClientFrame.SessionLeaf(pending, it)) }
     }
 
     private fun handleFrame(frame: ServerFrame) {
@@ -813,6 +891,7 @@ class RelayClient private constructor(
             }
             is ServerFrame.Snapshot -> {
                 if (frame.id != openedSessionId) return
+                if (requestedLeafId != null && frame.leafId != requestedLeafId) return
                 awaitingSnapshot = false
                 requestSessionState()
                 fetchBranches(frame.id)
@@ -837,6 +916,7 @@ class RelayClient private constructor(
                 openedSessionId = frame.id
                 pendingSessionId = null
                 pendingCmds.clear()
+                pendingSubagentRosters.clear()
                 connection.send(ClientFrame.SessionsList)
                 clearUiErrors()
                 _ui.update {
@@ -912,10 +992,17 @@ class RelayClient private constructor(
                 _ui.update { it.copy(creatingSession = false) }
             }
             is ServerFrame.Event -> {
-                if (frame.id != openedSessionId || awaitingSnapshot || historicalView) return
+                // Pending UI replay may precede the opening snapshot. Unlike transcript
+                // deltas it is independent of that snapshot and must not be discarded.
+                if (!EventProjector.acceptsSessionEvent(frame.id, openedSessionId, awaitingSnapshot, historicalView, frame.payload)) return
+                val eventType = frame.payload.optString("type")
+                if (eventType == "extension_ui_pending") {
+                    _ui.update { state -> state.copy(extensionDialogs = EventProjector.applyExtensionDialogs(state.extensionDialogs, frame.payload)) }
+                    return
+                }
+                if (eventType == "message_queue_update") applyMessageQueue(frame.payload)
                 val wasRunning = _ui.value.running
                 val terminal = EventProjector.isTerminalStop(wasRunning, frame.payload)
-                val dialog = EventProjector.parseExtensionDialog(frame.payload)
                 val sideEffect = EventProjector.parseExtensionSideEffect(frame.payload)
                 val notice = sideEffect?.notice ?: EventProjector.parseNotice(frame.payload)
                 val status = EventProjector.parseExtensionStatus(frame.payload)
@@ -925,9 +1012,7 @@ class RelayClient private constructor(
                 val subagentUpdate = EventProjector.applySubagentEvent(_ui.value.subagents, frame.payload)
                 _ui.update { state ->
                     val messages = EventProjector.applyMessages(state.messages, frame.payload)
-                    var dialogs = state.extensionDialogs
-                    sideEffect?.clearDialogId?.let { id -> dialogs = dialogs.filterNot { dialogId(it) == id } }
-                    if (dialog != null) dialogs = dialogs.filterNot { dialogId(it) == dialogId(dialog) } + dialog
+                    val dialogs = EventProjector.applyExtensionDialogs(state.extensionDialogs, frame.payload)
                     val statuses = if (status == null) state.extensionStatus else {
                         val value = status.second
                         if (value == null) state.extensionStatus - status.first else state.extensionStatus + (status.first to value)
@@ -936,9 +1021,6 @@ class RelayClient private constructor(
                         val lines = widget.second
                         if (lines == null) state.extensionWidgets - widget.first else state.extensionWidgets + (widget.first to lines)
                     }
-                    val deliveredUser = frame.payload.optString("type") == "message_end" &&
-                        frame.payload.optJSONObject("message")?.optString("role") == "user" &&
-                        messages.size > state.messages.size && messages.lastOrNull()?.role == "user"
                     state.copy(
                         messages = messages,
                         running = EventProjector.applyRunning(state.running, frame.payload),
@@ -947,7 +1029,6 @@ class RelayClient private constructor(
                         extensionStatus = statuses, extensionWidgets = widgets,
                         draft = editorText ?: state.draft,
                         chatTitle = title ?: state.chatTitle,
-                        queue = if (deliveredUser) EventProjector.queueAfterDelivered(state.queue, messages.lastOrNull()?.text.orEmpty()) else state.queue,
                         subagents = subagentUpdate ?: state.subagents,
                     )
                 }
@@ -964,6 +1045,7 @@ class RelayClient private constructor(
                 }
             }
             is ServerFrame.CmdErr -> {
+                pendingSubagentRosters.remove(frame.req)
                 pendingCmds.remove(frame.req) ?: return
                 setUiError(frame.message, RelayUiErrorKind.Command, frame.code)
             }
@@ -978,8 +1060,9 @@ class RelayClient private constructor(
                         val items = frame.data?.optJSONArray("items")
                             ?: frame.data?.optJSONArray("subagents")
                         val snapshot = parseSubagentChips(items, live = true)
+                        val atRequest = pendingSubagentRosters.remove(frame.req).orEmpty()
                         _ui.update { state ->
-                            state.copy(subagents = reconcileSubagentChips(state.subagents, snapshot))
+                            state.copy(subagents = reconcileSubagentChips(state.subagents, snapshot, atRequest))
                         }
                         refreshHistoricalSubagents()
                     }
@@ -1012,6 +1095,7 @@ class RelayClient private constructor(
 
     private fun refreshHistoricalSubagents() {
         val session = openedSessionId ?: return
+        val atRequest = _ui.value.subagents.associateBy { it.id }
         // Best-effort enrichment onto an already-owned live roster; failures must
         // not steal the global banner or erase chips from get_subagents.
         scopedRequest(
@@ -1024,14 +1108,15 @@ class RelayClient private constructor(
             val historical = parseSubagentChips(result.optJSONArray("subagents"), live = false)
             if (historical.isEmpty()) return@scopedRequest
             _ui.update { state ->
-                state.copy(subagents = mergeSubagentChips(state.subagents, historical))
+                val changedIds = state.subagents.filter { it != atRequest[it.id] }.mapTo(HashSet()) { it.id }
+                state.copy(subagents = mergeSubagentChips(state.subagents, historical.filter { it.id !in changedIds }))
             }
         }
     }
 
     private fun applySessionState(frame: ServerFrame.CmdOk) {
         val data = frame.data ?: return
-        applyQueueCount(data)
+        applyMessageQueue(data)
         val model = frame.model()
             ?: data.optJSONObject("model")?.let(::parseModelRef)
             ?: parseModelRef(data.optJSONObject("state"))
@@ -1059,6 +1144,7 @@ class RelayClient private constructor(
             openedSessionId = null
             pendingSessionId = null
             pendingCmds.clear()
+            pendingSubagentRosters.clear()
             connection.send(ClientFrame.SessionClose)
             _ui.update {
                 it.copy(

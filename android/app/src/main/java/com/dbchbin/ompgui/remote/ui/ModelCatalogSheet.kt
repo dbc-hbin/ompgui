@@ -97,8 +97,7 @@ internal fun ModelCatalogSheet(requester: RelayRequester, draft: ProviderDraft, 
             loading = false
         }
     }
-    OmpModalSheet(onDismissRequest = onDismiss, containerColor = OmpColors.Bg,
-        dragHandle = { OmpSheetDragHandle() }) {
+    OmpModalSheet(onDismissRequest = onDismiss, containerColor = OmpColors.Bg) {
         OmpDialogSystemBars()
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f)) {
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {

@@ -5,7 +5,7 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/lib/i18n";
 import { isSafeExternalUrl } from "@/lib/safe-url";
 import { omitUntouchedModelDrafts } from "@/lib/models-config-drafts";
-import { formatApiError } from "@/lib/i18n/api-error";
+import { formatApiError, formatConnectivityError } from "@/lib/i18n/api-error";
 import { invalidateClientModels, loadClientModels } from "@/lib/client-model-store";
 import {
   Dialog,
@@ -922,6 +922,40 @@ function ModelDetail({
   const { t } = useI18n();
   const [testState, setTestState] = useState<ModelTestState>({ phase: "idle" });
   const [removeOpen, setRemoveOpen] = useState(false);
+  const [connectionCandidate, setConnectionCandidate] = useState<{ providerName: string; modelId: string; body: string } | null>(null);
+  const [connectionState, setConnectionState] = useState<ModelTestState>({ phase: "idle" });
+  const [connectionTarget, setConnectionTarget] = useState("");
+  const connectionPending = useRef(false);
+  const handleConnectionTest = async () => {
+    if (!connectionCandidate || connectionPending.current) return;
+    const candidate = connectionCandidate;
+    connectionPending.current = true;
+    setConnectionCandidate(null);
+    setConnectionTarget(`${candidate.providerName} / ${candidate.modelId}`);
+    setConnectionState({ phase: "testing" });
+    try {
+      const res = await fetch("/api/models-config/connectivity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: candidate.body,
+      });
+      const data: unknown = await res.json();
+      if (typeof data !== "object" || data === null) throw new Error();
+      const latencyMs = "latencyMs" in data && typeof data.latencyMs === "number" && Number.isFinite(data.latencyMs) ? data.latencyMs : undefined;
+      if (!res.ok || !("ok" in data) || data.ok !== true || !("responseText" in data) || typeof data.responseText !== "string" || !data.responseText.trim()) {
+        const message = formatConnectivityError(data);
+        setConnectionState(message === null ? { phase: "idle" } : { phase: "error", latencyMs, message });
+        return;
+      }
+      setConnectionState({ phase: "success", latencyMs, responseText: data.responseText.slice(0, 1000) });
+    } catch (error) {
+      setConnectionState(error instanceof Error && error.name === "AbortError"
+        ? { phase: "idle" }
+        : { phase: "error", message: t("modelsConfig.connectionFailed") });
+    } finally {
+      connectionPending.current = false;
+    }
+  };
   const set = <K extends keyof ModelEntry>(k: K, v: ModelEntry[K]) => onChange({ ...model, [k]: v });
   const costVal = (k: keyof NonNullable<ModelEntry["cost"]>) => model.cost?.[k] !== undefined ? String(model.cost[k]) : "";
   const setCost = (k: keyof NonNullable<ModelEntry["cost"]>, v: string) => {
@@ -1199,6 +1233,41 @@ function ModelDetail({
         </div>
       </div>
 
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "var(--space-3)" }}>
+        <button
+          type="button"
+          disabled={!model.id.trim() || connectionState.phase === "testing" || connectionCandidate !== null}
+          onClick={() => {
+            if (connectionPending.current) return;
+            setConnectionCandidate({ providerName, modelId: model.id, body: JSON.stringify({ providerName, provider, model, confirm: true }) });
+          }}
+          style={{ padding: "5px 12px", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", color: "var(--text)", fontSize: "var(--text-sm)" }}
+        >
+          {t(connectionState.phase === "testing" ? "modelsConfig.connectionTesting" : "modelsConfig.connectionTest")}
+        </button>
+        <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>{t("modelsConfig.connectionIsolation")}</p>
+        {connectionState.phase !== "idle" && (
+          <div role="status" aria-live="polite" style={{ fontSize: "var(--text-sm)", color: "var(--text)", whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxWidth: "100%" }}>
+            {connectionTarget}{" · "}
+            {connectionState.phase === "testing" ? t("modelsConfig.connectionTesting") : (
+              <>
+                {connectionState.phase === "success" ? t("modelsConfig.connectionSuccess") : connectionState.message}
+                {connectionState.latencyMs !== undefined ? ` · ${connectionState.latencyMs}ms` : ""}
+                {connectionState.phase === "success" ? `\n${connectionState.responseText}` : ""}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+      <ConfirmDialog
+        open={connectionCandidate !== null}
+        onOpenChange={(open) => { if (!open) setConnectionCandidate(null); }}
+        title={t("modelsConfig.connectionConfirmTitle")}
+        description={t("modelsConfig.connectionConfirmBody", { provider: connectionCandidate?.providerName ?? "", model: connectionCandidate?.modelId ?? "" })}
+        confirmLabel={t("modelsConfig.connectionTest")}
+        cancelLabel={t("modelsConfig.cancel")}
+        onConfirm={handleConnectionTest}
+      />
       <ConfirmDialog
         open={removeOpen}
         onOpenChange={setRemoveOpen}

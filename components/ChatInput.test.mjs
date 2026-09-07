@@ -10,6 +10,7 @@ const jiti = createJiti(import.meta.url, {
 });
 const { ChatInput, ModelErrorBanner, filterModelOptions, resolveMobileRunSubmitMode } = await jiti.import("./ChatInput.tsx");
 const { CHAT_COLUMN_MAX_WIDTH } = await jiti.import("../lib/chat-layout.ts");
+const { getDraft, setDraft, clearDraft } = await jiti.import("../lib/draft-store.ts");
 
 const noop = () => {};
 if (typeof globalThis.requestAnimationFrame !== "function") {
@@ -240,6 +241,116 @@ test("opens the context popup with the resolved percent and window summary", () 
   });
 });
 
+test("running image upload survives failed enqueue and clears only after accepted retry", async () => {
+  const previousReader = globalThis.FileReader;
+  const previousCreateUrl = URL.createObjectURL;
+  const previousRevokeUrl = URL.revokeObjectURL;
+  globalThis.FileReader = class {
+    readAsDataURL() {
+      this.result = "data:image/png;base64,aGVsbG8=";
+      this.onload();
+    }
+  };
+  URL.createObjectURL = () => "blob:queued-image";
+  URL.revokeObjectURL = noop;
+  try {
+    await withInteractiveHooks(async (rerender) => {
+      const queued = [];
+      let accepted = false;
+      const props = {
+        onSend: noop,
+        onAbort: noop,
+        isStreaming: true,
+        onPromptWithStreamingBehavior: async (message, behavior, images) => {
+          queued.push({ message, behavior, images });
+          return accepted;
+        },
+      };
+      let tree = rerender(props);
+      const picker = findHostElements(tree, (type, inputProps) => type === "input" && inputProps.type === "file")[0];
+      assert.equal(picker.props.disabled, false);
+      picker.props.onChange({ target: { files: [{ type: "image/png", size: 5 }], value: "image.png" } });
+      await Promise.resolve();
+      await Promise.resolve();
+      tree = rerender(props);
+      assert.equal(findHostElements(tree, (type) => type === "img")[0].props.src, "blob:queued-image");
+      const queueButton = findHostElements(tree, (type, buttonProps) => type === "button"
+        && String(buttonProps.className).includes("composer-queue-action-steer"))[0];
+      assert.equal(queueButton.props.disabled, false);
+      await queueButton.props.onClick();
+      await Promise.resolve();
+      tree = rerender(props);
+      assert.equal(queued.length, 1);
+      assert.equal(queued[0].message, "");
+      assert.equal(queued[0].images[0].data, "aGVsbG8=");
+      assert.equal(findHostElements(tree, (type) => type === "img")[0].props.src, "blob:queued-image");
+      accepted = true;
+      findHostElements(tree, (type, buttonProps) => type === "button"
+        && String(buttonProps.className).includes("composer-queue-action-steer"))[0].props.onClick();
+      await Promise.resolve();
+      await Promise.resolve();
+      assert.equal(findHostElements(rerender(props), (type) => type === "img").length, 0);
+      assert.equal(queued[1].images[0].data, "aGVsbG8=");
+    });
+  } finally {
+    globalThis.FileReader = previousReader;
+    URL.createObjectURL = previousCreateUrl;
+    URL.revokeObjectURL = previousRevokeUrl;
+  }
+});
+
+test("pending enqueue blocks duplicate queue and idle submissions until acknowledgement", async () => {
+  await withInteractiveHooks(async (rerender) => {
+    const acknowledgement = Promise.withResolvers();
+    const queued = [];
+    const sent = [];
+    const props = {
+      onSend: (message) => sent.push(message),
+      onAbort: noop,
+      isStreaming: true,
+      onPromptWithStreamingBehavior: (message) => {
+        queued.push(message);
+        return acknowledgement.promise;
+      },
+    };
+    let tree = rerender(props);
+    findHostElements(tree, (type) => type === "textarea")[0].props.onChange({
+      target: { value: "one delivery", selectionStart: 12 },
+    });
+    tree = rerender(props);
+    const queueButton = findHostElements(tree, (type, buttonProps) => type === "button"
+      && String(buttonProps.className).includes("composer-queue-action-steer"))[0];
+    queueButton.props.onClick();
+    queueButton.props.onClick();
+    assert.deepEqual(queued, ["one delivery"]);
+
+    const idleProps = { ...props, isStreaming: false };
+    const idleTree = rerender(idleProps);
+    const send = findHostElements(idleTree, (type, buttonProps) => type === "button"
+      && buttonProps["data-state"] === "send")[0];
+    assert.equal(send.props.disabled, true);
+    await send.props.onClick();
+    const textarea = findHostElements(idleTree, (type) => type === "textarea")[0];
+    textarea.props.onKeyDown({ key: "Enter", shiftKey: false, nativeEvent: {}, preventDefault: noop });
+    assert.deepEqual(sent, []);
+    assert.equal(textarea.props.value, "one delivery");
+
+    acknowledgement.resolve(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    const acknowledgedTree = rerender(idleProps);
+    const emptyDraft = findHostElements(acknowledgedTree, (type) => type === "textarea")[0];
+    assert.equal(emptyDraft.props.value, "");
+    emptyDraft.props.onChange({ target: { value: "next delivery", selectionStart: 13 } });
+    const readyTree = rerender(idleProps);
+    const readySend = findHostElements(readyTree, (type, buttonProps) => type === "button"
+      && buttonProps["data-state"] === "send")[0];
+    assert.equal(readySend.props.disabled, false);
+    await readySend.props.onClick();
+    assert.deepEqual(sent, ["next delivery"]);
+  });
+});
+
 test("native-only queued counts have no edit or delete controls", () => {
   withInteractiveHooks((rerender) => {
     const tree = rerender({
@@ -262,13 +373,13 @@ test("queued items expose per-id edit, delete, and follow-up steer", async () =>
     const recalled = [];
     const deleted = [];
     const promoted = [];
-    let recallResult = "from-queue";
+    let recallResult = { text: "from-queue", images: [{ type: "image", data: "aGVsbG8=", mimeType: "image/png" }] };
     const snapshot = {
       revision: 4,
       nativeQueuedCount: 2,
       items: [
         { id: "q1", text: "same", lane: "followUp", status: "queued" },
-        { id: "q2", text: "same", lane: "followUp", status: "queued" },
+        { id: "q2", text: "same", lane: "followUp", status: "queued", attachments: [{ mimeType: "image/png", bytes: 5 }] },
         { id: "q-send", text: "in flight", lane: "steer", status: "sending" },
         { id: "q-fail", text: "broke", lane: "followUp", status: "failed", error: "timeout" },
       ],
@@ -328,9 +439,22 @@ test("queued items expose per-id edit, delete, and follow-up steer", async () =>
     const textarea = findHostElements(afterEdit, (type) => type === "textarea")[0];
     assert.deepEqual(recalled, ["q2"]);
     assert.equal(textarea.props.value, "from-queue");
+    const restoredImage = findHostElements(afterEdit, (type) => type === "img")[0];
+    assert.equal(restoredImage.props.src, "data:image/png;base64,aGVsbG8=");
+    assert.equal(findHostElements(duplicate, (type) => type === "img").length, 0);
+    assert.match(textContent(duplicate), /Images · 1|chatInput\.queuedImages/);
 
     recallResult = null;
-    buttonByTitle(findRow(afterEdit, "q1"), /Edit this queued message|chatInput\.queuedEditTitle/)?.props.onClick();
+    const previousWindow = globalThis.window;
+    try {
+      globalThis.window = { confirm: () => false };
+      buttonByTitle(findRow(afterEdit, "q1"), /Edit this queued message|chatInput\.queuedEditTitle/)?.props.onClick();
+      assert.deepEqual(recalled, ["q2"]);
+      globalThis.window = { confirm: () => true };
+      buttonByTitle(findRow(afterEdit, "q1"), /Edit this queued message|chatInput\.queuedEditTitle/)?.props.onClick();
+    } finally {
+      globalThis.window = previousWindow;
+    }
     await Promise.resolve();
     await Promise.resolve();
     const afterFailedRecall = rerender(props);
@@ -348,8 +472,84 @@ test("queued items expose per-id edit, delete, and follow-up steer", async () =>
     const sendingEdit = buttonByTitle(findRow(afterFailedRecall, "q-send"), /Edit this queued message|chatInput\.queuedEditTitle/);
     sendingEdit?.props.onClick();
     await Promise.resolve();
+    globalThis.window = previousWindow;
     assert.deepEqual(recalled, ["q2", "q1"]);
   });
+});
+
+test("recall preserves the outgoing draft during a key handoff before the draft-switch effect", async () => {
+  const originKey = "test:recall-handoff:origin";
+  const destinationKey = "test:recall-handoff:destination";
+  const ack = Promise.withResolvers();
+  const image = { type: "image", data: "AQID", mimeType: "image/png" };
+  const newerDestination = {
+    value: "Newer destination draft",
+    images: [{ data: "BAUG", mimeType: "image/png" }],
+    files: [{ name: "notes.txt", mimeType: "text/plain", content: "Keep these notes", size: 16 }],
+  };
+  clearDraft(originKey);
+  clearDraft(destinationKey);
+  try {
+    await withInteractiveHooks(async (rerender) => {
+      const recalledIds = [];
+      const props = {
+        draftKey: originKey,
+        onSend: noop,
+        onAbort: noop,
+        isStreaming: true,
+        queuedMessages: {
+          revision: 7,
+          items: [{
+            id: "handoff-item", text: "Recovered queued text", lane: "followUp", status: "queued",
+            attachments: [{ mimeType: "image/png", bytes: 3 }],
+          }],
+        },
+        onRecallQueuedMessage: (id) => {
+          recalledIds.push(id);
+          return ack.promise;
+        },
+      };
+      let tree = rerender(props);
+      const textarea = findHostElements(tree, (type) => type === "textarea")[0];
+      assert.equal(textarea.props.value, "");
+      const row = findHostElements(tree, (type, rowProps) => (
+        type === "div" && rowProps["data-queue-id"] === "handoff-item"
+      ))[0];
+      const edit = findHostElements(row, (type) => type === "button").find((button) => (
+        /Edit this queued message|chatInput\.queuedEditTitle/.test(String(button.props.title ?? ""))
+      ));
+      assert.ok(edit);
+      edit.props.onClick();
+      assert.deepEqual(recalledIds, ["handoff-item"]);
+
+      // The user continues the outgoing draft while recall is in flight.
+      textarea.props.onChange({ target: { value: "Outgoing draft typed during recall", selectionStart: 34 } });
+      rerender(props);
+      setDraft(destinationKey, newerDestination);
+      const destinationProps = { ...props, draftKey: destinationKey, queuedMessages: { revision: 0, items: [] } };
+      tree = rerender(destinationProps);
+      const beforeAckValue = findHostElements(tree, (type) => type === "textarea")[0].props.value;
+      const beforeAckImages = findHostElements(tree, (type) => type === "img").map((node) => node.props.src);
+      // Effects are disabled in this harness: the render has selected B,
+      // while the composer refs still belong to A until its switch effect.
+      ack.resolve({
+        id: "handoff-item", text: "Recovered queued text", lane: "followUp", status: "queued", images: [image],
+      });
+      await ack.promise;
+      await Promise.resolve();
+      assert.deepEqual(getDraft(originKey), {
+        value: "Recovered queued text\n\nOutgoing draft typed during recall",
+        images: [{ data: "AQID", mimeType: "image/png" }], files: [],
+      });
+      assert.deepEqual(getDraft(destinationKey), newerDestination);
+      tree = rerender(destinationProps);
+      assert.equal(findHostElements(tree, (type) => type === "textarea")[0].props.value, beforeAckValue);
+      assert.deepEqual(findHostElements(tree, (type) => type === "img").map((node) => node.props.src), beforeAckImages);
+    });
+  } finally {
+    clearDraft(originKey);
+    clearDraft(destinationKey);
+  }
 });
 
 test("uses the configured behavior for mobile submissions during a run", () => {

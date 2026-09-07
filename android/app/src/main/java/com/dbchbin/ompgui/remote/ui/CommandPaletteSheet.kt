@@ -88,7 +88,6 @@ fun CommandPaletteSheet(
             initialGit = true, onDismiss = { gitOpen = false })
     } else OmpModalSheet(
         onDismissRequest = onDismiss,
-        dragHandle = { OmpSheetDragHandle() },
         containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
     ) {

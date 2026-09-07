@@ -30,6 +30,14 @@ data class DisplayMessage(
     val text: String,
     val timestamp: Long? = null,
     val streaming: Boolean = false,
+    val entryId: String? = null,
+    val toolCallId: String? = null,
+    val toolName: String? = null,
+    val isError: Boolean = false,
+    val details: JSONObject? = null,
+    val content: JSONArray? = null,
+    val deferredImages: JSONObject? = null,
+    val truncated: Boolean = false,
 )
 
 data class AgentState(
@@ -69,6 +77,95 @@ data class SessionListItem(
 )
 
 data class AttachedImage(val data: String, val mimeType: String)
+
+data class RelayQueueAttachment(val mimeType: String, val bytes: Long)
+data class RelayQueuedMessage(
+    val id: String,
+    val text: String,
+    val lane: String,
+    val status: String,
+    val error: String? = null,
+    val attachments: List<RelayQueueAttachment> = emptyList(),
+)
+data class RelayMessageQueue(
+    val revision: Long = -1,
+    val items: List<RelayQueuedMessage> = emptyList(),
+    val nativeQueuedCount: Int? = null,
+)
+data class RelayRecalledDraft(val id: String, val text: String, val images: List<AttachedImage>)
+
+private fun queueInteger(value: Any?): Long? {
+    val number = value as? Number ?: return null
+    val long = number.toLong()
+    return long.takeIf { it >= 0 && it <= 9_007_199_254_740_991L && number.toDouble() == it.toDouble() }
+}
+
+/** Reject malformed snapshots atomically: dropping an item would falsely imply deletion. */
+fun parseMessageQueue(value: JSONObject?): RelayMessageQueue? {
+    value ?: return null
+    val revision = queueInteger(value.opt("revision")) ?: return null
+    val rows = value.optJSONArray("items") ?: return null
+    val ids = HashSet<String>()
+    val items = ArrayList<RelayQueuedMessage>(rows.length())
+    for (index in 0 until rows.length()) {
+        val row = rows.optJSONObject(index) ?: return null
+        val id = (row.opt("id") as? String)?.takeIf { it.isNotBlank() } ?: return null
+        if (!ids.add(id)) return null
+        val text = row.opt("text") as? String ?: return null
+        val lane = row.opt("lane") as? String ?: return null
+        val status = row.opt("status") as? String ?: return null
+        if ((lane != "steer" && lane != "followUp") ||
+            (status != "queued" && status != "sending" && status != "failed")) return null
+        val error = if (row.has("error")) row.opt("error") as? String ?: return null else null
+        val attachments = ArrayList<RelayQueueAttachment>()
+        if (row.has("attachments")) {
+            val array = row.optJSONArray("attachments") ?: return null
+            for (attachmentIndex in 0 until array.length()) {
+                val attachment = array.optJSONObject(attachmentIndex) ?: return null
+                val mime = (attachment.opt("mimeType") as? String)?.takeIf { it.startsWith("image/") } ?: return null
+                val bytes = queueInteger(attachment.opt("bytes")) ?: return null
+                attachments.add(RelayQueueAttachment(mime, bytes))
+            }
+        }
+        items.add(RelayQueuedMessage(id, text, lane, status, error, attachments))
+    }
+    val nativeCount = if (value.has("nativeQueuedCount")) {
+        val count = queueInteger(value.opt("nativeQueuedCount")) ?: return null
+        if (count > Int.MAX_VALUE) return null
+        count.toInt()
+    } else null
+    return RelayMessageQueue(revision, items, nativeCount)
+}
+
+fun reconcileMessageQueue(
+    previous: RelayMessageQueue,
+    incoming: RelayMessageQueue?,
+    establishBaseline: Boolean = false,
+): RelayMessageQueue = when {
+    incoming == null -> previous
+    establishBaseline -> incoming
+    incoming.revision < previous.revision -> previous
+    incoming.revision == previous.revision -> previous.copy(nativeQueuedCount = incoming.nativeQueuedCount)
+    else -> incoming
+}
+
+fun parseRecalledDraft(value: JSONObject?): RelayRecalledDraft? {
+    value ?: return null
+    val id = value.opt("id") as? String ?: return null
+    val text = value.opt("text") as? String ?: return null
+    val images = ArrayList<AttachedImage>()
+    if (value.has("images")) {
+        val array = value.optJSONArray("images") ?: return null
+        for (index in 0 until array.length()) {
+            val image = array.optJSONObject(index) ?: return null
+            if (image.opt("type") != "image") return null
+            val data = image.opt("data") as? String ?: return null
+            val mime = image.opt("mimeType") as? String ?: return null
+            images.add(AttachedImage(data, mime))
+        }
+    }
+    return RelayRecalledDraft(id, text, images)
+}
 
 /** Reopenable local source; transport IDs are never image data. */
 data class AttachmentSource(val mimeType: String, val size: Long, val open: () -> java.io.InputStream)
@@ -1217,21 +1314,54 @@ private fun parseSessions(array: JSONArray?): List<SessionListItem> {
     return out
 }
 
+/** Online-only rich projection; never serialize this model into an offline replica. */
+fun parseDisplayMessage(item: JSONObject, streaming: Boolean = false): DisplayMessage? {
+    val role = item.optString("role")
+    if (role != "user" && role != "assistant" && role != "custom" && role != "toolResult" && role != "bashExecution") return null
+    val content = item.optJSONArray("content")?.let { source ->
+        JSONArray().also { normalized ->
+            for (i in 0 until source.length()) {
+                val block = source.optJSONObject(i) ?: continue
+                if (block.optString("type") == "toolCall") {
+                    normalized.put(JSONObject(block.toString()).apply {
+                        if (!has("toolCallId")) put("toolCallId", block.optString("id"))
+                        if (!has("toolName")) put("toolName", block.optString("name"))
+                        if (!has("input")) put("input", block.opt("arguments") ?: JSONObject())
+                    })
+                } else normalized.put(block)
+            }
+        }
+    }
+    val text = (item.opt("text") as? String) ?: (item.opt("content") as? String)
+        ?: (if (role == "bashExecution") item.opt("output") as? String else null) ?: buildString {
+        if (content != null) for (i in 0 until content.length()) {
+            val block = content.optJSONObject(i) ?: continue
+            if (block.optString("type") == "text") append(block.optString("text"))
+        }
+    }
+    return DisplayMessage(
+        role = role, text = text, timestamp = (item.opt("timestamp") as? Number)?.toLong(),
+        streaming = streaming,
+        entryId = (item.opt("entryId") as? String)?.takeIf { it.isNotBlank() }
+            ?: (item.opt("id") as? String)?.takeIf { it.isNotBlank() },
+        toolCallId = (item.opt("toolCallId") as? String)?.takeIf { it.isNotBlank() },
+        toolName = (item.opt("toolName") as? String)?.takeIf { it.isNotBlank() } ?: if (role == "bashExecution") "bash" else null,
+        isError = item.optBoolean("isError") || (role == "bashExecution" && item.optInt("exitCode", 0) != 0),
+        details = item.optJSONObject("details") ?: if (role == "bashExecution") JSONObject().apply {
+            for (key in listOf("command", "exitCode", "cancelled", "truncated")) if (item.has(key)) put(key, item.opt(key))
+        } else null,
+        content = content, deferredImages = item.optJSONObject("deferredImages"),
+        truncated = item.optBoolean("truncated"),
+    )
+}
+
 private fun parseMessages(array: JSONArray?): List<DisplayMessage> {
     if (array == null) return emptyList()
     val out = ArrayList<DisplayMessage>()
     val first = maxOf(0, array.length() - RelayProtocol.MAX_SNAPSHOT_MESSAGES)
     for (i in first until array.length()) {
         val item = array.optJSONObject(i) ?: continue
-        val role = item.optString("role")
-        if (role !in setOf("user", "assistant", "custom")) continue
-        if (!item.has("text") || item.isNull("text")) continue
-        val text = item.optString("text")
-        val timestamp = when (val raw = item.opt("timestamp")) {
-            is Number -> raw.toLong()
-            else -> null
-        }
-        out.add(DisplayMessage(role = role, text = text, timestamp = timestamp))
+        parseDisplayMessage(item)?.let(out::add)
     }
     return out
 }
@@ -1366,32 +1496,21 @@ fun isSubagentTerminal(status: String): Boolean = when (status) {
 fun isSubagentLive(chip: SubagentChip): Boolean =
     chip.live && !isSubagentTerminal(chip.status)
 
-/**
- * Historical sessions/subagents status. Terminal only with explicit evidence
- * (aborted / error / exitCode / terminal result.status). Otherwise "unknown"
- * — visible, not-live, never presented as registry-running.
- */
-fun historicalSubagentStatus(item: JSONObject, normalized: String): String {
-    if (isSubagentTerminal(normalized)) return normalized
+/** Explicit terminal evidence also appears on result-only progress/history rows. */
+fun subagentStatus(item: JSONObject): String? {
+    val normalized = normalizeSubagentStatus(item.optString("status"))
+    if (normalized != null && isSubagentTerminal(normalized)) return normalized
     val result = item.optJSONObject("result")
     if (result != null) {
-        if (result.optBoolean("aborted")) return "aborted"
-        val error = result.optString("error").trim()
-        if (error.isNotEmpty()) return "failed"
-        if (result.has("exitCode") && !result.isNull("exitCode")) {
-            return if (result.optInt("exitCode") == 0) "completed" else "failed"
-        }
-        when (result.optString("status").trim().lowercase()) {
-            "completed", "failed", "aborted" -> return result.optString("status").trim().lowercase()
-        }
+        val resultStatus = subagentStatus(result)
+        if (resultStatus != null && isSubagentTerminal(resultStatus)) return resultStatus
     }
     if (item.optBoolean("aborted")) return "aborted"
-    val error = item.optString("error").trim()
-    if (error.isNotEmpty()) return "failed"
-    if (item.has("exitCode") && !item.isNull("exitCode")) {
-        return if (item.optInt("exitCode") == 0) "completed" else "failed"
-    }
-    return "unknown"
+    val error = item.opt("error")
+    if (error is String && error.isNotBlank()) return "failed"
+    val exitCode = item.opt("exitCode")
+    if (exitCode is Number) return if (exitCode.toDouble() == 0.0) "completed" else "failed"
+    return normalized
 }
 
 /**
@@ -1404,8 +1523,8 @@ fun parseSubagentChips(array: JSONArray?, live: Boolean = true): List<SubagentCh
         val item = array.optJSONObject(i) ?: continue
         val id = item.optString("id").trim()
         if (id.isEmpty()) continue
-        val normalized = normalizeSubagentStatus(item.optString("status")) ?: continue
-        val status = if (live) normalized else historicalSubagentStatus(item, normalized)
+        val normalized = subagentStatus(item) ?: if (live) continue else "unknown"
+        val status = if (live) normalized else if (normalized == "running") "recorded" else normalized
         out.add(
             SubagentChip(
                 id = id,
@@ -1466,13 +1585,21 @@ fun mergeSubagentChips(primary: List<SubagentChip>, secondary: List<SubagentChip
  * Reconcile an authoritative live get_subagents snapshot with the roster.
  * Omitted live-running ids drop; historical / terminal rows are retained.
  */
-fun reconcileSubagentChips(previous: List<SubagentChip>, snapshot: List<SubagentChip>): List<SubagentChip> {
+fun reconcileSubagentChips(
+    previous: List<SubagentChip>,
+    snapshot: List<SubagentChip>,
+    atRequest: List<SubagentChip> = previous,
+): List<SubagentChip> {
     if (previous.isEmpty()) return snapshot
     val snapIds = snapshot.mapTo(HashSet()) { it.id }
+    val requestById = atRequest.associateBy { it.id }
+    // Events received after the request outrank its potentially stale response.
+    val changed = previous.filter { it != requestById[it.id] }.associateBy { it.id }
     val retained = previous.filter { chip ->
-        chip.id !in snapIds && (!chip.live || isSubagentTerminal(chip.status))
+        chip.id !in snapIds && (!chip.live || isSubagentTerminal(chip.status) || chip.id in changed)
     }
-    return mergeSubagentChips(snapshot, retained)
+    val hydrated = snapshot.map { changed[it.id] ?: it }
+    return mergeSubagentChips(hydrated, retained)
 }
 
 /**

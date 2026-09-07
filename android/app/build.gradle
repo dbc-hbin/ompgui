@@ -42,7 +42,8 @@ tasks.named('preBuild').configure {
 
 android {
     sourceSets {
-        main.assets.srcDir(parityPreviewAssets)
+        // Replace the default source directory so stale Capacitor assets cannot be packaged.
+        main.assets.setSrcDirs([parityPreviewAssets])
     }
     namespace = "com.dbchbin.ompgui.remote"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -50,8 +51,8 @@ android {
         applicationId "com.dbchbin.ompgui.remote"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 703
-        versionName "0.7.3"
+        versionCode 704
+        versionName "0.7.4"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61

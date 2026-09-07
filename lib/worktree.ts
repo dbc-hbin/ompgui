@@ -4,6 +4,7 @@ import { basename, dirname, join, resolve } from "path";
 import { promisify } from "util";
 import { allowFileRoot } from "./allowed-roots";
 import { samePath, toNativePath } from "./paths";
+import { isExistingPathWithinRoots, isPathWithinRoots, resolvePathWithMissingLeaf } from "./path-security";
 
 const execFileAsync = promisify(execFile);
 
@@ -80,6 +81,24 @@ function inferRemovedWorktree(cwd: string): ProjectInfo | null {
   const repoRoot = parent.slice(0, -"-worktrees".length);
   if (!repoRoot || !existsSync(join(repoRoot, ".git"))) return null;
   return { projectRoot: realPathOrSelf(repoRoot), branch: basename(cwd), isWorktree: true, isTopLevel: true };
+}
+
+/** Listing may recover a removed managed worktree, but only through an authorized main checkout. */
+export async function resolveAllowedWorktreeListing(cwd: string, roots: Set<string>): Promise<{ project: ProjectInfo; listingCwd: string } | null> {
+  if (existsSync(cwd)) {
+    if (!isPathWithinRoots(cwd, roots) || !isExistingPathWithinRoots(cwd, roots)) return null;
+    return { project: await resolveProject(cwd), listingCwd: cwd };
+  }
+  let canonicalCwd: string;
+  try {
+    canonicalCwd = resolvePathWithMissingLeaf(cwd);
+  } catch {
+    return null;
+  }
+  // Infer afresh: a cached project must not authorize an arbitrary missing path.
+  const project = inferRemovedWorktree(canonicalCwd);
+  if (!project || !isExistingPathWithinRoots(project.projectRoot, roots)) return null;
+  return { project, listingCwd: project.projectRoot };
 }
 
 export async function resolveProject(cwd: string): Promise<ProjectInfo> {

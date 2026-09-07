@@ -144,7 +144,7 @@ export async function getOmpVersion(): Promise<string | null> {
  * stays identical. Rejects with a trimmed ANSI-free detail on failure. */
 export function runOmpCli(
   args: string[],
-  opts: { cwd?: string; timeout?: number; maxBuffer?: number } = {},
+  opts: { cwd?: string; timeout?: number; maxBuffer?: number; env?: NodeJS.ProcessEnv } = {},
 ): Promise<{ stdout: string; stderr: string }> {
   const bin = resolveOmpBin();
   if (!bin) {
@@ -161,7 +161,7 @@ export function runOmpCli(
       cwd: opts.cwd,
       timeout: opts.timeout ?? 60_000,
       maxBuffer: opts.maxBuffer ?? 16 * 1024 * 1024,
-      env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
+      env: { ...(opts.env ?? process.env), FORCE_COLOR: "0", NO_COLOR: "1" },
       windowsHide: true,
     },
     (error, stdout, stderr) => {

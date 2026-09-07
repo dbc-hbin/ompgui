@@ -46,6 +46,7 @@
  * - providers.update {config:object,mode?:'full'|'partial',overwrite?:boolean} -> {success:true,path}
  * - providers.validate {config:object} -> {ok:true}
  * - providers.test {providerName:string,provider:object,model:{id,...}} -> {ok:true,latencyMs,responseText}
+ * - providers.connectivity {providerName:string,provider:object,model:{id,...},confirm:true} -> {ok:true,latencyMs,responseText,usage?}
  * - fallback.get {} -> {chains:Record<string,string[]>,enabled?,maxRetries?,modelFallback?,revertPolicy?}
  * - fallback.set {chains?,enabled?,maxRetries?,modelFallback?,revertPolicy?} -> {retry}
  * - auth.providers {} -> {providers:[{id,name,loggedIn}]}
@@ -65,9 +66,8 @@
  * - cancelAllModelLogins(): Promise<void> — dispose everything (server teardown).
  */
 import { homedir } from "os";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
+import { ModelVerificationError, verifyModelConfiguration } from "../omp/model-verification";
+import { verifyModelConnectivity } from "../omp/model-connectivity";
 import { invalidateModelsCache } from "../models-cache";
 import { ModelCatalogError, searchPublicModelCatalog } from "../model-catalog-service";
 import { assertNoAmbiguousModelScopes } from "../model-scope";
@@ -78,7 +78,6 @@ import {
   mergeRedactedModelsConfig,
   readModelsConfigFile,
   redactModelsConfig,
-  serializeModelsConfig,
   validateModelsConfig,
   writeModelsConfig,
   type ModelsConfigEditor,
@@ -92,7 +91,6 @@ import {
 import { RpcProcess, type RpcFrame } from "../omp/rpc-process";
 import {
   disposeUtilityRpc,
-  runIsolatedUtilityCommand,
   runUtilityCommand,
   type OmpLoginProvider,
   type OmpModel,
@@ -118,6 +116,7 @@ export const MODELS_REQUEST_ACTIONS = [
   "providers.update",
   "providers.validate",
   "providers.test",
+  "providers.connectivity",
   "fallback.get",
   "fallback.set",
   "auth.providers",
@@ -162,7 +161,6 @@ const LOGIN_TIMEOUT_MS = 15 * 60_000;
 const CATALOG_TIMEOUT_MS = 120_000;
 const PROVIDERS_TIMEOUT_MS = 30_000;
 const STATE_TIMEOUT_MS = 30_000;
-const MODEL_TEST_TIMEOUT_MS = 60_000;
 
 /** Native OMP role selectors edited by the desktop ModelRolesDetail. */
 export const NATIVE_MODEL_ROLES = [
@@ -566,70 +564,19 @@ function validateProvidersConfig(args: Record<string, unknown>): Record<string, 
 }
 
 async function testProviderModel(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const providerName = (typeof args.providerName === "string" ? args.providerName : undefined)?.trim();
-  if (!providerName) {
-    throw new ModelsRequestError("invalid_args", "providerName is required");
-  }
-  if (typeof args.provider !== "object" || args.provider === null || Array.isArray(args.provider)) {
-    throw new ModelsRequestError("invalid_args", "provider is required");
-  }
-  if (typeof args.model !== "object" || args.model === null || Array.isArray(args.model)) {
-    throw new ModelsRequestError("invalid_args", "model is required");
-  }
-  if (!("id" in args.model)) {
-    throw new ModelsRequestError("invalid_args", "model.id is required");
-  }
-  const modelId = (typeof args.model.id === "string" ? args.model.id : undefined)?.trim();
-  if (!modelId) {
-    throw new ModelsRequestError("invalid_args", "model.id is required");
-  }
-  const candidate = {
-    providers: {
-      [providerName]: { ...args.provider, models: [{ ...args.model, id: modelId }] },
-    },
-  };
   try {
-    validateModelsConfig(candidate);
+    return await verifyModelConfiguration(args);
   } catch (error) {
-    throw toInvalidConfigError(error);
-  }
-  // Isolated throwaway agent dir: the spawned omp sees only this candidate
-  // config and never touches ~/.omp (mirrors /api/models-config/test).
-  const tempDir = mkdtempSync(join(tmpdir(), "ompgui-model-test-"));
-  try {
-    writeFileSync(join(tempDir, "models.yml"), serializeModelsConfig(candidate), "utf8");
-    const startedAt = Date.now();
-    const { models } = await runIsolatedUtilityCommand<{ models: OmpModel[] }>(
-      { type: "get_available_models" },
-      {
-        env: { PI_CODING_AGENT_DIR: tempDir, OMP_PROFILE: "", PI_PROFILE: "", XDG_DATA_HOME: "" },
-        timeoutMs: MODEL_TEST_TIMEOUT_MS,
-      },
-    );
-    const latencyMs = Date.now() - startedAt;
-    const found = Array.isArray(models)
-      ? models.find((model) => model.provider === providerName && model.id === modelId)
-      : undefined;
-    if (!found) {
-      throw new ModelsRequestError(
-        "model_test_unresolved",
-        `Model ${providerName}/${modelId} did not resolve — check the API key and provider config`,
-        { latencyMs },
-      );
+    if (!(error instanceof ModelVerificationError)) throw error;
+    if (error.code === "models_config_invalid") {
+      throw new ModelsRequestError(MODELS_CONFIG_INVALID_CODE, "Invalid models configuration",
+        error.issues ? { issues: error.issues } : undefined);
     }
-    return {
-      ok: true,
-      latencyMs,
-      responseText: `${found.provider}/${found.id} resolved (configuration only; credentials were not contacted)`,
-    };
-  } catch (error) {
-    if (error instanceof ModelsRequestError) throw error;
-    throw new ModelsRequestError(
-      "model_test_failed",
-      error instanceof Error ? error.message : String(error),
-    );
-  } finally {
-    rmSync(tempDir, { recursive: true, force: true });
+    if (error.code === "model_test_unresolved" || error.code === "model_test_failed") {
+      throw new ModelsRequestError(error.code, error.message,
+        error.code === "model_test_unresolved" ? { latencyMs: error.latencyMs } : undefined);
+    }
+    throw new ModelsRequestError("invalid_args", error.code === "model_id_required" ? "model.id is required" : error.message);
   }
 }
 
@@ -829,7 +776,7 @@ function loginSnapshot(token: string, entry: PendingModelLogin): Record<string, 
   return snapshot;
 }
 
-async function runModelLogin(token: string, entry: PendingModelLogin): Promise<void> {
+async function runModelLogin(entry: PendingModelLogin): Promise<void> {
   const proc = entry.proc;
   if (!proc) {
     entry.phase = "error";
@@ -946,7 +893,7 @@ function startModelLogin(rawProvider: unknown, context: RelayRequestContext): Re
   pendingModelLogins.set(token, entry);
   // The login command resolves only when the whole flow finishes; the panel
   // learns the URL/code prompt through poll while this runs detached.
-  void runModelLogin(token, entry);
+  void runModelLogin(entry);
   return { provider, token };
 }
 
@@ -1141,6 +1088,38 @@ export async function handleModelsRequest(
       return validateProvidersConfig(args);
     case "providers.test":
       return testProviderModel(args);
+    case "providers.connectivity": {
+      if (args.confirm !== true) {
+        throw new ModelsRequestError("connectivity_confirmation_required", "Explicit confirmation is required for a live connectivity check");
+      }
+      if (configJsonSize(args) > CONFIG_JSON_MAX_BYTES) {
+        throw new ModelsRequestError("config_too_large", "models configuration exceeds 512KiB");
+      }
+      if (typeof context.assertActive !== "function") {
+        throw new ModelsRequestError("unauthorized", "Active device authorization is required");
+      }
+      try {
+        context.assertActive();
+        const result = await verifyModelConnectivity(args, {
+          assertActive: () => {
+            if (typeof context.assertActive !== "function") {
+              throw new ModelVerificationError("connectivity_cancelled", "Connectivity request authorization expired");
+            }
+            context.assertActive();
+          },
+          signal: context.signal,
+        });
+        context.assertActive();
+        return { ok: result.ok, latencyMs: result.latencyMs, responseText: result.responseText, ...(result.usage ? { usage: result.usage } : {}) };
+      } catch (error) {
+        if (error instanceof ModelVerificationError) {
+          throw new ModelsRequestError(error.code,
+            error.code === "models_config_invalid" ? "Invalid models configuration" : error.message,
+            error.latencyMs === undefined ? undefined : { latencyMs: error.latencyMs });
+        }
+        throw new ModelsRequestError("connectivity_failed", "Model connectivity check failed");
+      }
+    }
     case "fallback.get": {
       try {
         const data = readNativeSettings();

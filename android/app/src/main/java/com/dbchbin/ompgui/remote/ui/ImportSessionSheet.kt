@@ -119,7 +119,6 @@ fun ImportSessionSheet(
         onDismissRequest = onDismiss,
         containerColor = OmpColors.Bg,
         contentColor = OmpColors.Text,
-        dragHandle = { OmpSheetDragHandle() },
     ) {
         OmpDialogSystemBars()
         Column(

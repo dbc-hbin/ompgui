@@ -99,6 +99,16 @@ function resultStatus(value: Record<string, unknown>): SubagentHistoryEntry["sta
   return "started";
 }
 
+// Only parse a harness envelope header, never quoted task/output prose. Async
+// notifications must additionally name this id in their structured jobs list;
+// wake relays must identify the same sender in their structured metadata.
+function taskEnvelopeStatus(text: unknown): { id: string; status: SubagentHistoryEntry["status"] } | undefined {
+  if (typeof text !== "string") return undefined;
+  const header = /^<task-result id="([A-Za-z0-9_-]+)" agent="[^"\r\n]+" status="(completed|aborted|cancelled|failed(?: \(exit -?\d+\))?)" duration="[^"\r\n]+">\r?\n/.exec(text.slice(0, 1024));
+  if (!header) return undefined;
+  return { id: header[1], status: header[2] === "completed" ? "completed" : header[2] === "aborted" || header[2] === "cancelled" ? "aborted" : "failed" };
+}
+
 /**
  * Recover the subagent roster from a parent session file. Walks task
  * toolResults, merging `progress` (live-snapshot fields) with `results`
@@ -113,20 +123,75 @@ export function extractSubagentHistory(sessionFilePath: string): SubagentHistory
   }
 
   const byId = new Map<string, SubagentHistoryEntry>();
+  const taskCalls = new Map<string, string>();
   const upsert = (entry: SubagentHistoryEntry) => {
     const existing = byId.get(entry.id);
     if (!existing) {
       byId.set(entry.id, entry);
       return;
     }
-    byId.set(entry.id, { ...existing, ...entry, result: entry.result ?? existing.result });
+    byId.set(entry.id, { ...existing, ...entry, result: entry.result ?? (entry.status === "started" && existing.status !== "started" ? undefined : existing.result) });
+  };
+
+  const applyStatus = (id: string, status: SubagentHistoryEntry["status"], durationMs?: number) => {
+    const prior = byId.get(id);
+    // Notifications cannot invent agents absent from a task spawn record.
+    // Conflicting terminal evidence belongs to an earlier outcome and must
+    // not override this delivery in consumers. Matching telemetry/artifact
+    // paths remain useful; an explicit new task invocation clears them above.
+    if (prior) byId.set(id, { ...prior, status, result: prior.status === status ? prior.result : undefined, durationMs: durationMs ?? prior.durationMs });
   };
 
   for (const entry of entries) {
+    if (entry.type === "custom_message") {
+      const details = isRecord(entry.details) ? entry.details : undefined;
+      if (entry.customType === "async-result" && details && Array.isArray(details.jobs) && typeof entry.content === "string") {
+        // The fixed notice introduction is outside the agent-controlled output.
+        const notice = /^<system-notice>\r?\nBackground job ([A-Za-z0-9_-]+) has (?:completed|failed|been cancelled|been canceled). Resume your work using the result below.\r?\n/.exec(entry.content.slice(0, 512));
+        if (notice) {
+          const envelope = taskEnvelopeStatus(entry.content.slice(notice[0].length, notice[0].length + 1024));
+          const job = details.jobs.find((value: unknown) => isRecord(value) && value.type === "task" && value.jobId === notice[1]);
+          if (envelope && envelope.id === notice[1] && isRecord(job)) applyStatus(envelope.id, envelope.status, asNumber(job.durationMs));
+        } else if (/^<system-notice>\r?\n\d+ background jobs have completed\. Resume your work using the results below\.\r?\n/.test(entry.content.slice(0, 512))) {
+          const content = entry.content.slice(0, MAX_SUBAGENT_COMPLETION_BYTES);
+          for (const job of details.jobs) {
+            if (!isRecord(job) || job.type !== "task" || typeof job.jobId !== "string" || typeof job.label !== "string" || /[\r\n]/.test(job.label)) continue;
+            const marker = `\n── Job ${job.jobId} (${job.label}) ──\n`;
+            const offset = content.indexOf(marker);
+            if (offset < 0 || content.indexOf(marker, offset + marker.length) >= 0) continue;
+            const envelope = taskEnvelopeStatus(content.slice(offset + marker.length, offset + marker.length + 1024));
+            if (envelope?.id === job.jobId) applyStatus(envelope.id, envelope.status, asNumber(job.durationMs));
+          }
+        }
+      } else if (entry.customType === "irc:incoming" && details?.wakeRelay === true) {
+        const envelope = taskEnvelopeStatus(details.message);
+        if (envelope && details.from === envelope.id) applyStatus(envelope.id, envelope.status);
+      }
+      continue;
+    }
     if (entry.type !== "message" || entry.message?.role !== "toolResult") continue;
     const message = entry.message as { toolName?: unknown; details?: unknown };
-    if (message.toolName !== "task") continue;
     const details = isRecord(message.details) ? message.details : {};
+    if (message.toolName === "hub" && Array.isArray(details.jobs)) {
+      for (const job of details.jobs) {
+        if (!isRecord(job) || job.type !== "task" || typeof job.id !== "string") continue;
+        if (job.status === "completed" || job.status === "failed" || job.status === "aborted") applyStatus(job.id, job.status, asNumber(job.durationMs));
+        else if (job.status === "cancelled") applyStatus(job.id, "aborted", asNumber(job.durationMs));
+        // Running registry snapshots can describe the initial run after its
+        // final delivery. Only a later task spawn can start a new run here.
+      }
+      continue;
+    }
+    if (message.toolName !== "task") continue;
+    const callId = asString(entry.message.toolCallId);
+    const statusForTask = (id: string, status: SubagentHistoryEntry["status"]) => {
+      const previousCall = taskCalls.get(id);
+      if (callId) taskCalls.set(id, callId);
+      const prior = byId.get(id);
+      // Replayed startup snapshots from the same invocation cannot erase its
+      // delivered result. A distinct task invocation explicitly renews the id.
+      return status === "started" && prior && prior.status !== "started" && callId !== undefined && previousCall === callId ? prior.status : status;
+    };
     const progressArr = Array.isArray(details.progress) ? details.progress : [];
     const resultsArr = Array.isArray(details.results) ? details.results : [];
     const asyncInfo = isRecord(details.async) ? details.async : undefined;
@@ -138,7 +203,7 @@ export function extractSubagentHistory(sessionFilePath: string): SubagentHistory
         id: progress.id,
         agent: progress.agent ?? "subagent",
         agentSource: progress.agentSource,
-        status: progressStatusToRoster(progress.status),
+        status: statusForTask(progress.id, progressStatusToRoster(progress.status)),
         task: progress.task,
         assignment: progress.assignment,
         description: progress.description,
@@ -196,7 +261,7 @@ export function extractSubagentHistory(sessionFilePath: string): SubagentHistory
         id,
         agent: asString(raw.agent) ?? prior?.agent ?? "subagent",
         agentSource: asAgentSource(raw.agentSource) ?? prior?.agentSource,
-        status: resultStatus(raw),
+        status: statusForTask(id, resultStatus(raw)),
         task: asString(raw.task) ?? prior?.task,
         assignment: asString(raw.assignment) ?? prior?.assignment,
         description: asString(raw.description) ?? prior?.description,

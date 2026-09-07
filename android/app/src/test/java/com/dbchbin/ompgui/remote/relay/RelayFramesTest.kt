@@ -11,6 +11,69 @@ import org.junit.Test
 
 class RelayFramesTest {
     @Test
+    fun queueSnapshotsPreserveIdentityLanesFailuresAndImageMetadata() {
+        val queue = parseMessageQueue(JSONObject("""{"revision":12,"nativeQueuedCount":2,"items":[{"id":"first","text":"same","lane":"steer","status":"sending"},{"id":"second","text":"same","lane":"followUp","status":"failed","error":"rejected","attachments":[{"mimeType":"image/png","bytes":42}]}]}"""))!!
+        assertEquals(listOf("first", "second"), queue.items.map { it.id })
+        assertEquals("sending", queue.items[0].status)
+        assertEquals("followUp", queue.items[1].lane)
+        assertEquals("rejected", queue.items[1].error)
+        assertEquals(listOf(RelayQueueAttachment("image/png", 42)), queue.items[1].attachments)
+        assertEquals(2, queue.nativeQueuedCount)
+    }
+
+    @Test
+    fun malformedQueueCannotMasqueradeAsAuthoritativeDeletion() {
+        val valid = """{"revision":2,"items":[{"id":"a","text":"keep","lane":"steer","status":"queued"}]}"""
+        val previous = parseMessageQueue(JSONObject(valid))!!
+        val malformed = JSONObject(valid).put("revision", 3)
+        malformed.getJSONArray("items").put(JSONObject().put("id", "broken"))
+        assertNull(parseMessageQueue(malformed))
+        assertEquals(previous, reconcileMessageQueue(previous, parseMessageQueue(malformed)))
+        assertNull(parseMessageQueue(JSONObject(valid).put("revision", "3")))
+        assertNull(parseMessageQueue(JSONObject(valid).put("revision", 2.5)))
+        assertNull(parseMessageQueue(JSONObject(valid).put("nativeQueuedCount", -1)))
+        val duplicate = JSONObject(valid)
+        duplicate.getJSONArray("items").put(duplicate.getJSONArray("items").getJSONObject(0))
+        assertNull(parseMessageQueue(duplicate))
+    }
+
+    @Test
+    fun delayedAcknowledgementAndReconnectSnapshotCannotRegressQueue() {
+        val old = parseMessageQueue(JSONObject("""{"revision":4,"items":[{"id":"a","text":"old","lane":"steer","status":"queued"}]}"""))!!
+        val delivered = parseMessageQueue(JSONObject("""{"revision":5,"items":[]}"""))!!
+        val afterEvent = reconcileMessageQueue(old, delivered)
+        assertEquals(delivered, reconcileMessageQueue(afterEvent, old))
+        assertEquals(delivered, reconcileMessageQueue(afterEvent, old.copy(revision = 5)))
+        assertEquals(delivered, reconcileMessageQueue(afterEvent, null))
+        assertEquals(delivered.copy(nativeQueuedCount = 3),
+            reconcileMessageQueue(afterEvent, old.copy(revision = 5, nativeQueuedCount = 3)))
+        val reconnected = old.copy(revision = 6)
+        assertEquals(reconnected, reconcileMessageQueue(afterEvent, reconnected))
+    }
+
+    @Test
+    fun reconnectRetainsDisplayUntilCurrentGenerationEstablishesBaseline() {
+        val retained = RelayMessageQueue(revision = 20)
+        assertEquals(retained, reconcileMessageQueue(retained, null, establishBaseline = true))
+        val restarted = RelayMessageQueue(revision = 0)
+        assertEquals(restarted, reconcileMessageQueue(retained, restarted, establishBaseline = true))
+        val event = RelayMessageQueue(revision = 2, items = listOf(
+            RelayQueuedMessage("new", "keep", "steer", "queued"),
+        ))
+        val eventBaseline = reconcileMessageQueue(retained, event, establishBaseline = true)
+        assertEquals(event, reconcileMessageQueue(eventBaseline, restarted))
+    }
+
+    @Test
+    fun recalledImagesRemainSeparateFromQueueMetadataAndText() {
+        val recalled = parseRecalledDraft(JSONObject("""{"id":"image-only","text":"","images":[{"type":"image","data":"aGVsbG8=","mimeType":"image/png"}]}"""))!!
+        assertEquals("", recalled.text)
+        assertEquals(listOf(AttachedImage("aGVsbG8=", "image/png")), recalled.images)
+        assertEquals(emptyList<AttachedImage>(), parseRecalledDraft(JSONObject("""{"id":"text","text":"draft"}"""))!!.images)
+        assertNull(parseRecalledDraft(JSONObject("""{"id":"bad","text":"draft","images":[{"type":"image","mimeType":"image/png"}]}""")))
+    }
+
+    @Test
     fun encodesPairingHelloWithoutNullFields() {
         val encoded = ClientFrame.Hello(
             pairingSecret = "c".repeat(43),
@@ -69,6 +132,80 @@ class RelayFramesTest {
         assertEquals(1, snapshot.messages.size)
         assertEquals("user", snapshot.messages[0].role)
         assertTrue(snapshot.agent.ready)
+    }
+
+    @Test
+    fun nativeAndNormalizedCallsHaveTheSameLiveAndSnapshotMeaning() {
+        val messages = JSONArray(
+            """[{"role":"assistant","id":"native","content":[{"type":"text","text":"Inspecting"},{"type":"toolCall","id":"call-1","name":"read","arguments":{"path":"image.png"}}]},{"role":"assistant","entryId":"online","content":[{"type":"text","text":"Inspecting"},{"type":"toolCall","toolCallId":"call-1","toolName":"read","input":{"path":"image.png"}}]}]""",
+        )
+        val snapshot = parseServerFrame(
+            JSONObject().put("op", "session.snapshot").put("id", "session").put("messages", messages).toString(),
+        ) as ServerFrame.Snapshot
+        assertEquals(listOf("native", "online"), snapshot.messages.map { it.entryId })
+        for (index in 0 until messages.length()) {
+            val live = parseDisplayMessage(messages.getJSONObject(index))!!
+            val restored = snapshot.messages[index]
+            for (message in listOf(live, restored)) {
+                assertEquals("Inspecting", message.text)
+                val call = message.content!!.getJSONObject(1)
+                assertEquals("toolCall", call.getString("type"))
+                assertEquals("call-1", call.getString("toolCallId"))
+                assertEquals("read", call.getString("toolName"))
+                assertEquals("image.png", call.getJSONObject("input").getString("path"))
+            }
+            assertEquals(live.entryId, restored.entryId)
+        }
+    }
+
+    @Test
+    fun onlineSnapshotPreservesFullTextAndImageOnlyErrorPreviewMetadata() {
+        val text = "Full output\n".repeat(600) + "final line"
+        val result = JSONObject(
+            """{"role":"toolResult","entryId":"result-1","toolCallId":"call-1","toolName":"read","isError":true,"content":[{"type":"image","data":"aW1hZ2U=","mimeType":"image/png"}],"details":{"reason":"decode failed"},"deferredImages":{"count":2},"truncated":true}""",
+        )
+        val snapshot = parseServerFrame(
+            JSONObject().put("op", "session.snapshot").put("id", "session")
+                .put("messages", JSONArray().put(JSONObject().put("role", "assistant").put("text", text)).put(result))
+                .toString(),
+        ) as ServerFrame.Snapshot
+        assertEquals(2, snapshot.messages.size)
+        assertEquals(text, snapshot.messages.first().text)
+        assertFalse(snapshot.messages.first().truncated)
+        for (message in listOf(parseDisplayMessage(result)!!, snapshot.messages.last())) {
+            assertEquals("toolResult", message.role)
+            assertEquals("", message.text)
+            assertEquals("result-1", message.entryId)
+            assertEquals("call-1", message.toolCallId)
+            assertEquals("read", message.toolName)
+            assertTrue(message.isError)
+            assertEquals("decode failed", message.details!!.getString("reason"))
+            assertEquals(2, message.deferredImages!!.getInt("count"))
+            assertTrue(message.truncated)
+            val image = message.content!!.getJSONObject(0)
+            assertEquals("image", image.getString("type"))
+            assertEquals("image/png", image.getString("mimeType"))
+            assertEquals("aW1hZ2U=", image.getString("data"))
+        }
+    }
+
+    @Test
+    fun nativeBashFailureRetainsOutputAndCommandAcrossLiveAndSnapshotParsing() {
+        val output = "command output\n".repeat(400) + "permission denied"
+        val wire = JSONObject().put("role", "bashExecution").put("id", "bash-1")
+            .put("command", "cat private.txt").put("output", output).put("exitCode", 1)
+        val snapshot = parseServerFrame(
+            JSONObject().put("op", "session.snapshot").put("id", "session")
+                .put("messages", JSONArray().put(wire)).toString(),
+        ) as ServerFrame.Snapshot
+        for (message in listOf(parseDisplayMessage(wire)!!, snapshot.messages.single())) {
+            assertEquals("bash-1", message.entryId)
+            assertEquals("bash", message.toolName)
+            assertEquals(output, message.text)
+            assertTrue(message.isError)
+            assertEquals("cat private.txt", message.details!!.getString("command"))
+            assertEquals(1, message.details.getInt("exitCode"))
+        }
     }
 
     @Test
