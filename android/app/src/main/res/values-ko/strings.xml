@@ -404,6 +404,7 @@
     <string name="session_list_export_failed">내보내기 실패</string>
     <string name="session_list_autoname_failed">이름 자동 생성 실패</string>
     <string name="session_list_pinned">고정됨</string>
+    <string name="session_list_current">현재 세션</string>
     <string name="session_list_deselect_session">세션 선택 해제</string>
     <string name="session_list_session_actions">세션 동작</string>
     <string name="session_list_pin">고정</string>

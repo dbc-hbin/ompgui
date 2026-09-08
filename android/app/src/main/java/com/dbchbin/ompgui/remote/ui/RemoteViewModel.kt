@@ -38,6 +38,8 @@ sealed class RemoteScreen {
 
 data class RemoteUiState(
     val screen: RemoteScreen = RemoteScreen.Pairing,
+    // Retained when returning to the list; independent of the live session subscription.
+    val viewedSessionId: String? = null,
     val pairingUri: String = "",
     val password: String = "",
     val connection: ConnectionState = ConnectionState.Idle,

@@ -586,6 +586,7 @@ This removes the project server and its saved environment variables and headers.
     <string name="session_list_no_sessions_yet">No sessions yet</string>
     <string name="session_list_pin">Pin</string>
     <string name="session_list_pinned">Pinned</string>
+    <string name="session_list_current">当前会话</string>
     <string name="session_list_project_removal_failed">Project removal failed</string>
     <string name="session_list_projects">Projects</string>
     <string name="session_list_relative_hours">%1$dh ago</string>

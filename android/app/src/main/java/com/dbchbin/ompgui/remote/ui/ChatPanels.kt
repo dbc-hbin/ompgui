@@ -1056,6 +1056,31 @@ fun LongMessageText(
 }
 
 @Composable
+fun TranscriptDisclosure(
+    label: String,
+    expanded: Boolean,
+    loading: Boolean = false,
+    failed: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val state = stringResource(if (expanded) R.string.chat_hide_details else R.string.chat_show_details)
+    androidx.compose.material3.TextButton(
+        onClick = onClick,
+        modifier = Modifier.heightIn(min = 48.dp).semantics { stateDescription = state },
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+    ) {
+        val tint = if (failed) OmpColors.StatusError else OmpColors.TextMuted
+        Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null, Modifier.size(14.dp), tint = tint)
+        Spacer(Modifier.width(6.dp))
+        if (loading) {
+            androidx.compose.material3.CircularProgressIndicator(Modifier.size(12.dp), color = tint, strokeWidth = 1.dp)
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(label, color = tint, fontSize = 12.sp)
+    }
+}
+
+@Composable
 fun TranscriptContent(
     requester: RelayRequester,
     sessionId: String,
@@ -1065,6 +1090,7 @@ fun TranscriptContent(
     actionsEnabled: Boolean = true,
     onEdit: ((JSONObject) -> Unit)? = null,
     onFork: (() -> Unit)? = null,
+    activityExpanded: Boolean? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1084,29 +1110,51 @@ fun TranscriptContent(
     }
     val content = full?.optJSONArray("content") ?: message.content
     val truncated = message.truncated && full == null
+    var localActivityExpanded by remember(sessionId, leafId, message.entryId) { mutableStateOf(false) }
+    val showActivity = activityExpanded ?: localActivityExpanded
+    val hasActivity = content != null && (0 until content.length()).any {
+        val type = content.optJSONObject(it)?.optString("type")
+        type == "thinking" || type == "toolCall"
+    }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (hasActivity && activityExpanded == null) TranscriptDisclosure(
+            label = "${stringResource(R.string.thinking_title)} · ${stringResource(R.string.new_session_tools)}",
+            expanded = showActivity,
+            loading = message.streaming,
+            onClick = { localActivityExpanded = !localActivityExpanded },
+        )
         if (content == null) LongMessageText(requester, sessionId, message.copy(text = full?.optString("text", message.text) ?: message.text), showCopy = false)
         else for (index in 0 until content.length()) {
             val block = content.optJSONObject(index) ?: continue
             androidx.compose.runtime.key(sessionId, leafId, message.entryId, index, block.optString("toolCallId")) {
                 when (block.optString("type")) {
                     "text" -> LongMessageText(requester, sessionId, message.copy(text = block.optString("text")), showCopy = false)
-                    "toolCall" -> TranscriptTool(requester, sessionId, leafId, block, results[block.optString("toolCallId")], truncated)
+                    "toolCall" -> if (showActivity) TranscriptTool(requester, sessionId, leafId, block, results[block.optString("toolCallId")], truncated)
                     "image" -> if (block.optString("data").isNotEmpty()) HistoryImage(block)
                     "thinking" -> {
-                        var thinking by remember(block) { mutableStateOf(block.optString("thinking")) }
-                        var loaded by remember(block) { mutableStateOf(!block.optBoolean("deferred")) }
-                        var expanded by remember { mutableStateOf(false) }
-                        RuntimeChip(stringResource(R.string.chat_load_thinking, index + 1), enabled = !busy, onClick = {
-                            if (!loaded && !message.entryId.isNullOrBlank()) perform {
-                                val args = JSONObject().put("id", sessionId).put("entryId", message.entryId).put("blockIndex", index)
-                                if (!leafId.isNullOrBlank()) args.put("leafId", leafId)
-                                thinking = requester.request("sessions", "thinking", args).getString("thinking")
-                                loaded = true
-                                expanded = true
-                            } else expanded = !expanded
-                        })
-                        if (expanded) LongMessageText(requester, sessionId, message.copy(text = thinking))
+                        var thinking by remember(block) { mutableStateOf<String?>(null) }
+                        var thinkingBusy by remember { mutableStateOf(false) }
+                        var thinkingFailure by remember { mutableStateOf<String?>(null) }
+                        LaunchedEffect(showActivity, block) {
+                            if (showActivity && block.optBoolean("deferred") && thinking == null) {
+                                thinkingBusy = true
+                                try {
+                                    val args = JSONObject().put("id", sessionId).put("entryId", requireNotNull(message.entryId)).put("blockIndex", index)
+                                    if (!leafId.isNullOrBlank()) args.put("leafId", leafId)
+                                    thinking = requester.request("sessions", "thinking", args).getString("thinking")
+                                    thinkingFailure = null
+                                } catch (e: Exception) {
+                                    if (e is CancellationException) throw e
+                                    thinkingFailure = e.message ?: context.getString(R.string.extension_request_failed)
+                                } finally { thinkingBusy = false }
+                            }
+                        }
+                        if (showActivity) {
+                            Text(stringResource(R.string.thinking_title), color = OmpColors.TextDim, fontSize = 12.sp)
+                            if (thinkingBusy) Text(stringResource(R.string.chat_content_loading), color = OmpColors.TextMuted, fontSize = 12.sp)
+                            thinkingFailure?.let { Text(it, color = OmpColors.StatusError, fontSize = 12.sp) }
+                            LongMessageText(requester, sessionId, message.copy(text = thinking ?: block.optString("thinking")), showCopy = false)
+                        }
                     }
                     else -> TranscriptJson(block.toString(2))
                 }
@@ -1184,7 +1232,11 @@ private fun TranscriptJson(value: String, initiallyExpanded: Boolean = false) {
     var expanded by remember { mutableStateOf(initiallyExpanded) }
     val context = LocalContext.current
     Row(verticalAlignment = Alignment.CenterVertically) {
-        RuntimeChip(if (expanded) stringResource(R.string.chat_hide_details) else stringResource(R.string.chat_show_details), onClick = { expanded = !expanded })
+        TranscriptDisclosure(
+            label = stringResource(if (expanded) R.string.chat_hide_details else R.string.chat_show_details),
+            expanded = expanded,
+            onClick = { expanded = !expanded },
+        )
         IconButton(onClick = {
             val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", value))
@@ -1212,11 +1264,14 @@ fun TranscriptTool(
         result.streaming -> stringResource(R.string.chat_tool_progress)
         else -> stringResource(R.string.chat_tool_complete)
     }
-    Column(Modifier.fillMaxWidth().background(OmpColors.ToolBg, panelShape()).border(1.dp, OmpColors.Border, panelShape()).padding(8.dp)) {
-        androidx.compose.material3.TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
-            Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null)
-            Text("$name · $status", Modifier.weight(1f), color = if (result?.isError == true) OmpColors.StatusError else OmpColors.TextMuted)
-        }
+    Column(Modifier.fillMaxWidth()) {
+        TranscriptDisclosure(
+            label = "$name · $status",
+            expanded = expanded,
+            loading = result == null || result.streaming,
+            failed = result?.isError == true,
+            onClick = { expanded = !expanded },
+        )
         if (expanded) {
             (call?.optString("toolCallId") ?: result?.toolCallId)?.let { Text(it, color = OmpColors.TextDim, fontSize = 11.sp) }
             if (call != null) {

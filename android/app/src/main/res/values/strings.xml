@@ -404,6 +404,7 @@
     <string name="session_list_export_failed">Export failed</string>
     <string name="session_list_autoname_failed">Autoname failed</string>
     <string name="session_list_pinned">Pinned</string>
+    <string name="session_list_current">Current</string>
     <string name="session_list_deselect_session">Deselect session</string>
     <string name="session_list_session_actions">Session actions</string>
     <string name="session_list_pin">Pin</string>

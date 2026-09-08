@@ -447,6 +447,7 @@ class RelayClient private constructor(
         _ui.update {
             it.copy(
                 screen = RemoteScreen.Chat(id),
+                viewedSessionId = id,
                 chatTitle = it.sessions.find { session -> session.id == id }?.name
                     ?: it.sessions.find { session -> session.id == id }?.firstMessage
                     ?: id,
@@ -937,6 +938,7 @@ class RelayClient private constructor(
                 _ui.update {
                     it.copy(
                         screen = RemoteScreen.Chat(frame.id),
+                        viewedSessionId = frame.id,
                         chatTitle = frame.cwd.substringAfterLast('/').ifBlank { frame.id },
                         messages = emptyList(),
                         running = false,
@@ -1167,6 +1169,7 @@ class RelayClient private constructor(
     }
 
     private fun dropOpenSession(id: String) {
+        _ui.update { if (it.viewedSessionId == id) it.copy(viewedSessionId = null) else it }
         if (openedSessionId == id) {
             resetSessionState()
             openedSessionId = null

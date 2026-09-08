@@ -128,6 +128,7 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
                     onSlashSelected = { newSessionDraft = it },
                     onOpenSessionFilePreview = { cwd, path -> filePreview = cwd to path },
                     sessions = state.sessions,
+                    viewedSessionId = state.viewedSessionId,
                     runningIds = state.runningIds,
                     connection = state.connection,
                     error = state.error,

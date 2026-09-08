@@ -618,7 +618,18 @@ fun ChatScreen(
                         ?.optString("toolCallId")?.takeIf { it.isNotBlank() }
                 }
             }.toSet() }
-    val transcriptMessages = remember(messages, callIds) { messages.filterNot { (it.role == "toolResult" || it.role == "tool") && it.toolCallId in callIds } }
+    val transcriptMessages = remember(messages, callIds) {
+        val turns = mutableListOf<MutableList<DisplayMessage>>()
+        for (message in messages) {
+            if ((message.role == "toolResult" || message.role == "tool") && message.toolCallId in callIds) continue
+            if (message.role == "user" || turns.lastOrNull()?.firstOrNull()?.role == "user" || turns.isEmpty()) {
+                turns.add(mutableListOf(message))
+            } else {
+                turns.last().add(message)
+            }
+        }
+        turns
+    }
     suspend fun scrollToLatest() {
         if (transcriptMessages.isEmpty()) return
         listState.scrollToItem(transcriptMessages.lastIndex)
@@ -717,12 +728,13 @@ fun ChatScreen(
         ) {
             itemsIndexed(
                 items = transcriptMessages,
-                key = { index, message -> message.entryId ?: "${message.role}_${message.toolCallId ?: message.timestamp ?: index}_$index" },
-            ) { _, message ->
+                key = { index, turn -> turn.first().let { message -> message.entryId ?: "${message.role}_${message.toolCallId ?: message.timestamp ?: index}_$index" } },
+            ) { _, turn ->
+                val message = turn.first()
                 if (message.role == "user") {
                     UserMessage(message, requester, sessionId, branchLeafId, messageActionsEnabled, onEdit = { messageAction(message, it, false) }, onFork = { messageAction(message, null, true) })
                 } else {
-                    AssistantMessage(message, requester, sessionId, branchLeafId, results)
+                    AssistantTurn(turn, requester, sessionId, branchLeafId, results)
                 }
             }
         }
@@ -1015,19 +1027,84 @@ private fun formatTimestamp(ts: Long?): String {
 }
 
 @Composable
+private fun AssistantTurn(
+    messages: List<DisplayMessage>,
+    requester: RelayRequester,
+    sessionId: String,
+    leafId: String?,
+    results: Map<String, DisplayMessage>,
+) {
+    var expanded by remember(sessionId, leafId, messages.first().entryId) { mutableStateOf(false) }
+    var hasActivity = false
+    var pending = false
+    var failed = false
+    for (message in messages) {
+        pending = pending || message.streaming
+        hasActivity = hasActivity || message.streaming
+        val standaloneTool = message.role == "toolResult" || message.role == "tool" || message.role == "bashExecution"
+        if (standaloneTool) {
+            hasActivity = true
+            failed = failed || message.isError
+        }
+        val content = message.content ?: continue
+        for (index in 0 until content.length()) {
+            val block = content.optJSONObject(index) ?: continue
+            when (block.optString("type")) {
+                "thinking" -> hasActivity = true
+                "toolCall" -> {
+                    hasActivity = true
+                    val result = results[block.optString("toolCallId")]
+                    pending = pending || result == null || result.streaming
+                    failed = failed || result?.isError == true
+                }
+            }
+        }
+    }
+    Column(Modifier.fillMaxWidth()) {
+        if (hasActivity) {
+            val status = when {
+                failed -> stringResource(R.string.chat_tool_failed)
+                pending -> stringResource(R.string.chat_tool_progress)
+                else -> stringResource(R.string.chat_tool_complete)
+            }
+            TranscriptDisclosure(
+                label = "${stringResource(R.string.thinking_title)} · ${stringResource(R.string.new_session_tools)} · $status",
+                expanded = expanded,
+                loading = pending,
+                failed = failed,
+                onClick = { expanded = !expanded },
+            )
+        }
+        for ((index, message) in messages.withIndex()) {
+            androidx.compose.runtime.key(message.entryId ?: index) {
+                AssistantMessage(message, requester, sessionId, leafId, results, expanded)
+            }
+        }
+    }
+}
+
+@Composable
 private fun AssistantMessage(
     message: DisplayMessage,
     requester: RelayRequester,
     sessionId: String,
     leafId: String?,
     results: Map<String, DisplayMessage>,
+    activityExpanded: Boolean,
 ) {
+    val standaloneTool = message.role == "toolResult" || message.role == "tool" || message.role == "bashExecution"
+    val content = message.content
+    val activityOnly = content != null && content.length() > 0 && (0 until content.length()).all {
+        val type = content.optJSONObject(it)?.optString("type")
+        type == "thinking" || type == "toolCall"
+    }
+    if (!activityExpanded && (standaloneTool || (activityOnly && message.details == null && !message.truncated && message.deferredImages == null))) return
     val stamp = remember(message.timestamp) { formatTimestamp(message.timestamp) }
     Column(Modifier.fillMaxWidth()) {
-        if (message.role == "toolResult" || message.role == "tool" || message.role == "bashExecution") {
+        if (standaloneTool) {
             TranscriptTool(requester, sessionId, leafId, null, message)
         } else {
-            TranscriptContent(requester, sessionId, leafId, message, results)
+            TranscriptContent(requester, sessionId, leafId, message, results, activityExpanded = activityExpanded)
         }
         if (stamp.isNotEmpty()) Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
             Text(stamp, fontSize = 12.sp, color = OmpColors.TextDim)

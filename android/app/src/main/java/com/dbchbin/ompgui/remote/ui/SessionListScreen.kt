@@ -117,6 +117,7 @@ private data class ProjectGroup(
 fun SessionListScreen(
     requester: RelayRequester,
     sessions: List<SessionListItem>,
+    viewedSessionId: String?,
     runningIds: Set<String>,
     connection: ConnectionState,
     error: String?,
@@ -537,6 +538,7 @@ fun SessionListScreen(
                                     SessionItemRow(
                                         session = session,
                                         running = session.id in runningIds,
+                                        current = session.id == viewedSessionId,
                                         now = now,
                                         selected = session.id in selectedIds,
                                         pinned = session.id in pinnedIds,
@@ -953,6 +955,7 @@ private fun FooterNavRow(
 private fun SessionItemRow(
     session: SessionListItem,
     running: Boolean,
+    current: Boolean,
     now: Long,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
@@ -966,9 +969,9 @@ private fun SessionItemRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .semantics { this.selected = selected }
+            .semantics { this.selected = current || selected }
             .heightIn(min = 48.dp)
-            .background(if (selected) OmpColors.BgHover else androidx.compose.ui.graphics.Color.Transparent)
+            .background(if (current || selected) OmpColors.BgHover else androidx.compose.ui.graphics.Color.Transparent)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(start = 24.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -980,14 +983,24 @@ private fun SessionItemRow(
         if (pinned) {
             Icon(Icons.Filled.PushPin, stringResource(R.string.session_list_pinned), tint = OmpColors.TextMuted, modifier = Modifier.size(14.dp))
         }
-        Text(
-            text = sessionTitle(session),
-            color = OmpColors.Text,
-            fontSize = 14.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+        Column(modifier = Modifier.weight(1f).padding(vertical = 6.dp)) {
+            Text(
+                text = sessionTitle(session),
+                color = if (current) OmpColors.Accent else OmpColors.Text,
+                fontSize = 14.sp,
+                fontWeight = if (current) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (current) {
+                Text(
+                    text = stringResource(R.string.session_list_current),
+                    color = OmpColors.Accent,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+        }
         if (onToggleSelect != null && selected) {
             IconButton(onClick = onToggleSelect) { Icon(Icons.Filled.CheckCircle, stringResource(R.string.session_list_deselect_session), tint = OmpColors.Accent, modifier = Modifier.size(18.dp)) }
         }
