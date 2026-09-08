@@ -2,7 +2,7 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-> **Android APK (Android 12+)** — Kotlin 보조 앱으로 원격 ompgui 서버에 연결하고, 최신 세션의 읽기 전용 오프라인 스냅샷을 이용할 수 있습니다. [ompgui Remote v0.7.6 다운로드](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.6/ompgui-remote-v0.7.6.apk) · [릴리스 노트](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.6)
+> **Android APK (Android 12+)** — Kotlin 보조 앱으로 원격 ompgui 서버에 연결하고, 최신 세션의 읽기 전용 오프라인 스냅샷을 이용할 수 있습니다. [ompgui Remote v0.7.7 다운로드](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.7/ompgui-remote-v0.7.7.apk) · [릴리스 노트](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.7)
 
 > `android/`의 실험용 네이티브 Compose 클라이언트는 인증된 `/relay` WebSocket을 사용하며, 세션/기록 제어와 링크·도구 호출·결과·오류·미디어 참조를 포함하는 풍부한 온라인 대화 기록, 오프라인 Mermaid 다이어그램 및 코드 구문 강조, 이미지/PDF/오디오/HTML/Markdown/DOCX 인라인 미리보기를 제공합니다. 온라인 기록은 보호된 오프라인 스냅샷과 별개입니다. 크기가 제한된 미리보기에서 `sessions.content`로 전체 텍스트를 나누어 가져오고 미디어 참조도 페이지 단위로 조회하므로 대화 기록을 4,000자로 잘라내지 않습니다. 오프라인 캐시의 개인정보 보호 제한은 그대로 유지됩니다. 파일 자동 새로고침은 화면에 보일 때만 동작하며 저장하지 않은 편집 내용을 보존합니다. 허용된 숨김 파일 탐색과 아카이브 검색도 지원합니다. 모델/설정에서는 공개 models.dev 카탈로그, 고급 OMP 설정, 구성 상태와 구분되는 세션별 실제 MCP 실행 상태를 확인할 수 있습니다. 첨부 파일은 휴대폰에서 하나의 거대한 JSON으로 묶지 않고 스트리밍으로 스테이징하며, 이미지는 개당 10 MiB로 최대 10개, 텍스트 첨부는 별도로 개당 256 KiB로 최대 10개까지 지원합니다. OMP 자체의 이미지 정규화와 제공자별 이미지 개수 제한은 계속 적용됩니다.
 >

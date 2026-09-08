@@ -39,6 +39,7 @@ fun RichPreview(
     kind: RichPreviewKind,
     modifier: Modifier = Modifier,
     language: String = "",
+    compactCode: Boolean = false,
 ) {
     val context = LocalContext.current
     val textZoom = (LocalDensity.current.fontScale * 100).toInt()
@@ -110,7 +111,9 @@ fun RichPreview(
             }
         }
     }
-    val document = remember(content, kind, language, OmpColors.dark, OmpColors.warm) { richPreviewDocument(content, kind, language) }
+    val document = remember(content, kind, language, compactCode, OmpColors.dark, OmpColors.warm) {
+        richPreviewDocument(content, kind, language, compactCode)
+    }
     DisposableEffect(webView, lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -129,12 +132,14 @@ fun RichPreview(
             webView.destroy()
         }
     }
-    // Code never wraps: match its 13px × 1.6 CSS line height, 24px body
-    // padding and a little scrollbar clearance without allocating a line list.
+    // Code never wraps: match its 13px × 1.6 CSS line height, body padding
+    // and 8px scrollbar clearance without allocating a line list.
     // Caller constraints still win (the file viewer deliberately reserves a viewport).
     val previewModifier = if (kind == RichPreviewKind.Code) {
         val lineCount = remember(content) { 1 + content.count { it == '\n' } }
-        val codeHeight = (32f + lineCount * 13f * 1.6f * textZoom / 100f).coerceIn(48f, 420f)
+        val verticalInsets = if (compactCode) 20f else 32f
+        val codeHeight = (verticalInsets + lineCount * 13f * 1.6f * textZoom / 100f)
+            .coerceIn(if (compactCode) 32f else 48f, 420f)
         modifier.height(codeHeight.dp)
     } else modifier.heightIn(min = 160.dp)
     key(webView) {
@@ -163,7 +168,7 @@ fun RichPreview(
 private fun escapePreviewHtml(value: String): String = value.replace("&", "&amp;")
     .replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;")
 
-internal fun richPreviewDocument(content: String, kind: RichPreviewKind, language: String): String {
+internal fun richPreviewDocument(content: String, kind: RichPreviewKind, language: String, compactCode: Boolean = false): String {
     val nonce = UUID.randomUUID().toString()
     val background = "#%06x".format((if (kind == RichPreviewKind.Code) OmpColors.CodeBg else OmpColors.BgPanel).toArgb() and 0xffffff)
     val foreground = "#%06x".format(OmpColors.Text.toArgb() and 0xffffff)
@@ -173,7 +178,7 @@ internal fun richPreviewDocument(content: String, kind: RichPreviewKind, languag
     val warning = "#%06x".format(OmpColors.StatusWarning.toArgb() and 0xffffff)
     val border = "#%06x".format(OmpColors.Border.toArgb() and 0xffffff)
     val panel = "#%06x".format(OmpColors.BgPanel.toArgb() and 0xffffff)
-    val style = "html{background:$background;color-scheme:${if (OmpColors.dark) "dark" else "light"}}body{margin:0;padding:12px;background:$background;color:$foreground;font:14px/1.6 system-ui,sans-serif;overflow-wrap:anywhere}pre{margin:0;padding:${if (kind == RichPreviewKind.Html) "12px" else "0"};white-space:pre;overflow:auto;overflow-wrap:normal;tab-size:4;font:13px/1.6 monospace;background:$background}code{font-family:monospace}img,svg{max-width:100%;height:auto}a{color:$accent}h1,h2,h3{line-height:1.3}h1{font-size:22px}h2{font-size:18px}h3{font-size:16px}table{display:block;max-width:100%;overflow:auto;border-collapse:collapse}td,th{padding:6px 10px;border:1px solid $border}blockquote{margin:12px 0;padding:0 12px;border-left:2px solid $border;color:$muted}#status{font-size:12px;color:$muted}#diagram-output:not(:empty){padding:12px;background:$panel;border:1px solid $border;border-radius:8px;margin-bottom:12px;overflow:auto}*{animation:none!important;transition:none!important;scroll-behavior:auto!important}.token.comment,.token.prolog{color:$muted}.token.keyword,.token.operator{color:$accent}.token.string,.token.attr-value{color:$success}.token.number,.token.boolean{color:$warning}.token.function,.token.tag{color:$accent}iframe{border:0;width:100%;height:100vh}"
+    val style = "html{background:$background;color-scheme:${if (OmpColors.dark) "dark" else "light"}}body{margin:0;padding:${if (compactCode && kind == RichPreviewKind.Code) "6px 12px" else "12px"};background:$background;color:$foreground;font:14px/1.6 system-ui,sans-serif;overflow-wrap:anywhere}pre{margin:0;padding:${if (kind == RichPreviewKind.Html) "12px" else "0"};white-space:pre;overflow:auto;overflow-wrap:normal;tab-size:4;font:13px/1.6 monospace;background:$background}code{font-family:monospace}img,svg{max-width:100%;height:auto}a{color:$accent}h1,h2,h3{line-height:1.3}h1{font-size:22px}h2{font-size:18px}h3{font-size:16px}table{display:block;max-width:100%;overflow:auto;border-collapse:collapse}td,th{padding:6px 10px;border:1px solid $border}blockquote{margin:12px 0;padding:0 12px;border-left:2px solid $border;color:$muted}#status{font-size:12px;color:$muted}#diagram-output:not(:empty){padding:12px;background:$panel;border:1px solid $border;border-radius:8px;margin-bottom:12px;overflow:auto}*{animation:none!important;transition:none!important;scroll-behavior:auto!important}.token.comment,.token.prolog{color:$muted}.token.keyword,.token.operator{color:$accent}.token.string,.token.attr-value{color:$success}.token.number,.token.boolean{color:$warning}.token.function,.token.tag{color:$accent}iframe{border:0;width:100%;height:100vh}"
     val policy = "default-src 'none'; script-src ${if (kind == RichPreviewKind.Html) "'none'" else "'nonce-$nonce'"}; style-src 'unsafe-inline'; img-src data:; font-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
     val label = when (kind) {
         RichPreviewKind.Code -> "Highlighted code"

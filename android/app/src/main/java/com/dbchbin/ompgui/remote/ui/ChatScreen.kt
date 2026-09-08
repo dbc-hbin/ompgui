@@ -1121,22 +1121,25 @@ private fun UserMessage(message: DisplayMessage, requester: RelayRequester, sess
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.End,
         ) {
-            Box(
-                modifier = Modifier
-                    .widthIn(max = bubbleMax)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(OmpColors.UserBg)
-                    .border(1.dp, OmpColors.Border, RoundedCornerShape(12.dp))
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-            ) {
-                TranscriptContent(requester, sessionId, leafId, message, actionsEnabled = actionsEnabled, onEdit = onEdit, onFork = onFork)
+            Box(Modifier.widthIn(max = bubbleMax)) {
+                TranscriptContent(
+                    requester, sessionId, leafId, message,
+                    actionsEnabled = actionsEnabled,
+                    onEdit = onEdit,
+                    onFork = onFork,
+                    contentModifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(OmpColors.UserBg)
+                        .border(1.dp, OmpColors.Border, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                )
             }
             if (stamp.isNotEmpty()) {
                 Text(
                     stamp,
                     fontSize = 12.sp,
                     color = OmpColors.TextDim,
-                    modifier = Modifier.padding(top = 4.dp, end = 4.dp),
+                    modifier = Modifier.padding(end = 4.dp),
                 )
             }
         }

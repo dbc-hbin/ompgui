@@ -2,7 +2,7 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-> **Android APK (Android 12+)** — Kotlin 製のコンパニオンアプリでリモートの ompgui サーバーに接続し、最新セッションの読み取り専用オフラインスナップショットを利用できます。[ompgui Remote v0.7.6 をダウンロード](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.6/ompgui-remote-v0.7.6.apk) · [リリースノート](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.6)
+> **Android APK (Android 12+)** — Kotlin 製のコンパニオンアプリでリモートの ompgui サーバーに接続し、最新セッションの読み取り専用オフラインスナップショットを利用できます。[ompgui Remote v0.7.7 をダウンロード](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.7/ompgui-remote-v0.7.7.apk) · [リリースノート](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.7)
 
 > `android/` の実験的なネイティブ Compose クライアントは、認証済みの `/relay` WebSocket を使用し、セッション・履歴の操作、リンク付きメッセージ、オフラインの Mermaid 図とコードの構文強調、画像/PDF/音声/HTML/Markdown/DOCX のインラインプレビューを提供します。ファイルの自動更新は表示中のみ動作し、未保存の編集を保持します。許可された隠しファイルの閲覧とアーカイブ検索にも対応します。モデル・設定には公開 models.dev カタログ、高度な OMP 設定、構成とは別に表示されるセッションごとの実際の MCP 実行状態が含まれます。添付ファイルは端末上で巨大な単一 JSON にまとめず、ストリーミングでステージングします。画像は各 10 MiB で最大 10 件、テキスト添付は独立した枠で各 256 KiB、最大 10 件です。OMP 自体の画像正規化とプロバイダーごとの画像数制限は引き続き適用されます。
 >

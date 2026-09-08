@@ -102,24 +102,32 @@ private fun InternalMessageDisclosure(text: String, range: MessageTextRange) {
     }
     val action = if (expanded) { if (korean) "접기" else "Collapse" } else { if (korean) "펼치기" else "Expand" }
     val state = if (expanded) { if (korean) "펼쳐짐" else "Expanded" } else { if (korean) "접힘" else "Collapsed" }
+    val compact = range.tag == "system-reminder" || range.tag == "system-directive"
     val shape = RoundedCornerShape(8.dp)
     Column(
-        Modifier.fillMaxWidth().clip(shape).background(OmpColors.BgPanel)
+        if (compact) Modifier.fillMaxWidth()
+        else Modifier.fillMaxWidth().clip(shape).background(OmpColors.BgPanel)
             .border(1.dp, OmpColors.Border, shape),
     ) {
         Row(
             Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = action) { expanded = !expanded }
                 .semantics { stateDescription = state }
-                .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+                .heightIn(min = 48.dp).padding(
+                    horizontal = if (compact) 4.dp else 12.dp,
+                    vertical = if (compact) 0.dp else 8.dp,
+                ),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
         ) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = OmpColors.TextMuted)
-            Text(title, modifier = Modifier.weight(1f), fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                color = OmpColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(action, fontSize = 12.sp, color = OmpColors.TextMuted)
+            Icon(icon, contentDescription = null, modifier = Modifier.size(if (compact) 14.dp else 18.dp), tint = OmpColors.TextMuted)
+            Text(title, modifier = Modifier.weight(1f, fill = !compact),
+                fontSize = if (compact) 12.sp else 13.sp,
+                fontWeight = if (compact) FontWeight.Normal else FontWeight.Medium,
+                color = if (compact) OmpColors.TextMuted else OmpColors.Text,
+                maxLines = if (compact) Int.MAX_VALUE else 1, overflow = TextOverflow.Ellipsis)
+            if (!compact) Text(action, fontSize = 12.sp, color = OmpColors.TextMuted)
             Icon(if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                contentDescription = null, modifier = Modifier.size(18.dp), tint = OmpColors.TextMuted)
+                contentDescription = null, modifier = Modifier.size(if (compact) 14.dp else 18.dp), tint = OmpColors.TextMuted)
         }
         if (expanded) {
             HorizontalDivider(color = OmpColors.Border)

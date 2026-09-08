@@ -1091,6 +1091,7 @@ fun TranscriptContent(
     onEdit: ((JSONObject) -> Unit)? = null,
     onFork: (() -> Unit)? = null,
     activityExpanded: Boolean? = null,
+    contentModifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1116,49 +1117,87 @@ fun TranscriptContent(
         val type = content.optJSONObject(it)?.optString("type")
         type == "thinking" || type == "toolCall"
     }
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (hasActivity && activityExpanded == null) TranscriptDisclosure(
-            label = "${stringResource(R.string.thinking_title)} · ${stringResource(R.string.new_session_tools)}",
-            expanded = showActivity,
-            loading = message.streaming,
-            onClick = { localActivityExpanded = !localActivityExpanded },
-        )
-        if (content == null) LongMessageText(requester, sessionId, message.copy(text = full?.optString("text", message.text) ?: message.text), showCopy = false)
-        else for (index in 0 until content.length()) {
-            val block = content.optJSONObject(index) ?: continue
-            androidx.compose.runtime.key(sessionId, leafId, message.entryId, index, block.optString("toolCallId")) {
-                when (block.optString("type")) {
-                    "text" -> LongMessageText(requester, sessionId, message.copy(text = block.optString("text")), showCopy = false)
-                    "toolCall" -> if (showActivity) TranscriptTool(requester, sessionId, leafId, block, results[block.optString("toolCallId")], truncated)
-                    "image" -> if (block.optString("data").isNotEmpty()) HistoryImage(block)
-                    "thinking" -> {
-                        var thinking by remember(block) { mutableStateOf<String?>(null) }
-                        var thinkingBusy by remember { mutableStateOf(false) }
-                        var thinkingFailure by remember { mutableStateOf<String?>(null) }
-                        LaunchedEffect(showActivity, block) {
-                            if (showActivity && block.optBoolean("deferred") && thinking == null) {
-                                thinkingBusy = true
-                                try {
-                                    val args = JSONObject().put("id", sessionId).put("entryId", requireNotNull(message.entryId)).put("blockIndex", index)
-                                    if (!leafId.isNullOrBlank()) args.put("leafId", leafId)
-                                    thinking = requester.request("sessions", "thinking", args).getString("thinking")
-                                    thinkingFailure = null
-                                } catch (e: Exception) {
-                                    if (e is CancellationException) throw e
-                                    thinkingFailure = e.message ?: context.getString(R.string.extension_request_failed)
-                                } finally { thinkingBusy = false }
+    Column(Modifier.fillMaxWidth()) {
+        Column(contentModifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (hasActivity && activityExpanded == null) TranscriptDisclosure(
+                label = "${stringResource(R.string.thinking_title)} · ${stringResource(R.string.new_session_tools)}",
+                expanded = showActivity,
+                loading = message.streaming,
+                onClick = { localActivityExpanded = !localActivityExpanded },
+            )
+            if (content == null) LongMessageText(requester, sessionId, message.copy(text = full?.optString("text", message.text) ?: message.text), showCopy = false)
+            else for (index in 0 until content.length()) {
+                val block = content.optJSONObject(index) ?: continue
+                androidx.compose.runtime.key(sessionId, leafId, message.entryId, index, block.optString("toolCallId")) {
+                    when (block.optString("type")) {
+                        "text" -> LongMessageText(requester, sessionId, message.copy(text = block.optString("text")), showCopy = false)
+                        "toolCall" -> if (showActivity) TranscriptTool(requester, sessionId, leafId, block, results[block.optString("toolCallId")], truncated)
+                        "image" -> if (block.optString("data").isNotEmpty()) HistoryImage(block)
+                        "thinking" -> {
+                            var thinking by remember(block) { mutableStateOf<String?>(null) }
+                            var thinkingBusy by remember { mutableStateOf(false) }
+                            var thinkingFailure by remember { mutableStateOf<String?>(null) }
+                            LaunchedEffect(showActivity, block) {
+                                if (showActivity && block.optBoolean("deferred") && thinking == null) {
+                                    thinkingBusy = true
+                                    try {
+                                        val args = JSONObject().put("id", sessionId).put("entryId", requireNotNull(message.entryId)).put("blockIndex", index)
+                                        if (!leafId.isNullOrBlank()) args.put("leafId", leafId)
+                                        thinking = requester.request("sessions", "thinking", args).getString("thinking")
+                                        thinkingFailure = null
+                                    } catch (e: Exception) {
+                                        if (e is CancellationException) throw e
+                                        thinkingFailure = e.message ?: context.getString(R.string.extension_request_failed)
+                                    } finally { thinkingBusy = false }
+                                }
+                            }
+                            if (showActivity) {
+                                Text(stringResource(R.string.thinking_title), color = OmpColors.TextDim, fontSize = 12.sp)
+                                if (thinkingBusy) Text(stringResource(R.string.chat_content_loading), color = OmpColors.TextMuted, fontSize = 12.sp)
+                                thinkingFailure?.let { Text(it, color = OmpColors.StatusError, fontSize = 12.sp) }
+                                LongMessageText(requester, sessionId, message.copy(text = thinking ?: block.optString("thinking")), showCopy = false)
                             }
                         }
-                        if (showActivity) {
-                            Text(stringResource(R.string.thinking_title), color = OmpColors.TextDim, fontSize = 12.sp)
-                            if (thinkingBusy) Text(stringResource(R.string.chat_content_loading), color = OmpColors.TextMuted, fontSize = 12.sp)
-                            thinkingFailure?.let { Text(it, color = OmpColors.StatusError, fontSize = 12.sp) }
-                            LongMessageText(requester, sessionId, message.copy(text = thinking ?: block.optString("thinking")), showCopy = false)
-                        }
+                        else -> TranscriptJson(block.toString(2))
                     }
-                    else -> TranscriptJson(block.toString(2))
                 }
             }
+            val details = full?.optJSONObject("details") ?: message.details
+            if (details != null) TranscriptJson(details.toString(2))
+            if (truncated) RuntimeChip(stringResource(R.string.chat_load_full_entry), enabled = !busy && !message.entryId.isNullOrBlank(), onClick = {
+                perform {
+                    full = ChatRequests.fullEntry(requester, sessionId, requireNotNull(message.entryId), leafId)
+                }
+            })
+            val deferred = message.deferredImages != null || (content != null && (0 until content.length()).any {
+                val block = content.optJSONObject(it)
+                block?.optString("type") == "image" && block.optString("data").isEmpty()
+            })
+            if (deferred) RuntimeChip(stringResource(R.string.chat_load_media), enabled = !busy && !message.entryId.isNullOrBlank(), onClick = {
+                perform {
+                    val images = JSONArray()
+                    var offset = 0
+                    var missing = 0
+                    do {
+                        val args = JSONObject().put("id", sessionId).put("entryId", message.entryId).put("offset", offset).put("limit", 1)
+                        if (!leafId.isNullOrBlank()) args.put("leafId", leafId)
+                        val response = requester.request("sessions", "media", args)
+                        val page = response.getJSONArray("images")
+                        for (index in 0 until page.length()) images.put(page.getJSONObject(index))
+                        missing += response.optInt("missingCount")
+                        if (!response.optBoolean("hasMore")) break
+                        val next = response.getInt("nextOffset")
+                        check(next > offset) { context.getString(R.string.chat_history_unavailable) }
+                        offset = next
+                    } while (true)
+                    media = images
+                    mediaSummary = context.getString(R.string.chat_media_summary, images.length(), missing)
+                }
+            })
+            media?.let { images -> for (index in 0 until images.length()) images.optJSONObject(index)?.let { HistoryImage(it) } }
+            mediaSummary?.let { Text(it, color = OmpColors.TextMuted, fontSize = 12.sp) }
+            if (busy) Text(stringResource(R.string.chat_content_loading), color = OmpColors.TextMuted)
+            failure?.let { Text(it, color = OmpColors.StatusError) }
         }
         if (message.role == "user" || message.role == "assistant") {
             suspend fun actionMessage(): JSONObject {
@@ -1172,7 +1211,10 @@ fun TranscriptContent(
                     block.optString("type") == "text" && block.optString("text").isNotEmpty()
                 } == true
             }
-            Row {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = if (message.role == "user") Arrangement.End else Arrangement.Start,
+            ) {
                 IconButton(enabled = !busy && (hasText || truncated) && (!truncated || !message.entryId.isNullOrBlank()), modifier = Modifier.size(48.dp), onClick = {
                     perform {
                         val text = ChatRequests.messageText(actionMessage())
@@ -1188,42 +1230,6 @@ fun TranscriptContent(
                 }
             }
         }
-        val details = full?.optJSONObject("details") ?: message.details
-        if (details != null) TranscriptJson(details.toString(2))
-        if (truncated) RuntimeChip(stringResource(R.string.chat_load_full_entry), enabled = !busy && !message.entryId.isNullOrBlank(), onClick = {
-            perform {
-                full = ChatRequests.fullEntry(requester, sessionId, requireNotNull(message.entryId), leafId)
-            }
-        })
-        val deferred = message.deferredImages != null || (content != null && (0 until content.length()).any {
-            val block = content.optJSONObject(it)
-            block?.optString("type") == "image" && block.optString("data").isEmpty()
-        })
-        if (deferred) RuntimeChip(stringResource(R.string.chat_load_media), enabled = !busy && !message.entryId.isNullOrBlank(), onClick = {
-            perform {
-                val images = JSONArray()
-                var offset = 0
-                var missing = 0
-                do {
-                    val args = JSONObject().put("id", sessionId).put("entryId", message.entryId).put("offset", offset).put("limit", 1)
-                    if (!leafId.isNullOrBlank()) args.put("leafId", leafId)
-                    val response = requester.request("sessions", "media", args)
-                    val page = response.getJSONArray("images")
-                    for (index in 0 until page.length()) images.put(page.getJSONObject(index))
-                    missing += response.optInt("missingCount")
-                    if (!response.optBoolean("hasMore")) break
-                    val next = response.getInt("nextOffset")
-                    check(next > offset) { context.getString(R.string.chat_history_unavailable) }
-                    offset = next
-                } while (true)
-                media = images
-                mediaSummary = context.getString(R.string.chat_media_summary, images.length(), missing)
-            }
-        })
-        media?.let { images -> for (index in 0 until images.length()) images.optJSONObject(index)?.let { HistoryImage(it) } }
-        mediaSummary?.let { Text(it, color = OmpColors.TextMuted, fontSize = 12.sp) }
-        if (busy) Text(stringResource(R.string.chat_content_loading), color = OmpColors.TextMuted)
-        failure?.let { Text(it, color = OmpColors.StatusError) }
     }
 }
 

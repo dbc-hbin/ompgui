@@ -391,7 +391,7 @@ private fun MdCodeBlock(lang: String, code: String) {
             modifier = Modifier
                 .fillMaxWidth()
                 .background(OmpColors.BgPanel)
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+                .padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -400,14 +400,16 @@ private fun MdCodeBlock(lang: String, code: String) {
                 maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 fontFamily = Mono,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
                 color = OmpColors.TextMuted,
             )
             Row(
                 modifier = Modifier
                     .heightIn(min = 48.dp)
+                    .widthIn(min = 48.dp)
                     .clip(RoundedCornerShape(6.dp))
-                    .clickable {
+                    .clickable(role = androidx.compose.ui.semantics.Role.Button) {
                         clipboard.setText(AnnotatedString(code))
                         copied = true
                     }
@@ -423,7 +425,8 @@ private fun MdCodeBlock(lang: String, code: String) {
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     text = if (copied) "Copied" else "Copy",
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp,
                     color = OmpColors.TextMuted,
                 )
             }
@@ -444,7 +447,8 @@ private fun MdCodeBlock(lang: String, code: String) {
             content = code,
             kind = if (hasPreview && !showSource) RichPreviewKind.Mermaid else RichPreviewKind.Code,
             language = lang,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp, max = 420.dp),
+            compactCode = true,
+            modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp),
         )
     }
 }
