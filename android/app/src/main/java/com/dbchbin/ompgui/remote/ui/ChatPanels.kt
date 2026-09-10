@@ -1035,12 +1035,13 @@ fun LongMessageText(
     sessionId: String,
     message: com.dbchbin.ompgui.remote.relay.DisplayMessage,
     showCopy: Boolean = true,
+    collapsible: Boolean = true,
 ) {
     var expanded by remember(sessionId, message.entryId, message.timestamp, message.role) { mutableStateOf(false) }
     val context = LocalContext.current
     Column(Modifier.fillMaxWidth()) {
-        val visible = if (expanded) message.text else EventProjector.previewText(message.text)
-        val modifier = if (expanded) Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()) else Modifier.fillMaxWidth()
+        val visible = if (!collapsible || expanded) message.text else EventProjector.previewText(message.text)
+        val modifier = if (collapsible && expanded) Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()) else Modifier.fillMaxWidth()
         androidx.compose.foundation.text.selection.SelectionContainer {
             MessageText(visible, modifier, plainText = message.role == "user")
         }
@@ -1048,7 +1049,7 @@ fun LongMessageText(
             val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", message.text))
         }) { Icon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy_content), modifier = Modifier.size(12.dp), tint = OmpColors.TextMuted) }
-        if (message.text.length > 4_000) RuntimeChip(
+        if (collapsible && message.text.length > 4_000) RuntimeChip(
             if (expanded) stringResource(R.string.chat_show_less) else stringResource(R.string.chat_show_full, message.text.length),
             onClick = { expanded = !expanded },
         )
@@ -1125,12 +1126,12 @@ fun TranscriptContent(
                 loading = message.streaming,
                 onClick = { localActivityExpanded = !localActivityExpanded },
             )
-            if (content == null) LongMessageText(requester, sessionId, message.copy(text = full?.optString("text", message.text) ?: message.text), showCopy = false)
+            if (content == null) LongMessageText(requester, sessionId, message.copy(text = full?.optString("text", message.text) ?: message.text), showCopy = false, collapsible = message.role != "assistant")
             else for (index in 0 until content.length()) {
                 val block = content.optJSONObject(index) ?: continue
                 androidx.compose.runtime.key(sessionId, leafId, message.entryId, index, block.optString("toolCallId")) {
                     when (block.optString("type")) {
-                        "text" -> LongMessageText(requester, sessionId, message.copy(text = block.optString("text")), showCopy = false)
+                        "text" -> LongMessageText(requester, sessionId, message.copy(text = block.optString("text")), showCopy = false, collapsible = message.role != "assistant")
                         "toolCall" -> if (showActivity) TranscriptTool(requester, sessionId, leafId, block, results[block.optString("toolCallId")], truncated)
                         "image" -> if (block.optString("data").isNotEmpty()) HistoryImage(block)
                         "thinking" -> {
