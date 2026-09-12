@@ -2,7 +2,7 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-> **Android APK (Android 12+)** — Kotlin 보조 앱으로 원격 ompgui 서버에 연결하고, 최신 세션의 읽기 전용 오프라인 스냅샷을 이용할 수 있습니다. [ompgui Remote v0.7.8 다운로드](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.8/ompgui-remote-v0.7.8.apk) · [릴리스 노트](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.8)
+> **Android APK (Android 12+)** — Kotlin 보조 앱으로 원격 ompgui 서버에 연결하고, 최신 세션의 읽기 전용 오프라인 스냅샷을 이용할 수 있습니다. [ompgui Remote v0.7.10 다운로드](https://github.com/dbc-hbin/ompgui/releases/download/android-v0.7.10/ompgui-remote-v0.7.10.apk) · [릴리스 노트](https://github.com/dbc-hbin/ompgui/releases/tag/android-v0.7.10)
 
 > `android/`의 실험용 네이티브 Compose 클라이언트는 인증된 `/relay` WebSocket을 사용하며, 세션/기록 제어와 링크·도구 호출·결과·오류·미디어 참조를 포함하는 풍부한 온라인 대화 기록, 오프라인 Mermaid 다이어그램 및 코드 구문 강조, 이미지/PDF/오디오/HTML/Markdown/DOCX 인라인 미리보기를 제공합니다. 온라인 기록은 보호된 오프라인 스냅샷과 별개입니다. 크기가 제한된 미리보기에서 `sessions.content`로 전체 텍스트를 나누어 가져오고 미디어 참조도 페이지 단위로 조회하므로 대화 기록을 4,000자로 잘라내지 않습니다. 오프라인 캐시의 개인정보 보호 제한은 그대로 유지됩니다. 파일 자동 새로고침은 화면에 보일 때만 동작하며 저장하지 않은 편집 내용을 보존합니다. 허용된 숨김 파일 탐색과 아카이브 검색도 지원합니다. 모델/설정에서는 공개 models.dev 카탈로그, 고급 OMP 설정, 구성 상태와 구분되는 세션별 실제 MCP 실행 상태를 확인할 수 있습니다. 첨부 파일은 휴대폰에서 하나의 거대한 JSON으로 묶지 않고 스트리밍으로 스테이징하며, 이미지는 개당 10 MiB로 최대 10개, 텍스트 첨부는 별도로 개당 256 KiB로 최대 10개까지 지원합니다. OMP 자체의 이미지 정규화와 제공자별 이미지 개수 제한은 계속 적용됩니다.
 >
@@ -10,7 +10,7 @@
 >
 > 네이티브 인터페이스는 웹 앱의 Warm 및 OMP 색상 팔레트를 따르며, 간결한 프로젝트/세션 트리와 설정/사용량 하단 메뉴, 도구 모음을 한 줄로 정리한 메시지 입력창을 제공합니다. 기록, 세션 정보, 명령 및 런타임 제어는 세션 메뉴에 모았고, 보조 워크스페이스 작업은 더보기 메뉴에 유지했습니다. 런타임 제어는 펼칠 수 있는 트리 카테고리로 구성하고 현재 값을 일정한 열에 맞춰 표시합니다. 설정은 간결한 행 단위 선택 컨트롤을 사용하며, 드롭다운 메뉴는 해당 컨트롤에 붙어 열립니다. Android 네이티브 컨트롤, 파일 선택기, 시트 탐색 방식과 서로 겹치지 않는 최소 48dp 터치 영역을 유지합니다.
 >
-> 이 클라이언트는 배포된 v0.7.2 APK를 대체하거나 호스팅형/E2E 릴레이를 추가하지 않습니다. JDK 21을 사용하여 저장소 루트에서 `npm install`을 실행한 뒤, `android/`에서 `./gradlew :app:assembleDebug`로 빌드합니다. 오프라인 에셋은 설치된 npm 의존성에서 생성되며, 출력 경로는 `android/app/build/outputs/apk/debug/app-debug.apk`입니다. 서버에서 비활성화된 업데이트, 로그아웃, 저장된 API 키 변경 작업은 여전히 사용할 수 없습니다.
+> 이 클라이언트는 호스팅형/E2E 릴레이를 추가하지 않습니다. JDK 21을 사용하여 저장소 루트에서 `npm install`을 실행한 뒤, `android/`에서 `./gradlew :app:assembleDebug`로 빌드합니다. 오프라인 에셋은 설치된 npm 의존성에서 생성되며, 출력 경로는 `android/app/build/outputs/apk/debug/app-debug.apk`입니다. 서버에서 비활성화된 업데이트, 로그아웃, 저장된 API 키 변경 작업은 여전히 사용할 수 없습니다.
 
 [oh-my-pi (omp) 코딩 에이전트](https://github.com/can1357/oh-my-pi)를 위한 로컬 웹 UI입니다. ompgui은 로컬 omp 세션 파일을 읽어 브라우저에서 세션 탐색, 실시간 채팅, 모델 설정, 스킬 관리, 프로젝트 파일 미리보기를 제공하는 워크스페이스를 엽니다.
 
