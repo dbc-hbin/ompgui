@@ -16,6 +16,7 @@ import android.content.SharedPreferences
  * - completion chime (desktop `ompgui-sound-enabled`, default true)
  * - submit during run: steer | queue (desktop `omp-web:submit-during-run`)
  * - tool calls collapsed (desktop `ompgui:tool-calls-collapsed`, default true)
+ * - model thinking visibility for this device (default shown)
  *
  * Backed by `ompgui_app_prefs` to preserve the existing SettingsSheet keys
  * (`language`, `soundChime`, `submissionMode`).
@@ -28,6 +29,7 @@ object AppPreferences {
     const val KEY_SOUND_CHIME = "soundChime"
     const val KEY_SUBMISSION_MODE = "submissionMode"
     const val KEY_TOOL_CALLS_COLLAPSED = "toolCallsCollapsed"
+    const val KEY_SHOW_THINKING = "showThinking"
 
     const val THEME_SYSTEM = "system"
     const val THEME_LIGHT = "light"
@@ -103,5 +105,12 @@ object AppPreferences {
 
     fun setToolCallsCollapsed(context: Context, collapsed: Boolean) {
         prefs(context).edit().putBoolean(KEY_TOOL_CALLS_COLLAPSED, collapsed).apply()
+    }
+
+    fun isThinkingShown(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_SHOW_THINKING, true)
+
+    fun setThinkingShown(context: Context, shown: Boolean) {
+        prefs(context).edit().putBoolean(KEY_SHOW_THINKING, shown).apply()
     }
 }

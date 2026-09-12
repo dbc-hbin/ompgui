@@ -12,7 +12,7 @@
  *   (mirrors `app/api/models/route.ts`, including its provider-family
  *   allowlist for the /fast eligibility flag), `readDisabledProviders`.
  * - roles: `readModelRoles`/`writeModelRoles` (mirrors `/api/model-roles`).
- * - registry: `readNativeSettings`/`mergeNativeSettings`/`writeNativeSettings`
+ * - registry: `readNativeSettings`/`mutateNativeSettings`/`writeNativeSettings`
  *   + `assertNoAmbiguousModelScopes` (mirrors `/api/omp-settings`).
  * - providers.enable: `enableProvider` (mirrors `/api/providers/enable`).
  * - providers.get/update/validate/test: redacted models.yml merge
@@ -96,7 +96,7 @@ import {
   type OmpModel,
 } from "../omp/rpc-utility";
 import {
-  mergeNativeSettings,
+  mutateNativeSettings,
   readNativeSettings,
   writeNativeSettings,
   type NativeSettings,
@@ -459,10 +459,9 @@ async function setNativeRegistry(args: Record<string, unknown>): Promise<Record<
       }
     }
   }
+  let updatedSettings: NativeSettings;
   try {
-    const current = readNativeSettings();
-    const next = mergeNativeSettings(current.settings, patch);
-    writeNativeSettings(next);
+    updatedSettings = await writeNativeSettings(patch);
   } catch (error) {
     throw new ModelsRequestError(
       "registry_write_failed",
@@ -471,8 +470,7 @@ async function setNativeRegistry(args: Record<string, unknown>): Promise<Record<
   }
   invalidateModelsCache();
   disposeUtilityRpc();
-  const updated = readNativeSettings();
-  return { settings: registrySubset(updated.settings), path: updated.path };
+  return { settings: registrySubset(updatedSettings), path: readNativeSettings().path };
 }
 
 // ── models.yml redacted registry ─────────────────────────────────────────────
@@ -590,7 +588,7 @@ function fallbackSubset(settings: NativeSettings): Record<string, unknown> {
   return out;
 }
 
-function setFallback(args: Record<string, unknown>): Record<string, unknown> {
+async function setFallback(args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const retry: NonNullable<NativeSettings["retry"]> = {};
   let present = false;
   if (args.chains !== undefined) {
@@ -656,10 +654,8 @@ function setFallback(args: Record<string, unknown>): Record<string, unknown> {
     );
   }
   try {
-    const current = readNativeSettings();
-    const next = mergeNativeSettings(current.settings, { retry });
-    writeNativeSettings(next);
-    return { retry: fallbackSubset(next) };
+    const updated = await mutateNativeSettings(() => ({ retry }));
+    return { retry: fallbackSubset(updated) };
   } catch (error) {
     if (error instanceof ModelsRequestError) throw error;
     throw new ModelsRequestError(
@@ -783,7 +779,7 @@ async function runModelLogin(entry: PendingModelLogin): Promise<void> {
     const ready = await proc.waitReady(READY_TIMEOUT_MS);
     await proc.negotiateProtocol(ready);
     await proc.sendCommand({ type: "login", providerId: entry.provider }, LOGIN_TIMEOUT_MS);
-    enableProvider(entry.provider);
+    await enableProvider(entry.provider);
     invalidateModelsCache();
     disposeUtilityRpc();
     entry.phase = "success";
@@ -974,7 +970,7 @@ export async function cancelAllModelLogins(): Promise<void> {
 
 // ── Domain dispatch ──────────────────────────────────────────────────────────
 
-function setModelRoles(args: Record<string, unknown>): Record<string, unknown> {
+async function setModelRoles(args: Record<string, unknown>): Promise<Record<string, unknown>> {
   if (typeof args.roles !== "object" || args.roles === null || Array.isArray(args.roles)) {
     throw new ModelsRequestError("invalid_args", "roles must be an object");
   }
@@ -992,7 +988,7 @@ function setModelRoles(args: Record<string, unknown>): Record<string, unknown> {
     roles[key] = value;
   }
   try {
-    writeModelRoles(roles);
+    await writeModelRoles(roles);
   } catch (error) {
     throw new ModelsRequestError(
       "roles_write_failed",
@@ -1065,7 +1061,7 @@ export async function handleModelsRequest(
     case "providers.enable": {
       const provider = requireProviderId(args.provider);
       try {
-        enableProvider(provider);
+        await enableProvider(provider);
       } catch (error) {
         throw new ModelsRequestError(
           "provider_enable_failed",

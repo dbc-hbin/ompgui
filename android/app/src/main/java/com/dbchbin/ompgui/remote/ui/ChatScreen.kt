@@ -1035,6 +1035,7 @@ private fun AssistantTurn(
     results: Map<String, DisplayMessage>,
 ) {
     var expanded by remember(sessionId, leafId, messages.first().entryId) { mutableStateOf(false) }
+    val thinkingShown = LocalThinkingShown.current
     var hasActivity = false
     var pending = false
     var failed = false
@@ -1050,7 +1051,7 @@ private fun AssistantTurn(
         for (index in 0 until content.length()) {
             val block = content.optJSONObject(index) ?: continue
             when (block.optString("type")) {
-                "thinking" -> hasActivity = true
+                "thinking" -> if (thinkingShown) hasActivity = true
                 "toolCall" -> {
                     hasActivity = true
                     val result = results[block.optString("toolCallId")]
@@ -1068,7 +1069,7 @@ private fun AssistantTurn(
                 else -> stringResource(R.string.chat_tool_complete)
             }
             TranscriptDisclosure(
-                label = "${stringResource(R.string.thinking_title)} · ${stringResource(R.string.new_session_tools)} · $status",
+                label = if (thinkingShown) "${stringResource(R.string.thinking_title)} · ${stringResource(R.string.new_session_tools)} · $status" else "${stringResource(R.string.new_session_tools)} · $status",
                 expanded = expanded,
                 loading = pending,
                 failed = failed,

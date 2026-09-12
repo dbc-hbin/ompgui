@@ -87,7 +87,7 @@ import org.json.JSONObject
  * Server-disabled operations (API-key store/remove, logout) surface the exact
  * 501 capability codes plus terminal guidance instead of fake success.
  */
-enum class ModelSettingsSection { All, Defaults, Roles, Providers }
+enum class ModelSettingsSection { All, Defaults, Roles, Providers, Hidden }
 
 @Composable
 fun ModelSettingsPanel(

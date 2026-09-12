@@ -8,6 +8,7 @@ import { translate, useI18n, type Locale } from "@/lib/i18n";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
 import { collectToolResultImages } from "@/lib/image-attachments";
 import { isEmptyThinkingBlock } from "@/lib/message-display";
+import { useHideThinking } from "@/hooks/useHideThinking";
 import { parseUnifiedPatch, type SplitDiffCell } from "@/lib/patch";
 import { isRecord } from "@/lib/type-guards";
 import { Tooltip, Collapsible, CollapsibleTrigger, CollapsiblePanel } from "./ui/primitives";
@@ -380,10 +381,11 @@ function AssistantMessageView({
   toolCallsDefaultCollapsed: boolean;
 }) {
   const { t, locale } = useI18n();
+  const hideThinking = useHideThinking();
   const time = showTimestamp ? formatTime(message.timestamp, locale) : null;
   const blockItems = (message.content ?? [])
     .map((block, originalIndex) => ({ block, originalIndex }))
-    .filter(({ block }) => !isEmptyThinkingBlock(block, { isStreaming }));
+    .filter(({ block }) => block.type !== "thinking" || (!hideThinking && !isEmptyThinkingBlock(block, { isStreaming })));
   const blocks = blockItems.map(({ block }) => block);
   const [hovered, setHovered] = useState(false);
   const [actionsActive, setActionsActive] = useState(false);

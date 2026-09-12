@@ -51,7 +51,7 @@ Browser
   │ HTTP / Server-Sent Events
   ▼
 ompgui (Next.js on Node)
-  ├─ reads native OMP session files and selected configuration
+  ├─ reads native OMP sessions and catalog-filtered global/project settings
   ├─ serves allow-listed project files
   └─ starts one `omp --mode rpc-ui` child per active session
        │ NDJSON over stdio
@@ -96,13 +96,40 @@ atomic where possible; archive or deletion stops the associated live process
 first. ompgui does not provide a general editor for session JSONL or opaque OMP
 state.
 
-Models and allow-listed OMP settings use surgical YAML updates that preserve
-unrelated content. Plugin operations run the installed `omp plugin` CLI. MCP
-configuration is project-local, validated before writing, and saved atomically.
-Renaming a server to an existing name returns HTTP 409 without overwriting either
-configuration.
-Configuration replacements use exclusive, owner-only temporary files. Project
-configuration targets are checked through symlinks before creating directories.
+Models use surgical YAML updates. Native OMP settings are defined once in
+`lib/omp/settings-catalog.ts`; `/api/omp-settings` and Relay's `settings.get` /
+`settings.update` call the same settings service, so browser and Android receive
+the same catalog, validation, scope policy, redaction, confirmation rules, and
+per-layer/effective-value DTOs. Values in that DTO are saved configuration, not
+live-session state or environment/CLI overrides; clients supply catalog defaults
+for absent effective values.
+
+The global layer reads `~/.omp/agent/config.yml`, falling back to an existing
+`config.yaml`; an authorized project layer reads and writes only `.omp/config.yml`.
+Project values recursively merge over global values for display; a null project
+model-role entry inherits the global role, and ordered role-selector arrays are
+preserved. Scoped model/provider registry arrays that the simple editor cannot
+represent are marked read-only and protected against replacement or reset.
+A save applies a minimal leaf patch, with structured records replacing that record at the selected
+layer and ordered arrays remaining ordered; reset removes the selected-layer leaf
+so defaults or inheritance apply. Catalog-designated secret values are never
+returned, only presence, and sensitive changes fail closed without their required
+confirmation. YAML aliases are isolated before mutation so editing an anchor
+does not change unrelated alias consumers. Unrelated YAML and comments are
+preserved. New or restarted OMP sessions consume saved changes; ompgui does not
+silently restart a live RPC child.
+
+Every settings read-modify-write holds OMP's native cross-process config lock and
+then performs an atomic replacement. The Node implementation uses `koffi` for the
+platform primitives and `xxhash-wasm` for OMP-compatible lock names; Darwin
+interoperability has been exercised, while the Linux and Windows implementations
+are source-complete but were not runtime-tested in that verification pass.
+Configuration replacements use exclusive, owner-only temporary files, and project
+targets are checked through symlinks before directories are created.
+
+Plugin operations run the installed `omp plugin` CLI. MCP configuration is
+project-local, validated before writing, and saved atomically. Renaming a server
+to an existing name returns HTTP 409 without overwriting either configuration.
 
 ### Server-owned pre-dispatch queue
 

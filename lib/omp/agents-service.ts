@@ -229,8 +229,8 @@ export async function discoverAgents(cwd: string = process.cwd()): Promise<{
   }
 
   const agentModelOverrides = (taskSettings.agentModelOverrides as Record<string, string | string[]>) || {};
-  const agentPrewalk = (taskSettings.agentPrewalk as Record<string, boolean | string>) || {};
-  const agentAdvisor = (taskSettings.agentAdvisor as Record<string, boolean | string>) || {};
+  const agentPrewalk = (taskSettings.agentPrewalk as Record<string, string>) || {};
+  const agentAdvisor = (taskSettings.agentAdvisor as Record<string, string>) || {};
   const disabledAgents = new Set(Array.isArray(taskSettings.disabledAgents) ? taskSettings.disabledAgents : []);
 
   for (const agent of allFound) {
@@ -243,10 +243,12 @@ export async function discoverAgents(cwd: string = process.cwd()): Promise<{
         agent.overrideModel = agentModelOverrides[agent.name];
       }
       if (agent.name in agentPrewalk) {
-        agent.prewalkOverride = agentPrewalk[agent.name];
+        const value = agentPrewalk[agent.name];
+        agent.prewalkOverride = value === "on" ? true : value === "off" ? false : value;
       }
       if (agent.name in agentAdvisor) {
-        agent.advisorOverride = agentAdvisor[agent.name];
+        const value = agentAdvisor[agent.name];
+        agent.advisorOverride = value === "on" ? true : value === "off" ? false : value;
       }
       if (disabledAgents.has(agent.name)) {
         agent.disabled = true;

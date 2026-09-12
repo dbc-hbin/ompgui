@@ -1111,17 +1111,18 @@ fun TranscriptContent(
         }
     }
     val content = full?.optJSONArray("content") ?: message.content
+    val thinkingShown = LocalThinkingShown.current
     val truncated = message.truncated && full == null
     var localActivityExpanded by remember(sessionId, leafId, message.entryId) { mutableStateOf(false) }
     val showActivity = activityExpanded ?: localActivityExpanded
     val hasActivity = content != null && (0 until content.length()).any {
         val type = content.optJSONObject(it)?.optString("type")
-        type == "thinking" || type == "toolCall"
+        (thinkingShown && type == "thinking") || type == "toolCall"
     }
     Column(Modifier.fillMaxWidth()) {
         Column(contentModifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (hasActivity && activityExpanded == null) TranscriptDisclosure(
-                label = "${stringResource(R.string.thinking_title)} · ${stringResource(R.string.new_session_tools)}",
+                label = if (thinkingShown) "${stringResource(R.string.thinking_title)} · ${stringResource(R.string.new_session_tools)}" else stringResource(R.string.new_session_tools),
                 expanded = showActivity,
                 loading = message.streaming,
                 onClick = { localActivityExpanded = !localActivityExpanded },
@@ -1134,7 +1135,7 @@ fun TranscriptContent(
                         "text" -> LongMessageText(requester, sessionId, message.copy(text = block.optString("text")), showCopy = false, collapsible = message.role != "assistant")
                         "toolCall" -> if (showActivity) TranscriptTool(requester, sessionId, leafId, block, results[block.optString("toolCallId")], truncated)
                         "image" -> if (block.optString("data").isNotEmpty()) HistoryImage(block)
-                        "thinking" -> {
+                        "thinking" -> if (thinkingShown) {
                             var thinking by remember(block) { mutableStateOf<String?>(null) }
                             var thinkingBusy by remember { mutableStateOf(false) }
                             var thinkingFailure by remember { mutableStateOf<String?>(null) }
@@ -1405,7 +1406,9 @@ private fun ChatHistoryContent(requester: RelayRequester, sessionId: String, lea
 @Composable
 private fun HistoryEntry(requester: RelayRequester, sessionId: String, leafId: String?, entryId: String, message: JSONObject, onOpenSession: (String) -> Unit, onEditMessage: (String) -> Unit) {
     val context = LocalContext.current
-    var details by remember { mutableStateOf<String?>(null) }
+    val thinkingShown = LocalThinkingShown.current
+    var thinkingDetails by remember { mutableStateOf<String?>(null) }
+    var actionFeedback by remember { mutableStateOf<String?>(null) }
     var media by remember { mutableStateOf<org.json.JSONArray?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -1445,8 +1448,8 @@ private fun HistoryEntry(requester: RelayRequester, sessionId: String, leafId: S
                 } else {
                     MessageText(block.optString("text"), Modifier.fillMaxWidth())
                 }
-                "thinking" -> RuntimeChip(stringResource(R.string.chat_load_thinking, index + 1), enabled = !busy && entryId.isNotBlank(), onClick = {
-                    perform { details = ChatRequests.thinking(requester, sessionId, entryId, index).getString("thinking"); thinkingExpanded = true }
+                "thinking" -> if (thinkingShown) RuntimeChip(stringResource(R.string.chat_load_thinking, index + 1), enabled = !busy && entryId.isNotBlank(), onClick = {
+                    perform { thinkingDetails = ChatRequests.thinking(requester, sessionId, entryId, index).getString("thinking"); thinkingExpanded = true }
                 })
                 "image" -> HistoryImage(block)
                 else -> {
@@ -1465,12 +1468,13 @@ private fun HistoryEntry(requester: RelayRequester, sessionId: String, leafId: S
     } else {
         MessageText(content?.toString().orEmpty(), plainText = true)
     }
-    details?.let {
+    if (thinkingShown) thinkingDetails?.let {
         RuntimeChip(if (thinkingExpanded) stringResource(R.string.chat_hide_details) else stringResource(R.string.chat_show_details), onClick = { thinkingExpanded = !thinkingExpanded })
         if (thinkingExpanded) androidx.compose.foundation.text.selection.SelectionContainer {
             Text(it, color = OmpColors.TextMuted, fontSize = 13.sp, lineHeight = 20.sp)
         }
     }
+    actionFeedback?.let { Text(it, color = OmpColors.TextMuted, fontSize = 13.sp, lineHeight = 20.sp) }
     media?.let { images -> for (i in 0 until images.length()) images.optJSONObject(i)?.let { HistoryImage(it) } }
     error?.let { Text(it, color = OmpColors.StatusError) }
     if (message.optString("role") == "user") RuntimeChip(stringResource(R.string.chat_copy_to_composer), onClick = {
@@ -1484,7 +1488,7 @@ private fun HistoryEntry(requester: RelayRequester, sessionId: String, leafId: S
             perform {
                 val result = ChatRequests.media(requester, sessionId, entryId)
                 media = result.getJSONArray("images")
-                details = context.getString(R.string.chat_media_summary, media?.length() ?: 0, result.optInt("missingCount"))
+                actionFeedback = context.getString(R.string.chat_media_summary, media?.length() ?: 0, result.optInt("missingCount"))
             }
         })
         if (message.optString("role") == "user") RuntimeChip(stringResource(R.string.chat_fork_here), enabled = !busy, onClick = {
@@ -1492,7 +1496,7 @@ private fun HistoryEntry(requester: RelayRequester, sessionId: String, leafId: S
                 val command = JSONObject().put("type", "fork").put("entryId", entryId)
                 if (!leafId.isNullOrBlank()) command.put("leafId", leafId)
                 val result = ChatRequests.command(requester, sessionId, command).getJSONObject("result")
-                if (result.optBoolean("cancelled")) details = context.getString(R.string.chat_fork_cancelled)
+                if (result.optBoolean("cancelled")) actionFeedback = context.getString(R.string.chat_fork_cancelled)
                 else onOpenSession(result.getString("newSessionId"))
             }
         })

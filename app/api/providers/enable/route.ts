@@ -9,7 +9,7 @@ export async function POST(request: Request) {
     if (typeof body.provider !== "string" || !body.provider.trim()) {
       return NextResponse.json({ error: "provider is required" }, { status: 400 });
     }
-    enableProvider(body.provider);
+    await enableProvider(body.provider);
     invalidateModelsCache();
     disposeUtilityRpc();
     return NextResponse.json({ success: true });

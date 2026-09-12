@@ -168,7 +168,7 @@ export async function GET(
         const ready = await child.waitReady(READY_TIMEOUT_MS);
         await child.negotiateProtocol(ready);
         await child.sendCommand({ type: "login", providerId: provider }, LOGIN_TIMEOUT_MS);
-        enableProvider(provider);
+        await enableProvider(provider);
         invalidateModelsCache();
         disposeUtilityRpc();
         send({ type: "success" });

@@ -43,9 +43,11 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
     val backDispatcherOwner = requireNotNull(androidx.activity.compose.LocalOnBackPressedDispatcherOwner.current)
     val preferences = remember(context) { AppPreferences.prefs(context) }
     var language by remember { mutableStateOf(AppPreferences.getLanguage(context, Locale.getDefault().language)) }
+    var thinkingShown by remember { mutableStateOf(AppPreferences.isThinkingShown(context)) }
     DisposableEffect(preferences) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, changedKey ->
             if (changedKey == AppPreferences.KEY_LANGUAGE) language = AppPreferences.getLanguage(context, Locale.getDefault().language)
+            if (changedKey == AppPreferences.KEY_SHOW_THINKING) thinkingShown = AppPreferences.isThinkingShown(context)
         }
         preferences.registerOnSharedPreferenceChangeListener(listener)
         onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
@@ -89,6 +91,7 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
         LocalMarkdownNavigation provides MarkdownNavigation(state.sessionCwd) { path ->
             state.sessionCwd?.let { cwd -> filePreview = cwd to path }
         },
+        LocalThinkingShown provides thinkingShown,
     ) {
     key(language) {
     RemoteTheme {

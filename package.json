@@ -1,6 +1,6 @@
 {
   "name": "ompgui",
-  "version": "0.7.8",
+  "version": "0.7.9",
   "description": "Web UI & Browser GUI for the oh-my-pi (omp) coding agent",
   "homepage": "https://github.com/dbc-hbin/ompgui#readme",
   "repository": {
@@ -55,6 +55,7 @@
     "@base-ui/react": "^1.6.0",
     "cmdk": "^1.1.1",
     "katex": "^0.16.47",
+    "koffi": "3.2.1",
     "lucide-react": "^1.27.0",
     "mammoth": "^1.12.0",
     "mermaid": "^11.14.0",
@@ -73,6 +74,7 @@
     "undici": "8.10.0",
     "unified": "^11.0.5",
     "uqr": "^0.1.3",
+    "xxhash-wasm": "1.1.0",
     "yaml": "^2"
   },
   "devDependencies": {

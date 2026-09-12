@@ -1,4 +1,5 @@
 import { MAX_ATTACHED_IMAGE_BYTES, validateAgentImages } from "../image-attachments";
+import type { NativeSettingsSnapshot, NativeSettingsUpdate } from "../omp/settings-catalog";
 import { asNumber, asString, isRecord } from "../type-guards";
 
 export const RELAY_PROTOCOL_VERSION = 1 as const;
@@ -66,8 +67,8 @@ export type RelayClientFrame =
   | { op: "files.index"; cwd: string; query: string }
   | { op: "projects.add"; cwd: string }
   | { op: "projects.remove"; cwd: string }
-  | { op: "settings.get" }
-  | { op: "settings.update"; settings: Record<string, unknown> }
+  | ({ op: "settings.get" } & Pick<NativeSettingsUpdate, "scope" | "cwd">)
+  | ({ op: "settings.update" } & NativeSettingsUpdate)
   | RelayCmdFrame;
 
 export type RelayRequestDomain = "files" | "sessions" | "models" | "extensions" | "system";
@@ -135,8 +136,9 @@ export type RelayServerFrame =
   | { op: "cmd_ok"; req: number; data: unknown }
   | { op: "cmd_err"; req: number; code: string; message: string }
   | { op: "usage"; data: unknown }
-  | { op: "settings"; settings: Record<string, unknown> }
-  | { op: "settings_updated"; success: boolean; settings?: Record<string, unknown>; error?: string }
+  | ({ op: "settings" } & NativeSettingsSnapshot)
+  | ({ op: "settings_updated"; success: true; application: { mode: "new-session" | "runtime-refresh"; restartRequired: false } } & NativeSettingsSnapshot)
+  | { op: "settings_updated"; success: false; error: string }
   | { op: "session.created"; id: string; cwd: string }
   | { op: "session.deleted"; id: string }
   | { op: "session.archived"; id: string }
@@ -778,13 +780,46 @@ export function parseClientFrame(raw: string, assembled = false): RelayClientFra
       }
       return op === "projects.add" ? { op: "projects.add", cwd } : { op: "projects.remove", cwd };
     }
-    case "settings.get":
-      return { op: "settings.get" };
+    case "settings.get": {
+      if (parsed.scope !== undefined && parsed.scope !== "global" && parsed.scope !== "project") {
+        return { error: true, code: "invalid_settings", message: "scope must be global or project" };
+      }
+      if (parsed.cwd !== undefined && typeof parsed.cwd !== "string") {
+        return { error: true, code: "invalid_settings", message: "cwd must be a string" };
+      }
+      return {
+        op: "settings.get",
+        ...(parsed.scope !== undefined ? { scope: parsed.scope } : {}),
+        ...(typeof parsed.cwd === "string" ? { cwd: parsed.cwd } : {}),
+      };
+    }
     case "settings.update": {
-      if (!isRecord(parsed.settings)) {
+      if (parsed.settings !== undefined && !isRecord(parsed.settings)) {
         return { error: true, code: "invalid_settings", message: "settings must be an object" };
       }
-      return { op: "settings.update", settings: parsed.settings as Record<string, unknown> };
+      if (parsed.scope !== undefined && parsed.scope !== "global" && parsed.scope !== "project") {
+        return { error: true, code: "invalid_settings", message: "scope must be global or project" };
+      }
+      if (parsed.cwd !== undefined && typeof parsed.cwd !== "string") {
+        return { error: true, code: "invalid_settings", message: "cwd must be a string" };
+      }
+      for (const key of ["reset", "confirm"] as const) {
+        if (parsed[key] !== undefined && (!Array.isArray(parsed[key]) || parsed[key].some((value) => typeof value !== "string"))) {
+          return { error: true, code: "invalid_settings", message: `${key} must be a string array` };
+        }
+      }
+      if (parsed.secrets !== undefined && (!isRecord(parsed.secrets) || Object.values(parsed.secrets).some((value) => typeof value !== "string" && value !== null))) {
+        return { error: true, code: "invalid_settings", message: "secrets must contain string or null values" };
+      }
+      return {
+        op: "settings.update",
+        ...(isRecord(parsed.settings) ? { settings: parsed.settings } : {}),
+        ...(parsed.scope !== undefined ? { scope: parsed.scope } : {}),
+        ...(typeof parsed.cwd === "string" ? { cwd: parsed.cwd } : {}),
+        ...(Array.isArray(parsed.reset) ? { reset: parsed.reset as string[] } : {}),
+        ...(isRecord(parsed.secrets) ? { secrets: parsed.secrets as Record<string, string | null> } : {}),
+        ...(Array.isArray(parsed.confirm) ? { confirm: parsed.confirm as string[] } : {}),
+      };
     }
     case "cmd":
       return parseCmd(parsed);

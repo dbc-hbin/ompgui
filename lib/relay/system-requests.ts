@@ -22,9 +22,9 @@
  * - systemPrompt.get: live `getRpcSession(id).send({type:"get_state"})`
  *   systemPrompt (mirrors `hooks/useAgentSession.ts` loadSystemPrompt;
  *   requires explicit sessionId, never context-implied).
- * - settings.get/update: `readNativeSettings`/`mergeNativeSettings`/
- *   `writeNativeSettings` + `assertNoAmbiguousModelScopes` (mirrors
- *   `app/api/omp-settings/route.ts` incl. registry invalidation).
+ * - settings.get/update: shared catalog-backed settings service (same DTO,
+ *   validation, redaction, scope checks, confirmation, and registry
+ *   invalidation as `app/api/omp-settings/route.ts`).
  * - update: HONEST `update_disabled` mirroring the desktop route — ompgui
  *   never executes a host self-update; the panel shows a copyable command.
  *
@@ -37,22 +37,15 @@
  * - devices.list {} -> {devices:[{id,label,createdAt,lastSeenAt}]}
  * - devices.revoke {deviceId:string} -> {revoked:true,deviceId,self:boolean}
  * - systemPrompt.get {sessionId:string} -> {sessionId,systemPrompt:string}
- * - settings.get {} -> {path,settings}
- * - settings.update {settings:object} -> {success:true,settings,application:{mode,restartRequired}}
+ * - settings.get {scope?,cwd?} -> NativeSettingsSnapshot
+ * - settings.update NativeSettingsUpdate -> NativeSettingsSnapshot + {success:true,application}
  * - update {...any} -> throws update_disabled (400, never executes)
  */
 import { invalidateOmpCliCache } from "../omp/omp-cli";
-import {
-  filterNativeSettings,
-  mergeNativeSettings,
-  readNativeSettings,
-  writeNativeSettings,
-} from "../omp/settings-config";
+import { NativeSettingsError } from "../omp/settings-config";
+import { applyNativeSettings, getNativeSettings } from "../omp/settings-service";
 import { checkOmpUpdate, type OmpUpdateStatus } from "../omp/updates";
 import { checkNpmUpdate, type NpmUpdateStatus } from "../npm-update";
-import { assertNoAmbiguousModelScopes, type ModelScopeCandidate } from "../model-scope";
-import { invalidateModelsCache } from "../models-cache";
-import { disposeUtilityRpc, runUtilityCommand } from "../omp/rpc-utility";
 import { restartAllRpcSessions, getRpcSession } from "../rpc-manager";
 import { getUsage as getSharedUsage, usageErrorCode } from "../usage";
 import type { UsageResponse } from "../api-types";
@@ -261,109 +254,31 @@ async function getSystemPrompt(args: Record<string, unknown>): Promise<Record<st
   }
 }
 
-function settingsToRecord(path: string, settings: unknown): Record<string, unknown> {
-  if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
-    throw new SystemRequestError("settings_read_failed", "Stored settings are not an object");
-  }
-  const record: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(settings)) record[key] = value;
-  return { path, settings: record };
-}
-
-function getSettings(): Record<string, unknown> {
-  try {
-    const data = readNativeSettings();
-    return settingsToRecord(data.path, data.settings);
-  } catch (error) {
-    if (error instanceof SystemRequestError) throw error;
-    throw new SystemRequestError(
-      "settings_read_failed",
-      error instanceof Error ? error.message : String(error),
+function settingsFailure(error: unknown, fallbackCode: string): SystemRequestError {
+  if (error instanceof NativeSettingsError) {
+    return new SystemRequestError(
+      error.code,
+      error.message,
+      error.issues.length ? { issues: error.issues } : undefined,
+      400,
     );
   }
+  return new SystemRequestError(fallbackCode, "Settings operation failed", undefined, 400);
 }
 
-function readStringList(value: unknown): string[] | undefined {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value)) {
-    throw new SystemRequestError("invalid_args", "model lists must contain non-empty strings");
+async function getSettings(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  try {
+    return { ...await getNativeSettings(args) };
+  } catch (error) {
+    throw settingsFailure(error, "settings_read_failed");
   }
-  const out: string[] = [];
-  for (const entry of value) {
-    if (typeof entry !== "string" || !entry.trim()) {
-      throw new SystemRequestError("invalid_args", "model lists must contain non-empty strings");
-    }
-    out.push(entry);
-  }
-  return out;
-}
-
-function modelsForScopeCheck(models: unknown): ModelScopeCandidate[] {
-  if (!Array.isArray(models)) return [];
-  const out: ModelScopeCandidate[] = [];
-  for (const entry of models) {
-    if (typeof entry !== "object" || entry === null) continue;
-    if (!("id" in entry) || !("provider" in entry)) continue;
-    const id = entry.id;
-    const provider = entry.provider;
-    if (typeof id === "string" && typeof provider === "string") out.push({ id, provider });
-  }
-  return out;
 }
 
 async function updateSettings(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  if (typeof args.settings !== "object" || args.settings === null || Array.isArray(args.settings)) {
-    throw new SystemRequestError("invalid_args", "settings must be an object");
-  }
-  // Drop unknown fields through the existing filter. Recognized malformed
-  // values survive filtering and are rejected before persistence by the writer.
-  const reviewed = filterNativeSettings(args.settings);
-  const enabledModels = readStringList(reviewed.enabledModels);
-  if (enabledModels !== undefined && enabledModels.length > 0) {
-    // Best-effort ambiguity guard, mirroring /api/omp-settings: settings stay
-    // editable when omp is unavailable.
-    try {
-      const response = await runUtilityCommand<{ models?: unknown }>(
-        { type: "get_available_models" },
-        120_000,
-      );
-      if (Array.isArray(response.models)) {
-        assertNoAmbiguousModelScopes(enabledModels, modelsForScopeCheck(response.models));
-      }
-    } catch (error) {
-      if (error instanceof Error && error.message.startsWith("Ambiguous enabledModels entry")) {
-        throw new SystemRequestError("invalid_args", error.message);
-      }
-    }
-  }
   try {
-    const current = readNativeSettings();
-    const next = mergeNativeSettings(current.settings, reviewed);
-    writeNativeSettings(next);
-    const registryInvalidated = reviewed.enabledModels !== undefined
-      || reviewed.disabledProviders !== undefined
-      || reviewed.modelProviderOrder !== undefined;
-    if (registryInvalidated) {
-      invalidateModelsCache();
-      disposeUtilityRpc();
-    }
-    const updated = readNativeSettings();
-    const updatedRecord = settingsToRecord(updated.path, updated.settings);
-    const settingsValue = updatedRecord.settings;
-    return {
-      success: true,
-      settings: settingsValue,
-      application: {
-        mode: registryInvalidated ? "runtime-refresh" : "new-session",
-        restartRequired: false,
-      },
-    };
+    return { ...await applyNativeSettings(args) };
   } catch (error) {
-    if (error instanceof SystemRequestError) throw error;
-    throw new SystemRequestError(
-      "settings_write_failed",
-      error instanceof Error ? error.message : String(error),
-    );
+    throw settingsFailure(error, "settings_write_failed");
   }
 }
 
@@ -395,7 +310,7 @@ export async function handleSystemRequest(
     case "systemPrompt.get":
       return getSystemPrompt(args);
     case "settings.get":
-      return getSettings();
+      return getSettings(args);
     case "settings.update":
       return updateSettings(args);
     case "update":
