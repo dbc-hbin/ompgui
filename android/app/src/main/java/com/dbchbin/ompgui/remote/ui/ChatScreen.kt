@@ -66,6 +66,7 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -80,8 +81,11 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
@@ -133,6 +137,32 @@ private const val MAX_ATTACHMENTS = AttachmentTransfer.MAX_PER_KIND
 private const val MAX_IMAGE_BYTES = AttachmentTransfer.MAX_IMAGE_BYTES
 private const val MAX_TEXT_BYTES = AttachmentTransfer.MAX_TEXT_BYTES
 private val THINKING_LEVELS = listOf("auto", "minimal", "low", "medium", "high", "xhigh", "max")
+
+internal fun transcriptTurnKey(turn: List<DisplayMessage>): String {
+    val last = turn.last()
+    return last.entryId?.takeIf { it.isNotBlank() }?.let { "entry:$it" }
+        ?: "legacy:${last.role}:${last.toolCallId.orEmpty()}:${last.timestamp ?: ""}:${last.text.hashCode()}"
+}
+
+internal fun groupTranscriptMessages(
+    messages: List<DisplayMessage>,
+    callIds: Set<String>,
+    pageBoundaryEntryIds: Set<String> = emptySet(),
+): List<List<DisplayMessage>> {
+    val turns = mutableListOf<MutableList<DisplayMessage>>()
+    for (message in messages) {
+        if ((message.role == "toolResult" || message.role == "tool") && message.toolCallId in callIds) continue
+        val startsLoadedPage = message.entryId?.let(pageBoundaryEntryIds::contains) == true
+        if (startsLoadedPage || message.role == "user" || turns.lastOrNull()?.firstOrNull()?.role == "user" || turns.isEmpty()) {
+            turns.add(mutableListOf(message))
+        } else {
+            turns.last().add(message)
+        }
+    }
+    return turns
+}
+
+private data class TranscriptScrollAnchor(val turnKey: String, val scrollOffset: Int)
 
 private fun guessMimeType(name: String): String {
     return when (name.substringAfterLast('.', "").lowercase(Locale.US)) {
@@ -305,6 +335,10 @@ fun ChatScreen(
     onDismissChatNotice: (String) -> Unit,
     title: String,
     messages: List<DisplayMessage>,
+    transcriptOffset: Int,
+    earlierMessagesLoading: Boolean,
+    earlierMessagesError: String?,
+    onLoadEarlierMessages: () -> Unit,
     draft: String,
     running: Boolean,
     connection: ConnectionState,
@@ -490,12 +524,20 @@ fun ChatScreen(
             try {
                 val response = com.dbchbin.ompgui.remote.relay.ChatRequests.command(requester, sessionId, command)
                 completed(response.optJSONObject("result") ?: response)
-                val stateResponse = com.dbchbin.ompgui.remote.relay.ChatRequests.sessionState(requester, sessionId)
-                runtimeState = stateResponse.optJSONObject("state") ?: stateResponse
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
                 commandError = failure.message ?: context.getString(R.string.chat_error_command_failed)
+                return@launch
+            }
+            try {
+                val stateResponse = com.dbchbin.ompgui.remote.relay.ChatRequests.sessionState(requester, sessionId)
+                runtimeState = stateResponse.optJSONObject("state") ?: stateResponse
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // The command succeeded. Its follow-up state refresh is only
+                // enrichment and must not turn success into a red error banner.
             }
         }
     }
@@ -511,8 +553,10 @@ fun ChatScreen(
             runtimeState = response.optJSONObject("state") ?: response
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
-        } catch (failure: Exception) {
-            commandError = failure.message ?: context.getString(R.string.chat_error_session_state)
+        } catch (_: Exception) {
+            // Best-effort bootstrap enrichment. The snapshot already owns the
+            // connected chat; command failures initiated by the user still
+            // surface through runCommand.
         }
     }
     LaunchedEffect(recalledDraft?.id) {
@@ -618,21 +662,34 @@ fun ChatScreen(
                         ?.optString("toolCallId")?.takeIf { it.isNotBlank() }
                 }
             }.toSet() }
-    val transcriptMessages = remember(messages, callIds) {
-        val turns = mutableListOf<MutableList<DisplayMessage>>()
-        for (message in messages) {
-            if ((message.role == "toolResult" || message.role == "tool") && message.toolCallId in callIds) continue
-            if (message.role == "user" || turns.lastOrNull()?.firstOrNull()?.role == "user" || turns.isEmpty()) {
-                turns.add(mutableListOf(message))
-            } else {
-                turns.last().add(message)
-            }
+    var pageBoundaryEntryIds by remember(sessionId, branchLeafId) { mutableStateOf(emptySet<String>()) }
+    val transcriptMessages = remember(messages, callIds, pageBoundaryEntryIds) {
+        groupTranscriptMessages(messages, callIds, pageBoundaryEntryIds)
+    }
+    val turnIndices = remember(transcriptMessages) {
+        transcriptMessages.mapIndexed { index, turn -> transcriptTurnKey(turn) to index }.toMap()
+    }
+    var earlierScrollAnchor by remember(sessionId) { mutableStateOf<TranscriptScrollAnchor?>(null) }
+    var observedEarlierLoading by remember(sessionId) { mutableStateOf(false) }
+    fun captureEarlierScrollAnchor() {
+        followLocked = false
+        transcriptMessages.firstOrNull()?.firstOrNull()?.entryId?.let { boundary ->
+            pageBoundaryEntryIds = pageBoundaryEntryIds + boundary
         }
-        turns
+        val visibleTurn = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key != "live-history-loader" } ?: return
+        val key = visibleTurn.key as? String ?: return
+        if (key !in turnIndices) return
+        earlierScrollAnchor = TranscriptScrollAnchor(
+            turnKey = key,
+            // scrollToItem offsets are relative to the padded content origin;
+            // viewportStartOffset includes the negative top content padding.
+            scrollOffset = -visibleTurn.offset,
+        )
     }
     suspend fun scrollToLatest() {
         if (transcriptMessages.isEmpty()) return
-        listState.scrollToItem(transcriptMessages.lastIndex)
+        val loaderCount = if (com.dbchbin.ompgui.remote.relay.ChatRequests.shouldShowLiveHistoryLoader(transcriptOffset)) 1 else 0
+        listState.scrollToItem(transcriptMessages.lastIndex + loaderCount)
         // A final message can be taller than the viewport: its top is not the end.
         val layout = listState.layoutInfo
         val lastItem = layout.visibleItemsInfo.lastOrNull() ?: return
@@ -650,6 +707,22 @@ fun ChatScreen(
                 if (source == NestedScrollSource.UserInput && !listState.canScrollForward) followLocked = true
                 return Offset.Zero
             }
+        }
+    }
+    LaunchedEffect(earlierMessagesLoading) {
+        if (earlierMessagesLoading) {
+            followLocked = false
+            if (earlierScrollAnchor == null) captureEarlierScrollAnchor()
+            observedEarlierLoading = true
+        } else if (observedEarlierLoading) {
+            val anchor = earlierScrollAnchor
+            val index = anchor?.let { turnIndices[it.turnKey] }
+            if (anchor != null && index != null) {
+                val loaderCount = if (com.dbchbin.ompgui.remote.relay.ChatRequests.shouldShowLiveHistoryLoader(transcriptOffset)) 1 else 0
+                listState.scrollToItem(index + loaderCount, anchor.scrollOffset)
+            }
+            earlierScrollAnchor = null
+            observedEarlierLoading = false
         }
     }
     LaunchedEffect(messages.size, messages.lastOrNull(), followLocked, listState.layoutInfo.viewportSize.height) {
@@ -726,9 +799,49 @@ fun ChatScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (com.dbchbin.ompgui.remote.relay.ChatRequests.shouldShowLiveHistoryLoader(transcriptOffset)) {
+                item(key = "live-history-loader") {
+                    val loadingLabel = stringResource(R.string.chat_loading_earlier)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .semantics {
+                                liveRegion = LiveRegionMode.Polite
+                                if (earlierMessagesLoading) stateDescription = loadingLabel
+                            },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        OutlinedButton(
+                            enabled = !earlierMessagesLoading,
+                            onClick = {
+                                captureEarlierScrollAnchor()
+                                onLoadEarlierMessages()
+                            },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) {
+                            Text(
+                                text = if (earlierMessagesLoading) loadingLabel
+                                else stringResource(R.string.chat_load_earlier),
+                                color = if (earlierMessagesLoading) OmpColors.TextMuted else OmpColors.Accent,
+                                fontSize = 13.sp,
+                            )
+                        }
+                        if (earlierMessagesError != null) {
+                            Text(
+                                stringResource(R.string.chat_earlier_failed),
+                                color = OmpColors.StatusError,
+                                fontSize = 13.sp,
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                            )
+                        }
+                    }
+                }
+            }
             itemsIndexed(
                 items = transcriptMessages,
-                key = { index, turn -> turn.first().let { message -> message.entryId ?: "${message.role}_${message.toolCallId ?: message.timestamp ?: index}_$index" } },
+                // Loaded page boundaries keep the previously visible turn intact.
+                key = { _, turn -> transcriptTurnKey(turn) },
             ) { _, turn ->
                 val message = turn.first()
                 if (message.role == "user") {

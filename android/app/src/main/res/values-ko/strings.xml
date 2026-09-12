@@ -324,6 +324,9 @@
     <string name="chat_status_sending">전송 중 / 수락 대기…</string>
     <string name="chat_status_cancel_send">전송 취소</string>
     <string name="chat_jump_to_latest">최신으로 이동</string>
+    <string name="chat_load_earlier">이전 메시지 불러오기</string>
+    <string name="chat_loading_earlier">이전 메시지를 불러오는 중…</string>
+    <string name="chat_earlier_failed">이전 메시지를 불러올 수 없습니다</string>
     <string name="chat_subagent_hub_summary">서브에이전트 %1$d</string>
     <string name="chat_subagent_hub_live">%1$d 실행 중</string>
     <string name="chat_subagent_status_running">실행 중</string>

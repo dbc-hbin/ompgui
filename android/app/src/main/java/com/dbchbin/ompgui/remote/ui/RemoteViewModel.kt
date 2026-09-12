@@ -48,6 +48,12 @@ data class RemoteUiState(
     val runningIds: Set<String> = emptySet(),
     val chatTitle: String = "",
     val messages: List<DisplayMessage> = emptyList(),
+    val transcriptTotal: Int = 0,
+    val transcriptOffset: Int = 0,
+    val transcriptNextOffset: Int = 0,
+    val transcriptHasMore: Boolean = false,
+    val earlierMessagesLoading: Boolean = false,
+    val earlierMessagesError: String? = null,
     val running: Boolean = false,
     val draft: String = "",
     val paired: Boolean = false,
@@ -150,6 +156,8 @@ class RemoteViewModel(
     fun closeSession() = client().closeSession()
 
     fun refreshMessageQueue() = client().refreshMessageQueue()
+
+    fun loadEarlierMessages() = client().loadEarlierMessages()
 
     suspend fun recallQueuedMessage(id: String): Boolean = client().recallQueuedMessage(id)
 

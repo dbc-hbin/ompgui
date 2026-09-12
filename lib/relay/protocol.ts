@@ -128,6 +128,7 @@ export type RelayServerFrame =
       messages: RelayDisplayMessage[];
       total?: number;
       offset?: number;
+      nextOffset?: number;
       hasMore?: boolean;
       agent: RelayAgentState;
     }

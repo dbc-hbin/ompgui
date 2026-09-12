@@ -324,6 +324,9 @@
     <string name="chat_status_sending">Sending / awaiting acceptance…</string>
     <string name="chat_status_cancel_send">Cancel send</string>
     <string name="chat_jump_to_latest">Jump to latest</string>
+    <string name="chat_load_earlier">Load earlier messages</string>
+    <string name="chat_loading_earlier">Loading earlier messages…</string>
+    <string name="chat_earlier_failed">Earlier messages unavailable</string>
     <string name="chat_subagent_hub_summary">Subagents %1$d</string>
     <string name="chat_subagent_hub_live">%1$d live</string>
     <string name="chat_subagent_status_running">Running</string>

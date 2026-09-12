@@ -119,6 +119,9 @@
     <string name="chat_error_session_state">Session state unavailable</string>
     <string name="chat_historical_readonly">Historical branch — read only. Fork a user entry in History to continue separately.</string>
     <string name="chat_jump_to_latest">Jump to latest</string>
+    <string name="chat_load_earlier">以前のメッセージを読み込む</string>
+    <string name="chat_loading_earlier">以前のメッセージを読み込み中…</string>
+    <string name="chat_earlier_failed">以前のメッセージを取得できません</string>
     <string name="chat_subagent_hub_summary">サブエージェント %1$d</string>
     <string name="chat_subagent_hub_live">%1$d 実行中</string>
     <string name="chat_subagent_status_running">実行中</string>

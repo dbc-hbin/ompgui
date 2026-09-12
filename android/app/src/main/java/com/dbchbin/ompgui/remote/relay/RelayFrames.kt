@@ -19,10 +19,30 @@ object RelayProtocol {
     const val CHUNK_DEADLINE_MS = 30_000L
     const val MAX_PROMPT_CHARS = 3 * 1024 * 1024
     const val MAX_LABEL_CHARS = 64
-    const val MAX_SNAPSHOT_MESSAGES = 50
+    const val MAX_SNAPSHOT_MESSAGES = 100
     val DEVICE_ID = Regex("^d_[A-Za-z0-9_-]{16,64}$")
     val SECRET = Regex("^[A-Za-z0-9_-]{32,128}$")
     val SESSION_ID = Regex("^[A-Za-z0-9._-]{1,128}$")
+}
+
+data class TranscriptPageInfo(
+    val total: Int,
+    val offset: Int,
+    val nextOffset: Int,
+    val hasMore: Boolean,
+)
+
+fun parseTranscriptPageInfo(data: JSONObject, messageCount: Int): TranscriptPageInfo {
+    val offset = data.optInt("offset", 0).coerceAtLeast(0)
+    val minimumTotal = offset + messageCount
+    val total = data.optInt("total", minimumTotal).coerceAtLeast(minimumTotal)
+    val nextOffset = data.optInt("nextOffset", minimumTotal).coerceIn(offset, total)
+    return TranscriptPageInfo(
+        total = total,
+        offset = offset,
+        nextOffset = nextOffset,
+        hasMore = data.optBoolean("hasMore", nextOffset < total),
+    )
 }
 
 data class DisplayMessage(
@@ -307,6 +327,7 @@ sealed class ServerFrame {
         val cwd: String?,
         val leafId: String?,
         val messages: List<DisplayMessage>,
+        val transcript: TranscriptPageInfo,
         val agent: AgentState,
     ) : ServerFrame()
     data class SessionErr(val id: String?, val code: String, val message: String) : ServerFrame()
@@ -897,12 +918,14 @@ private fun parseLogicalServerFrame(raw: String): ServerFrame? {
             val id = parsed.optString("id").trim()
             if (!RelayProtocol.SESSION_ID.matches(id)) return null
             val agent = parsed.optJSONObject("agent")
+            val messages = parseMessages(parsed.optJSONArray("messages")) ?: return null
             ServerFrame.Snapshot(
                 id = id,
                 title = parsed.optString("title").trim().takeIf { it.isNotEmpty() },
                 cwd = parsed.optString("cwd").trim().takeIf { it.isNotEmpty() },
                 leafId = parsed.optString("leafId").trim().takeIf { it.isNotEmpty() },
-                messages = parseMessages(parsed.optJSONArray("messages")),
+                messages = messages,
+                transcript = parseTranscriptPageInfo(parsed, messages.size),
                 agent = AgentState(
                     running = agent?.optBoolean("running", false) == true,
                     ready = agent?.optBoolean("ready", false) == true,
@@ -1355,11 +1378,11 @@ fun parseDisplayMessage(item: JSONObject, streaming: Boolean = false): DisplayMe
     )
 }
 
-private fun parseMessages(array: JSONArray?): List<DisplayMessage> {
+private fun parseMessages(array: JSONArray?): List<DisplayMessage>? {
     if (array == null) return emptyList()
-    val out = ArrayList<DisplayMessage>()
-    val first = maxOf(0, array.length() - RelayProtocol.MAX_SNAPSHOT_MESSAGES)
-    for (i in first until array.length()) {
+    if (array.length() > RelayProtocol.MAX_SNAPSHOT_MESSAGES) return null
+    val out = ArrayList<DisplayMessage>(array.length())
+    for (i in 0 until array.length()) {
         val item = array.optJSONObject(i) ?: continue
         parseDisplayMessage(item)?.let(out::add)
     }

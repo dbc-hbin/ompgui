@@ -26,4 +26,16 @@ class RelayUiErrorsTest {
             RelayUiErrors.clearKindsOnLeaveChat(),
         )
     }
+
+    @Test
+    fun healthySnapshotClearsStaleSessionRequestsButBackgroundEnrichmentCannotOwnBanner() {
+        assertEquals(
+            setOf(RelayUiErrorKind.Request, RelayUiErrorKind.Session),
+            RelayUiErrors.clearKindsOnHealthySnapshot(),
+        )
+        assertFalse(RelayUiErrors.shouldSurfaceCommandFailure("get_state"))
+        assertFalse(RelayUiErrors.shouldSurfaceCommandFailure("get_subagents"))
+        assertTrue(RelayUiErrors.shouldSurfaceCommandFailure("set_model"))
+        assertTrue(RelayUiErrors.shouldSurfaceCommandFailure("abort"))
+    }
 }

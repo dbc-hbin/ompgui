@@ -595,6 +595,10 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
             ...(snapshot.cwd ? { cwd: snapshot.cwd } : {}),
             leafId: snapshot.leafId,
             messages: snapshot.messages,
+            total: snapshot.total,
+            offset: snapshot.offset,
+            nextOffset: snapshot.nextOffset,
+            hasMore: snapshot.hasMore,
             agent: snapshot.agent,
           });
           try {
@@ -726,6 +730,10 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
             ...(opened.snapshot.cwd ? { cwd: opened.snapshot.cwd } : {}),
             leafId: opened.snapshot.leafId,
             messages: opened.snapshot.messages,
+            total: opened.snapshot.total,
+            offset: opened.snapshot.offset,
+            nextOffset: opened.snapshot.nextOffset,
+            hasMore: opened.snapshot.hasMore,
             agent: opened.snapshot.agent,
           });
         } catch (error) {
@@ -901,6 +909,10 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
             ...(opened.snapshot.cwd ? { cwd: opened.snapshot.cwd } : {}),
             leafId: opened.snapshot.leafId,
             messages: opened.snapshot.messages,
+            total: opened.snapshot.total,
+            offset: opened.snapshot.offset,
+            nextOffset: opened.snapshot.nextOffset,
+            hasMore: opened.snapshot.hasMore,
             agent: opened.snapshot.agent,
           });
           if (!snapshotSent) {
