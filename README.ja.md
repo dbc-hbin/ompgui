@@ -2,11 +2,11 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-> **Android APK (Android 12+)** — Kotlin 製のコンパニオンアプリでリモートの ompgui サーバーに接続し、最新セッションの読み取り専用オフラインスナップショットを利用できます。[ompgui Remote v0.7.8 をダウンロード](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.8/ompgui-remote-v0.7.8.apk) · [リリースノート](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.8)
+> **Android APK (Android 12+)** — Kotlin 製のコンパニオンアプリでリモートの ompgui サーバーに接続し、最新セッションの読み取り専用オフラインスナップショットを利用できます。[ompgui Remote v0.7.10 をダウンロード](https://github.com/dbc-hbin/ompgui/releases/download/android-v0.7.10/ompgui-remote-v0.7.10.apk) · [リリースノート](https://github.com/dbc-hbin/ompgui/releases/tag/android-v0.7.10)
 
 > `android/` の実験的なネイティブ Compose クライアントは、認証済みの `/relay` WebSocket を使用し、セッション・履歴の操作、リンク付きメッセージ、オフラインの Mermaid 図とコードの構文強調、画像/PDF/音声/HTML/Markdown/DOCX のインラインプレビューを提供します。ファイルの自動更新は表示中のみ動作し、未保存の編集を保持します。許可された隠しファイルの閲覧とアーカイブ検索にも対応します。モデル・設定には公開 models.dev カタログ、高度な OMP 設定、構成とは別に表示されるセッションごとの実際の MCP 実行状態が含まれます。添付ファイルは端末上で巨大な単一 JSON にまとめず、ストリーミングでステージングします。画像は各 10 MiB で最大 10 件、テキスト添付は独立した枠で各 256 KiB、最大 10 件です。OMP 自体の画像正規化とプロバイダーごとの画像数制限は引き続き適用されます。
 >
-> このクライアントは公開済みの v0.7.2 APK を置き換えるものではなく、ホスト型/E2E リレーを追加するものでもありません。JDK 21 を使用し、リポジトリのルートで `npm install` を実行してから、`android/` で `./gradlew :app:assembleDebug` を実行します。オフラインアセットはインストール済みの npm 依存パッケージから生成されます。出力先は `android/app/build/outputs/apk/debug/app-debug.apk` です。サーバーで無効化されている更新、ログアウト、保存済み API キーの変更操作は引き続き利用できません。
+> このクライアントはホスト型/E2E リレーを追加するものではありません。JDK 21 を使用し、リポジトリのルートで `npm install` を実行してから、`android/` で `./gradlew :app:assembleDebug` を実行します。オフラインアセットはインストール済みの npm 依存パッケージから生成されます。出力先は `android/app/build/outputs/apk/debug/app-debug.apk` です。サーバーで無効化されている更新、ログアウト、保存済み API キーの変更操作は引き続き利用できません。
 
 [oh-my-pi (omp) コーディングエージェント](https://github.com/can1357/oh-my-pi)のローカル Web UI です。ompgui はローカルの omp セッションファイルを読み込み、セッションの閲覧、リアルタイムチャット、モデル設定、スキル管理、プロジェクトファイルのプレビューを行えるブラウザワークスペースを提供します。
 
