@@ -32,6 +32,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.material.icons.filled.Queue
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -885,20 +890,35 @@ fun ChatScreen(
                 .padding(bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            val imeVisible = WindowInsets.isImeVisible
             ChatExtensionHost(
                 requester = requester, sessionId = sessionId,
                 requests = extensionDialogs, notices = chatNotices,
                 status = extensionStatus, widgets = extensionWidgets,
                 onDismissNotice = onDismissChatNotice,
                 onDismissRequest = onDismissExtensionDialog,
+                compact = imeVisible,
             )
-            // Todo and subagent details open in modal workspaces.
-            TodoPanel(todos = todos)
-            SubagentPanel(
-                requester = requester,
-                sessionId = sessionId,
-                subagents = subagents,
-            )
+            val queuedCount = if (historicalView) 0 else queuedMessageCount(messageQueue)
+            // Todo, subagent and queue details open in modal workspaces. With the
+            // keyboard up the headers collapse into one row of chips. One FlowRow keeps
+            // call sites stable so each panel's sheet state survives the IME toggling
+            // (tapping a header hides the keyboard).
+            if (todos.isNotEmpty() || subagents.isNotEmpty() || queuedCount > 0) FlowRow(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                maxItemsInEachRow = if (imeVisible) Int.MAX_VALUE else 1,
+            ) {
+                TodoPanel(todos = todos, compact = imeVisible)
+                SubagentPanel(
+                    requester = requester,
+                    sessionId = sessionId,
+                    subagents = subagents,
+                    compact = imeVisible,
+                )
+                QueuePanel(count = queuedCount, onOpen = { openQueue() }, compact = imeVisible)
+            }
             RuntimePanel(
                 expanded = runtimeExpanded && !historicalView,
                 onExpandedChange = { runtimeExpanded = it },
@@ -1111,7 +1131,7 @@ private fun ChatTopBar(
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_session_info)) }, leadingIcon = { Icon(Icons.Filled.Info, null, Modifier.size(20.dp)) }, onClick = { menuOpen = false; onOpenStats() })
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_commands)) }, leadingIcon = { Icon(Icons.Filled.Terminal, null, Modifier.size(20.dp)) }, onClick = { menuOpen = false; onOpenCommands() })
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_session_controls)) }, leadingIcon = { Icon(Icons.Filled.Tune, null, Modifier.size(20.dp)) }, enabled = runtimeEnabled, onClick = { menuOpen = false; onOpenRuntime() })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.chat_queue_title)) }, enabled = runtimeEnabled, onClick = { menuOpen = false; onOpenQueue() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.chat_queue_title)) }, leadingIcon = { Icon(Icons.Filled.Queue, null, Modifier.size(20.dp)) }, enabled = runtimeEnabled, onClick = { menuOpen = false; onOpenQueue() })
                     HorizontalDivider(color = OmpColors.Border)
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_settings)) }, leadingIcon = { Icon(Icons.Filled.Settings, null, Modifier.size(20.dp)) }, onClick = { menuOpen = false; onOpenSettings() })
                 }
@@ -1230,7 +1250,8 @@ private fun AssistantMessage(
 private fun UserMessage(message: DisplayMessage, requester: RelayRequester, sessionId: String, leafId: String?, actionsEnabled: Boolean, onEdit: (JSONObject) -> Unit, onFork: () -> Unit) {
     val stamp = remember(message.timestamp) { formatTimestamp(message.timestamp) }
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val bubbleMax = maxWidth * 0.85f
+        // Phones: 85% of the row; tablets: cap for readable line length.
+        val bubbleMax = minOf(maxWidth * 0.85f, 720.dp)
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.End,
@@ -1289,6 +1310,8 @@ private fun ComposerCard(
     var utilitiesOpen by remember { mutableStateOf(false) }
     val utilitiesDesc = stringResource(R.string.chat_composer_utilities)
     val usageLabel = usageFraction?.let { "${(it.coerceIn(0.0, 1.0) * 100).toInt()}%" } ?: "—"
+    val usageState = stringResource(R.string.chat_composer_context_usage, usageLabel)
+    val haptics = LocalHapticFeedback.current
     val shape = androidx.compose.material3.MaterialTheme.shapes.medium
     Column(
         modifier = Modifier
@@ -1356,7 +1379,12 @@ private fun ComposerCard(
             }
             Box {
                 IconButton(onClick = { utilitiesOpen = true }, modifier = Modifier.size(48.dp)) {
-                    Box(Modifier.size(28.dp).semantics { contentDescription = utilitiesDesc }, contentAlignment = Alignment.Center) {
+                    // Percent lives in semantics and the utilities menu; text inside a
+                    // 28dp ring overflows at large font scales.
+                    Box(Modifier.size(28.dp).semantics {
+                        contentDescription = utilitiesDesc
+                        if (usageFraction != null) stateDescription = usageState
+                    }, contentAlignment = Alignment.Center) {
                         androidx.compose.foundation.Canvas(Modifier.fillMaxSize().padding(1.dp)) {
                             val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
                             drawCircle(color = OmpColors.Border, style = stroke)
@@ -1366,7 +1394,6 @@ private fun ComposerCard(
                                     useCenter = false, style = stroke)
                             }
                         }
-                        Text(usageLabel, fontSize = 9.sp, color = OmpColors.TextMuted, maxLines = 1)
                     }
                 }
                 DropdownMenu(expanded = utilitiesOpen, onDismissRequest = { utilitiesOpen = false }) {
@@ -1385,7 +1412,15 @@ private fun ComposerCard(
                 else -> R.string.chat_submit_steer
             })
             androidx.compose.material3.TextButton(
-                onClick = { if (stop) onAbort() else onSend() },
+                onClick = {
+                    if (stop) {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onAbort()
+                    } else {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onSend()
+                    }
+                },
                 enabled = active,
                 modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
                 contentPadding = PaddingValues(horizontal = 8.dp),

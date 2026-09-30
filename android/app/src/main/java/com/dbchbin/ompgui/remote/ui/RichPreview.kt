@@ -40,6 +40,7 @@ fun RichPreview(
     modifier: Modifier = Modifier,
     language: String = "",
     compactCode: Boolean = false,
+    wrapLines: Boolean = false,
 ) {
     val context = LocalContext.current
     val textZoom = (LocalDensity.current.fontScale * 100).toInt()
@@ -111,9 +112,14 @@ fun RichPreview(
             }
         }
     }
+    // Wrap is embedded only as the initial body class; later toggles flip the class in place so the
+    // WebView keeps its scroll position instead of reloading the whole (possibly large) document.
+    val latestWrap = rememberUpdatedState(wrapLines)
     val document = remember(content, kind, language, compactCode, OmpColors.dark, OmpColors.warm) {
-        richPreviewDocument(content, kind, language, compactCode)
+        val initialWrap = latestWrap.value
+        richPreviewDocument(content, kind, language, compactCode, initialWrap) to initialWrap
     }
+    val appliedWrap = remember(webView) { java.util.concurrent.atomic.AtomicBoolean(wrapLines) }
     DisposableEffect(webView, lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -132,9 +138,10 @@ fun RichPreview(
             webView.destroy()
         }
     }
-    // Code never wraps: match its 13px × 1.6 CSS line height, body padding
+    // Unwrapped code: match its 13px × 1.6 CSS line height, body padding
     // and 8px scrollbar clearance without allocating a line list.
-    // Caller constraints still win (the file viewer deliberately reserves a viewport).
+    // Caller constraints still win (the file viewer deliberately reserves a viewport,
+    // which also covers wrapped code whose visual line count is unknown here).
     val previewModifier = if (kind == RichPreviewKind.Code) {
         val lineCount = remember(content) { 1 + content.count { it == '\n' } }
         val verticalInsets = if (compactCode) 20f else 32f
@@ -148,17 +155,32 @@ fun RichPreview(
         modifier = previewModifier,
         update = { view ->
             if (view.settings.textZoom != textZoom) view.settings.textZoom = textZoom
-            val documentKey = document to navigation?.cwd
-            if (view.tag != documentKey) {
-                view.tag = documentKey
+            fun load(html: String) {
                 // loadDataWithBaseURL's synthetic main request also reaches interception;
                 // denying it replaces the document with Chromium's HTTP error page.
                 // Give each document an exact local URL instead of exempting arbitrary data URLs.
                 val url = android.net.Uri.parse(PreviewOrigin).buildUpon()
                     .path(navigation?.cwd?.trimEnd('/').orEmpty() + "/")
                     .appendQueryParameter("document", UUID.randomUUID().toString()).build().toString()
-                localDocument.set(url to document.toByteArray(Charsets.UTF_8))
+                localDocument.set(url to html.toByteArray(Charsets.UTF_8))
                 view.loadUrl(url)
+            }
+            val documentKey = document.first to navigation?.cwd
+            if (view.tag != documentKey) {
+                view.tag = documentKey
+                appliedWrap.set(wrapLines)
+                // The remembered document bakes in the wrap state it was built with; rebuild
+                // only when a later toggle raced a content/cwd change.
+                load(if (document.second == wrapLines) document.first else richPreviewDocument(content, kind, language, compactCode, wrapLines))
+            } else if (appliedWrap.get() != wrapLines) {
+                appliedWrap.set(wrapLines)
+                val target = wrapLines
+                view.evaluateJavascript("document.body.classList.toggle('wrap',$target)") { result ->
+                    // Page not ready or script unavailable: reload once with the requested class.
+                    if (result != target.toString() && appliedWrap.get() == target && view.tag == documentKey) {
+                        load(richPreviewDocument(content, kind, language, compactCode, target))
+                    }
+                }
             }
         },
     )
@@ -168,7 +190,7 @@ fun RichPreview(
 private fun escapePreviewHtml(value: String): String = value.replace("&", "&amp;")
     .replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;")
 
-internal fun richPreviewDocument(content: String, kind: RichPreviewKind, language: String, compactCode: Boolean = false): String {
+internal fun richPreviewDocument(content: String, kind: RichPreviewKind, language: String, compactCode: Boolean = false, wrapLines: Boolean = false): String {
     val nonce = UUID.randomUUID().toString()
     val background = "#%06x".format((if (kind == RichPreviewKind.Code) OmpColors.CodeBg else OmpColors.BgPanel).toArgb() and 0xffffff)
     val foreground = "#%06x".format(OmpColors.Text.toArgb() and 0xffffff)
@@ -178,14 +200,14 @@ internal fun richPreviewDocument(content: String, kind: RichPreviewKind, languag
     val warning = "#%06x".format(OmpColors.StatusWarning.toArgb() and 0xffffff)
     val border = "#%06x".format(OmpColors.Border.toArgb() and 0xffffff)
     val panel = "#%06x".format(OmpColors.BgPanel.toArgb() and 0xffffff)
-    val style = "html{background:$background;color-scheme:${if (OmpColors.dark) "dark" else "light"}}body{margin:0;padding:${if (compactCode && kind == RichPreviewKind.Code) "6px 12px" else "12px"};background:$background;color:$foreground;font:14px/1.6 system-ui,sans-serif;overflow-wrap:anywhere}pre{margin:0;padding:${if (kind == RichPreviewKind.Html) "12px" else "0"};white-space:pre;overflow:auto;overflow-wrap:normal;tab-size:4;font:13px/1.6 monospace;background:$background}code{font-family:monospace}img,svg{max-width:100%;height:auto}a{color:$accent}h1,h2,h3{line-height:1.3}h1{font-size:22px}h2{font-size:18px}h3{font-size:16px}table{display:block;max-width:100%;overflow:auto;border-collapse:collapse}td,th{padding:6px 10px;border:1px solid $border}blockquote{margin:12px 0;padding:0 12px;border-left:2px solid $border;color:$muted}#status{font-size:12px;color:$muted}#diagram-output:not(:empty){padding:12px;background:$panel;border:1px solid $border;border-radius:8px;margin-bottom:12px;overflow:auto}*{animation:none!important;transition:none!important;scroll-behavior:auto!important}.token.comment,.token.prolog{color:$muted}.token.keyword,.token.operator{color:$accent}.token.string,.token.attr-value{color:$success}.token.number,.token.boolean{color:$warning}.token.function,.token.tag{color:$accent}iframe{border:0;width:100%;height:100vh}"
+    val style = "html{background:$background;color-scheme:${if (OmpColors.dark) "dark" else "light"}}body{margin:0;padding:${if (compactCode && kind == RichPreviewKind.Code) "6px 12px" else "12px"};background:$background;color:$foreground;font:14px/1.6 system-ui,sans-serif;overflow-wrap:anywhere}pre{margin:0;padding:${if (kind == RichPreviewKind.Html) "12px" else "0"};white-space:pre;overflow:auto;overflow-wrap:normal;tab-size:4;font:13px/1.6 monospace;background:$background}body.wrap pre{white-space:pre-wrap;overflow-wrap:anywhere}code{font-family:monospace}img,svg{max-width:100%;height:auto}a{color:$accent}h1,h2,h3{line-height:1.3}h1{font-size:22px}h2{font-size:18px}h3{font-size:16px}table{display:block;max-width:100%;overflow:auto;border-collapse:collapse}td,th{padding:6px 10px;border:1px solid $border}blockquote{margin:12px 0;padding:0 12px;border-left:2px solid $border;color:$muted}#status{font-size:12px;color:$muted}#diagram-output:not(:empty){padding:12px;background:$panel;border:1px solid $border;border-radius:8px;margin-bottom:12px;overflow:auto}*{animation:none!important;transition:none!important;scroll-behavior:auto!important}.token.comment,.token.prolog{color:$muted}.token.keyword,.token.operator{color:$accent}.token.string,.token.attr-value{color:$success}.token.number,.token.boolean{color:$warning}.token.function,.token.tag{color:$accent}iframe{border:0;width:100%;height:100vh}"
     val policy = "default-src 'none'; script-src ${if (kind == RichPreviewKind.Html) "'none'" else "'nonce-$nonce'"}; style-src 'unsafe-inline'; img-src data:; font-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
     val label = when (kind) {
         RichPreviewKind.Code -> "Highlighted code"
         RichPreviewKind.Mermaid -> "Mermaid diagram"
         RichPreviewKind.Html -> "Document preview"
     }
-    val head = "<!doctype html><html><head><title>$label</title><meta name=viewport content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"$policy\"><style>$style</style></head><body role=document aria-label=\"$label\">"
+    val head = "<!doctype html><html><head><title>$label</title><meta name=viewport content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"$policy\"><style>$style</style></head><body${if (wrapLines) " class=wrap" else ""} role=document aria-label=\"$label\">"
     if (kind == RichPreviewKind.Html) return head + content + "</body></html>"
     // JSON strings additionally escape HTML delimiters: a closing script tag can never escape data.
     val source = JSONObject.quote(content).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")

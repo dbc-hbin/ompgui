@@ -45,6 +45,12 @@ data class RemoteUiState(
     val connection: ConnectionState = ConnectionState.Idle,
     val error: String? = null,
     val sessions: List<SessionListItem> = emptyList(),
+    /** False until the first sessions frame after (re)connecting; distinguishes loading from empty. */
+    val sessionsLoaded: Boolean = false,
+    /** True from a sessions.list request until its sessions frame, disconnect, or failure. */
+    val sessionsRefreshing: Boolean = false,
+    /** Wall-clock time (System.currentTimeMillis) of the next scheduled reconnect, when backing off. */
+    val nextRetryAtMillis: Long? = null,
     val runningIds: Set<String> = emptySet(),
     val chatTitle: String = "",
     val messages: List<DisplayMessage> = emptyList(),
@@ -142,6 +148,8 @@ class RemoteViewModel(
     fun pair() = client().pair()
 
     fun refreshSessions() = client().refreshSessions()
+
+    fun reconnectNow() = client().reconnectNow()
 
     fun openModelPicker() = client().openModelPicker()
 

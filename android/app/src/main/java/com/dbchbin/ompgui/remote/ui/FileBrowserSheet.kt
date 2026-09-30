@@ -301,9 +301,13 @@ fun FileBrowserSheet(
                 Column(Modifier.weight(1f)) {
                     Text(selected?.optString("name") ?: stringResource(R.string.file_browser_title), style = MaterialTheme.typography.titleMedium,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val pathScroll = rememberScrollState()
+                    // Keep the deepest segment visible: the tail is what identifies the location.
+                    // maxValue is read in a snapshotFlow so layout changes don't recompose the sheet.
+                    LaunchedEffect(directory) { snapshotFlow { pathScroll.maxValue }.collect { pathScroll.scrollTo(it) } }
                     Text(directory.ifBlank { stringResource(R.string.file_browser_workspace) }, style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace, color = OmpColors.TextMuted,
-                        modifier = Modifier.horizontalScroll(rememberScrollState()), maxLines = 1)
+                        modifier = Modifier.horizontalScroll(pathScroll), maxLines = 1)
                 }
                 IconButton(modifier = Modifier.size(48.dp), onClick = {
                     if (dirty || busy) { dismissAfterDiscard = true; discard = true } else onDismiss()
@@ -378,8 +382,22 @@ fun FileBrowserSheet(
                         Icon(if (row.optBoolean("dir")) Icons.Default.Folder else Icons.Default.Description,
                             if (row.optBoolean("dir")) stringResource(R.string.file_browser_folder) else null, Modifier.size(18.dp), tint = OmpColors.TextMuted)
                         Spacer(Modifier.width(10.dp))
-                        Text(row.optString("name", filePath), Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Start)
+                        if (mode == "list") {
+                            Text(row.optString("name", filePath), Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Start)
+                        } else {
+                            // Search/git rows can come from any depth: show the file name first and
+                            // its parent (relative to the browsed directory) as muted context.
+                            val root = directory.trimEnd('/') + "/"
+                            val relative = if (filePath.startsWith(root)) filePath.removePrefix(root) else filePath
+                            val parent = relative.trimEnd('/').substringBeforeLast('/', "")
+                            Column(Modifier.weight(1f)) {
+                                Text(relative.trimEnd('/').substringAfterLast('/'), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Start)
+                                if (parent.isNotEmpty()) Text(parent, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = OmpColors.TextMuted)
+                            }
+                        }
                         if (mode == "git") Text(row.optString("status"), color = OmpColors.StatusWarning, style = MaterialTheme.typography.labelMedium)
                     }
                 }
@@ -436,6 +454,19 @@ fun FileBrowserSheet(
                             DropdownMenu(expanded = actionsExpanded, onDismissRequest = { actionsExpanded = false }) {
                                 DropdownMenuItem(text = { Text(stringResource(R.string.file_browser_open_external)) }, onClick = { actionsExpanded = false; runOperation { val uri = cached ?: download(); openFilePreview(context, uri, file.optString("mime", "application/octet-stream")) } })
                                 DropdownMenuItem(text = { Text(stringResource(R.string.file_browser_share)) }, onClick = { actionsExpanded = false; runOperation { val uri = cached ?: download(); shareFile(context, uri, file.optString("mime", "application/octet-stream")) } })
+                                DropdownMenuItem(text = { Text(stringResource(R.string.file_ux_copy_path)) }, onClick = {
+                                    actionsExpanded = false
+                                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText(file.optString("name"), file.getString("path")))
+                                    notice = context.getString(R.string.file_ux_path_copied)
+                                })
+                                if (file.optString("previewKind") == "text") DropdownMenuItem(text = { Text(stringResource(R.string.file_ux_copy_content)) }, onClick = {
+                                    actionsExpanded = false
+                                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                    // Server content; unsaved edits already have "Copy draft".
+                                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText(file.optString("name"), base))
+                                    notice = context.getString(if (complete) R.string.file_ux_content_copied else R.string.file_ux_partial_content_copied)
+                                })
                             }
                         }
                     }

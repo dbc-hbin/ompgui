@@ -2,6 +2,8 @@ package com.dbchbin.ompgui.remote.net
 
 import android.app.Application
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -384,7 +386,7 @@ class RelayClient private constructor(
                     invalidateRequests("Relay connection changed")
                     pendingSessionId = openedSessionId
                     awaitingSnapshot = openedSessionId != null
-                    _ui.update { it.copy(extensionStatus = emptyMap(), extensionWidgets = emptyMap()) }
+                    _ui.update { it.copy(extensionStatus = emptyMap(), extensionWidgets = emptyMap(), sessionsRefreshing = false, sessionsLoaded = false) }
                 }
                 _ui.update { it.copy(connection = state) }
                 when (state) {
@@ -405,10 +407,16 @@ class RelayClient private constructor(
             override fun onProtocolError(message: String) {
                 setUiError(message, RelayUiErrorKind.Protocol)
             }
+
+            override fun onRetryScheduled(delayMs: Long?) {
+                val at = delayMs?.let { System.currentTimeMillis() + it }
+                _ui.update { it.copy(nextRetryAtMillis = at) }
+            }
         })
         val device = store.load()
         if (device != null) {
             _ui.update { it.copy(screen = RemoteScreen.Sessions, paired = true) }
+            registerNetworkCallback()
             connection.connectToken(device.relayUrl, device.deviceId, device.token, deviceLabel)
         } else if (!store.isAvailable()) {
             uiErrorKind = RelayUiErrorKind.Pairing
@@ -473,7 +481,58 @@ class RelayClient private constructor(
     }
 
     fun refreshSessions() {
-        connection.send(ClientFrame.SessionsList)
+        if (connection.send(ClientFrame.SessionsList)) {
+            _ui.update { it.copy(sessionsRefreshing = true) }
+        } else {
+            reconnectNow()
+        }
+    }
+
+    /**
+     * User- or network-initiated reconnect: skips any pending backoff. When the
+     * connection gave up (Failed without a scheduled retry), a user request
+     * restarts from the saved device credentials.
+     */
+    fun reconnectNow() {
+        if (connection.reconnectNow()) return
+        if (connection.state != ConnectionState.Failed) return
+        val device = store.load() ?: return
+        connection.connectToken(device.relayUrl, device.deviceId, device.token, deviceLabel)
+    }
+
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    /** Reconnects as soon as a default network appears; kept for as long as a device is paired. */
+    private fun registerNetworkCallback() {
+        if (networkCallback != null) return
+        val manager = app.getSystemService(ConnectivityManager::class.java) ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                handler.post {
+                    if (networkCallback !== this) return@post
+                    val state = connection.state
+                    if (state == ConnectionState.Failed || state == ConnectionState.Connecting) {
+                        connection.reconnectNow()
+                    }
+                }
+            }
+        }
+        try {
+            manager.registerDefaultNetworkCallback(callback, handler)
+            networkCallback = callback
+        } catch (_: RuntimeException) {
+            // SecurityException without ACCESS_NETWORK_STATE, or the per-app callback limit.
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        val callback = networkCallback ?: return
+        networkCallback = null
+        try {
+            app.getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(callback)
+        } catch (_: IllegalArgumentException) {
+            // Already unregistered.
+        }
     }
 
     fun openModelPicker() {
@@ -845,6 +904,7 @@ class RelayClient private constructor(
         if (opened != null) RelayNotifications.cancelAgentDone(app, opened)
         if (pending != null && pending != opened) RelayNotifications.cancelAgentDone(app, pending)
         RelayForegroundService.stop(app)
+        unregisterNetworkCallback()
         connection.close()
         _ui.value = RemoteUiState(screen = RemoteScreen.Pairing, paired = false)
     }
@@ -900,6 +960,7 @@ class RelayClient private constructor(
                 pairingServerId = serverId
                 if (url != null && token != null) {
                     connection.promoteToToken(url, frame.deviceId, token, deviceLabel)
+                    registerNetworkCallback()
                 }
                 if (saveFailed) {
                     uiErrorKind = RelayUiErrorKind.Pairing
@@ -930,6 +991,7 @@ class RelayClient private constructor(
                 when {
                     PairingPolicy.shouldClearCredentials(frame.code, hasSavedDevice, attempt) -> {
                         store.clear()
+                        unregisterNetworkCallback()
                         RelayForegroundService.stop(app)
                         setUiError(frame.message, RelayUiErrorKind.Pairing, frame.code)
                         _ui.update {
@@ -975,6 +1037,8 @@ class RelayClient private constructor(
                 _ui.update {
                     it.copy(
                         sessions = frame.sessions,
+                        sessionsLoaded = true,
+                        sessionsRefreshing = false,
                         runningIds = frame.runningIds.toSet(),
                     )
                 }
@@ -1201,6 +1265,9 @@ class RelayClient private constructor(
                 }
             }
             is ServerFrame.Error -> {
+                // Error frames carry no op/req; a failed sessions.list (internal_error, busy)
+                // answers only with this, so the pull-to-refresh spinner must stop here too.
+                _ui.update { it.copy(sessionsRefreshing = false) }
                 setUiError(frame.message, RelayUiErrorKind.Protocol, frame.code)
             }
             is ServerFrame.Usage -> {

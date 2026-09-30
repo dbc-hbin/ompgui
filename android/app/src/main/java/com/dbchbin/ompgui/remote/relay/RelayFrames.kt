@@ -258,7 +258,6 @@ sealed class ClientFrame {
     ) : ClientFrame()
     data object Usage : ClientFrame()
     data object SettingsGet : ClientFrame()
-    data class SettingsUpdate(val settings: JSONObject) : ClientFrame()
     data object ProjectsList : ClientFrame()
     data object SlashList : ClientFrame()
     data class FilesList(val path: String? = null) : ClientFrame()
@@ -542,10 +541,6 @@ fun ClientFrame.encode(): String {
         is ClientFrame.SessionClose -> json.put("op", "session.close")
         is ClientFrame.Usage -> json.put("op", "usage")
         is ClientFrame.SettingsGet -> json.put("op", "settings.get")
-        is ClientFrame.SettingsUpdate -> {
-            json.put("op", "settings.update")
-            json.put("settings", settings)
-        }
         is ClientFrame.ProjectsList -> json.put("op", "projects.list")
         is ClientFrame.SlashList -> json.put("op", "slash.list")
         is ClientFrame.FilesList -> {

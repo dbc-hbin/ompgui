@@ -55,12 +55,24 @@ const CATALOG_BY_PATH = new Map(NATIVE_SETTINGS_CATALOG.map((definition) => [def
 const REVIEWED_NUMBER_RANGES: Readonly<Record<string, readonly [number, number]>> = {
   "advisor.immuneTurns": [0, 20],
   "advisor.maxNotesPerUpdate": [1, 32],
+  "ask.timeout": [0, 3_600],
   "autolearn.minToolCalls": [0, 100],
+  "claudeResets.keepCredits": [0, 100],
+  "claudeResets.minBlockedMinutes": [0, 10_080],
+  "claudeResets.salvageHorizonHours": [0, 720],
   "compaction.keepRecentTokens": [1_000, 1_000_000],
+  "extensionHandlers.toolCallTimeoutMs": [1, 3_600_000],
+  "github.cache.hardTtlSec": [0, 31_536_000],
+  "github.cache.softTtlSec": [0, 31_536_000],
+  "grep.contextAfter": [0, 100],
+  "grep.contextBefore": [0, 100],
   "mcp.notificationDebounceMs": [0, 60_000],
+  "mcp.startupTimeoutMs": [0, 600_000],
   "providers.webSearchTimeoutSeconds": [0, 300],
   "retry.maxRetries": [0, 20],
   "retry.usageReservePct": [0, 100],
+  "tools.artifactTailLines": [0, 100_000],
+  "tools.outputMaxColumns": [0, 1_048_576],
 };
 
 type LocatedValue = { present: boolean; value?: unknown; malformedAt?: string };

@@ -2,7 +2,7 @@ import { statSync } from "fs";
 import { invalidateModelsCache, loadModelsWithCache, withSafeModelLoadFailure, type ModelsData } from "@/lib/models-cache";
 import { disposeUtilityRpc, runUtilityCommand, type OmpModel } from "@/lib/omp/rpc-utility";
 import { getModelsConfigPath } from "@/lib/omp/paths";
-import { readDisabledProviders } from "@/lib/omp/model-roles";
+import { listKindModels, readDisabledProviders } from "@/lib/omp/model-roles";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +61,8 @@ function supportsFastMode(model: OmpModel): boolean {
 }
 
 async function loadModels(): Promise<ModelsData> {
+  // RPC lists chat models only; kind roles need the CLI's all-kind catalog.
+  const kindModelsPromise = listKindModels();
   const availableResponse = await runUtilityCommand<{ models?: unknown }>(
     { type: "get_available_models" },
     120_000,
@@ -87,6 +89,8 @@ async function loadModels(): Promise<ModelsData> {
       provider: m.provider,
       thinkingLevels: thinkingLevelsFor(m),
       supportsFastMode: supportsFastMode(m),
+      ...(typeof m.kind === "string" ? { kind: m.kind } : {}),
+      ...(typeof m.webSearch === "string" ? { webSearch: m.webSearch } : {}),
       ...(typeof m.contextWindow === "number" && Number.isFinite(m.contextWindow) && m.contextWindow > 0
         ? { contextWindow: m.contextWindow }
         : {}),
@@ -131,7 +135,7 @@ async function loadModels(): Promise<ModelsData> {
     // Default model is cosmetic — the models list is still useful without it.
   }
 
-  return { models: Object.fromEntries(nameMap), modelList, defaultModel, thinkingLevels, connectedProviders };
+  return { models: Object.fromEntries(nameMap), modelList, kindModels: await kindModelsPromise, defaultModel, thinkingLevels, connectedProviders };
 }
 
 const EMPTY_MODELS: ModelsData = {

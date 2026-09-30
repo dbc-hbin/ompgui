@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import com.dbchbin.ompgui.remote.R
 import kotlinx.coroutines.CancellationException
 import androidx.compose.foundation.layout.FlowRow
@@ -169,6 +170,10 @@ data class CatalogModel(
     val thinkingLevels: List<String> = emptyList(),
     val supportsFastMode: Boolean = false,
     val contextWindow: Int? = null,
+    /** omp model kind; absent means chat. */
+    val kind: String = "chat",
+    /** Native web-search backend of a chat model, if any. */
+    val webSearch: String? = null,
 ) {
     val selector: String get() = "$provider/$id"
 }
@@ -177,6 +182,8 @@ data class ConnectedProvider(val id: String, val name: String, val disabled: Boo
 
 data class ModelCatalogState(
     val models: List<CatalogModel> = emptyList(),
+    /** Non-chat models (image/search/tts/stt/judge/tiny) offered only to roles. */
+    val kindModels: List<CatalogModel> = emptyList(),
     val defaultModel: String? = null,
     val connectedProviders: List<ConnectedProvider> = emptyList(),
     val unavailable: Boolean = false,
@@ -185,8 +192,42 @@ data class ModelCatalogState(
 /** Native OMP role selectors, mirroring the desktop ModelRolesDetail. */
 val nativeModelRoles: List<String> = listOf(
     "default", "smol", "slow", "vision", "plan",
-    "designer", "commit", "tiny", "task", "advisor",
+    "commit", "tiny", "memory", "task", "advisor",
 )
+
+/** Native OMP kind roles (omp KIND_ROLE_IDS), shown below the chat roles. */
+val kindModelRoles: List<String> = listOf("image", "web", "speech", "dictation", "judge")
+
+/** Mirrors omp's per-role `accepts` model filter (model-roles registry). */
+fun roleAcceptsModel(role: String, model: CatalogModel): Boolean = when (role) {
+    "tiny", "memory" -> model.kind == "tiny" || model.kind == "chat"
+    "image" -> model.kind == "image"
+    "web" -> model.kind == "search" || (model.kind == "chat" && model.webSearch != null)
+    "speech" -> model.kind == "tts"
+    "dictation" -> model.kind == "stt"
+    "judge" -> model.kind == "judge" || model.kind == "tiny" || model.kind == "chat"
+    else -> model.kind == "chat"
+}
+
+/** omp display name for a built-in role; unknown (custom) roles have none. */
+fun modelRoleLabelRes(role: String): Int? = when (role) {
+    "default" -> R.string.role_default
+    "smol" -> R.string.role_smol
+    "slow" -> R.string.role_slow
+    "vision" -> R.string.role_vision
+    "plan" -> R.string.role_plan
+    "commit" -> R.string.role_commit
+    "tiny" -> R.string.role_tiny
+    "memory" -> R.string.role_memory
+    "task" -> R.string.role_task
+    "advisor" -> R.string.role_advisor
+    "image" -> R.string.role_image
+    "web" -> R.string.role_web
+    "speech" -> R.string.role_speech
+    "dictation" -> R.string.role_dictation
+    "judge" -> R.string.role_judge
+    else -> null
+}
 
 val modelApiOptions: List<String> = listOf(
     "openai-completions",
@@ -221,36 +262,42 @@ fun sanitizeRolesForSave(roles: Map<String, String?>): Map<String, String> {
     return out
 }
 
-fun parseModelCatalog(data: JSONObject): ModelCatalogState {
+private fun parseCatalogModels(array: JSONArray?): List<CatalogModel> {
     val models = mutableListOf<CatalogModel>()
-    val array = data.optJSONArray("models")
-    if (array != null) {
-        for (i in 0 until array.length()) {
-            val entry = array.optJSONObject(i) ?: continue
-            val provider = entry.optString("provider").trim()
-            val id = entry.optString("id").trim()
-            if (provider.isEmpty() || id.isEmpty()) continue
-            val name = entry.optString("name").ifBlank { id }
-            val levels = mutableListOf<String>()
-            val rawLevels = entry.optJSONArray("thinkingLevels")
-            if (rawLevels != null) {
-                for (j in 0 until rawLevels.length()) {
-                    val level = rawLevels.optString(j)
-                    if (level.isNotBlank()) levels.add(level)
-                }
+    if (array == null) return models
+    for (i in 0 until array.length()) {
+        val entry = array.optJSONObject(i) ?: continue
+        val provider = entry.optString("provider").trim()
+        val id = entry.optString("id").trim()
+        if (provider.isEmpty() || id.isEmpty()) continue
+        val name = entry.optString("name").ifBlank { id }
+        val levels = mutableListOf<String>()
+        val rawLevels = entry.optJSONArray("thinkingLevels")
+        if (rawLevels != null) {
+            for (j in 0 until rawLevels.length()) {
+                val level = rawLevels.optString(j)
+                if (level.isNotBlank()) levels.add(level)
             }
-            models.add(
-                CatalogModel(
-                    provider = provider,
-                    id = id,
-                    name = name,
-                    thinkingLevels = levels,
-                    supportsFastMode = entry.optBoolean("supportsFastMode", false),
-                    contextWindow = if (entry.has("contextWindow")) entry.optInt("contextWindow").takeIf { it > 0 } else null,
-                ),
-            )
         }
+        models.add(
+            CatalogModel(
+                provider = provider,
+                id = id,
+                name = name,
+                thinkingLevels = levels,
+                supportsFastMode = entry.optBoolean("supportsFastMode", false),
+                contextWindow = if (entry.has("contextWindow")) entry.optInt("contextWindow").takeIf { it > 0 } else null,
+                kind = entry.optString("kind").ifBlank { "chat" },
+                webSearch = entry.optString("webSearch").takeIf { entry.has("webSearch") && !entry.isNull("webSearch") && it.isNotBlank() },
+            ),
+        )
     }
+    return models
+}
+
+fun parseModelCatalog(data: JSONObject): ModelCatalogState {
+    val models = parseCatalogModels(data.optJSONArray("models"))
+    val kindModels = parseCatalogModels(data.optJSONArray("kindModels"))
     val defaultObj = data.optJSONObject("defaultModel")
     val defaultModel = if (defaultObj != null) {
         val provider = defaultObj.optString("provider")
@@ -277,6 +324,7 @@ fun parseModelCatalog(data: JSONObject): ModelCatalogState {
     }
     return ModelCatalogState(
         models = models,
+        kindModels = kindModels,
         defaultModel = defaultModel,
         connectedProviders = connected,
         unavailable = data.optBoolean("unavailable", false),
@@ -540,7 +588,17 @@ private fun ModelRolesSection(
         if (!loaded && pending) {
             ModelStatusText(text = if (korean) "불러오는 중…" else "Loading…")
         } else {
-            nativeModelRoles.forEach { role ->
+            (nativeModelRoles + kindModelRoles).forEach { role ->
+                if (role == kindModelRoles.first()) {
+                    HorizontalDivider(color = OmpColors.Border, thickness = 1.dp)
+                    Text(
+                        text = stringResource(R.string.role_section_kind),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = OmpColors.Text,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
                 HorizontalDivider(color = OmpColors.Border, thickness = 1.dp)
                 val raw = roles[role].orEmpty()
                 val modelPart = raw.substringBeforeLast(":", missingDelimiterValue = raw)
@@ -548,7 +606,8 @@ private fun ModelRolesSection(
                 Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text(role, style = MaterialTheme.typography.labelLarge, color = OmpColors.Text)
+                            Text(modelRoleLabelRes(role)?.let { stringResource(it) } ?: role, style = MaterialTheme.typography.labelLarge, color = OmpColors.Text)
+                            Text(role, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = OmpColors.TextMuted)
                             Text(raw.ifBlank { if (korean) "재정의 없음" else "No override" },
                                 style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted)
                         }
@@ -567,7 +626,7 @@ private fun ModelRolesSection(
                         )
                     } else if (raw.isNotBlank()) {
                         Text(
-                            text = modelSelectorLabel(modelPart, catalog.models),
+                            text = modelSelectorLabel(modelPart, catalog.models + catalog.kindModels),
                             fontSize = 12.sp,
                             color = OmpColors.TextMuted,
                         )
@@ -576,8 +635,8 @@ private fun ModelRolesSection(
                         ModelTextField(raw, { roles = roles + (role to it) }, "provider/model[:effort]")
                         ModelSearchField(pickerQuery, { pickerQuery = it })
                         val q = pickerQuery.trim()
-                        val options = remember(catalog.models, q) {
-                            catalog.models.filter { q.isEmpty() || it.selector.contains(q, ignoreCase = true) || it.name.contains(q, ignoreCase = true) }
+                        val options = remember(catalog.models, catalog.kindModels, q, role) {
+                            (catalog.models + catalog.kindModels).filter { roleAcceptsModel(role, it) && (q.isEmpty() || it.selector.contains(q, ignoreCase = true) || it.name.contains(q, ignoreCase = true)) }
                         }
                         if (options.isEmpty()) ModelStatusText(if (korean) "검색 결과가 없습니다" else "No matching models")
                         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) {

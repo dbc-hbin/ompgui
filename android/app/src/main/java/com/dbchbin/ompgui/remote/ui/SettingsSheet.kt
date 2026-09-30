@@ -2,12 +2,15 @@ package com.dbchbin.ompgui.remote.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
@@ -16,11 +19,14 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.LocalPinnableContainer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,7 +65,7 @@ private data class CatalogDraft(
 
 private data class CatalogDraftKey(val scope: String, val cwd: String, val path: String)
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsSheet(
     requester: RelayRequester,
@@ -85,6 +91,9 @@ fun SettingsSheet(
     var category by rememberSaveable { mutableStateOf("browse") }
     var confirmation by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
     var showUsage by remember { mutableStateOf(false) }
+    var modifiedOnly by rememberSaveable { mutableStateOf(false) }
+    // Hoisted out of the lazy list so collapsing survives items scrolling out of composition.
+    var expandedGroups by rememberSaveable { mutableStateOf(listOf<String>()) }
     // Deliberately not saveable: this owner survives filtering/collapse/category changes,
     // while write-only credentials never enter Android saved-instance-state Bundles.
     val catalogDrafts = remember { mutableStateMapOf<CatalogDraftKey, CatalogDraft>() }
@@ -186,31 +195,64 @@ fun SettingsSheet(
             HorizontalDivider(color = OmpColors.Border)
             Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text(stringResource(R.string.settings_search)) }, trailingIcon = if (query.isBlank()) null else {{ IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, stringResource(R.string.settings_clear_search)) } }})
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = selectedScope == "global", onClick = { switchScope("global") }, enabled = !busy, label = { Text(stringResource(R.string.settings_scope_global)) }, modifier = Modifier.heightIn(min = 48.dp))
                     FilterChip(selected = selectedScope == "project", onClick = { switchScope("project") }, enabled = !busy && settingsCwd.isNotBlank(), label = { Text(stringResource(R.string.settings_scope_project)) }, modifier = Modifier.heightIn(min = 48.dp))
+                    if (category != "browse" || query.isNotBlank()) FilterChip(
+                        selected = modifiedOnly,
+                        onClick = { modifiedOnly = !modifiedOnly },
+                        label = { Text(stringResource(R.string.settings_ux_modified_only)) },
+                        leadingIcon = if (modifiedOnly) {{ Icon(Icons.Default.Check, null, Modifier.size(FilterChipDefaults.IconSize)) }} else null,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    )
                 }
-                Text(
-                    if (selectedScope == "project") stringResource(R.string.settings_scope_project_path, snapshot?.cwd ?: settingsCwd)
-                    else stringResource(R.string.settings_scope_global_path, snapshot?.path ?: stringResource(R.string.settings_path_loading)),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = OmpColors.TextMuted,
-                )
-                if (selectedScope == "project") Text(stringResource(R.string.settings_scope_config_path, snapshot?.path ?: stringResource(R.string.settings_path_loading)), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted)
-                Text(stringResource(R.string.settings_apply_new_sessions), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted)
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 notice?.let { Text(it, color = OmpColors.TextMuted, style = MaterialTheme.typography.bodySmall) }
-                snapshot?.issues?.forEach { issue -> Text(stringResource(R.string.settings_stored_value_issue, issue.path, issue.message), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
             if (category != "browse" || query.isNotBlank()) {
                 ScrollableTabRow(selectedTabIndex = fixedCategories.drop(1).indexOf(category).coerceAtLeast(0), edgePadding = 0.dp, containerColor = OmpColors.Bg) {
                     fixedCategories.drop(1).forEach { id -> Tab(selected = category == id, onClick = { category = id; query = "" }, modifier = Modifier.heightIn(min = 48.dp), text = { Text(settingsCategoryTitle(id), maxLines = 1, overflow = TextOverflow.Ellipsis) }) }
                 }
             }
-            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            val catalogView = category != "browse" || query.isNotBlank()
+            // Filtering/grouping the catalog allocates per definition; recompute only when its inputs
+            // change, not on every busy/notice/expand recomposition of the sheet.
+            val categoryFields = remember(snapshot, selectedScope, query, category, korean, catalogView) {
+                if (!catalogView) return@remember emptyList<NativeSettingDefinition>()
+                snapshot?.catalog.orEmpty().filter { definition ->
+                    if (selectedScope == "global" && definition.path in GloballyManagedSettings) return@filter false
+                    if (query.isNotBlank()) {
+                        definition.path.contains(query, true) || definition.group.contains(query, true) ||
+                            definition.label.localized(korean).contains(query, true) || definition.description.localized(korean).contains(query, true)
+                    } else when (category) {
+                        "administrator" -> definition.admin
+                        "models", "intelligence", "agents", "tools", "safety" -> definition.category == category && !definition.admin
+                        "system" -> definition.category == "system" && !definition.admin
+                        else -> false
+                    }
+                }
+            }
+            val fields = remember(categoryFields, modifiedOnly, snapshot) {
+                if (modifiedOnly) categoryFields.filter { catalogSettingModified(it, snapshot) } else categoryFields
+            }
+            val fieldGroups = remember(fields) { fields.groupBy { it.group } }
+            LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                item(key = "settings-scope-info") {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            if (selectedScope == "project") stringResource(R.string.settings_scope_project_path, snapshot?.cwd ?: settingsCwd)
+                            else stringResource(R.string.settings_scope_global_path, snapshot?.path ?: stringResource(R.string.settings_path_loading)),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OmpColors.TextMuted,
+                        )
+                        if (selectedScope == "project") Text(stringResource(R.string.settings_scope_config_path, snapshot?.path ?: stringResource(R.string.settings_path_loading)), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted)
+                        Text(stringResource(R.string.settings_apply_new_sessions), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted)
+                        snapshot?.issues?.forEach { issue -> Text(stringResource(R.string.settings_stored_value_issue, issue.path, issue.message), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                    }
+                }
                 if (category == "browse" && query.isBlank()) {
-                    fixedCategories.drop(1).forEach { id ->
+                    items(fixedCategories.drop(1), key = { "settings-category:$it" }) { id ->
                         Surface(Modifier.fillMaxWidth().heightIn(min = 64.dp).clickable(role = Role.Button) { category = id }, color = OmpColors.BgPanel, shape = MaterialTheme.shapes.small, border = BorderStroke(1.dp, OmpColors.Border)) {
                             Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) { Text(settingsCategoryTitle(id), style = MaterialTheme.typography.titleSmall); Text(settingsCategoryDescription(id), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted) }
@@ -219,36 +261,37 @@ fun SettingsSheet(
                         }
                     }
                 } else {
-                    if (query.isBlank()) { Text(settingsCategoryTitle(category), style = MaterialTheme.typography.titleSmall); Text(settingsCategoryDescription(category), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted) }
-                    if (category == "general" || queryMatches(query, "general theme palette language completion submit collapse thinking interface")) LocalPreferencesSection()
-                    val catalog = snapshot?.catalog.orEmpty()
-                    val globallyManagedSettings = setOf(
-                        "enabledModels", "disabledProviders", "modelProviderOrder", "modelRoles",
-                        "task.disabledAgents", "task.agentModelOverrides", "task.agentPrewalk", "task.agentAdvisor",
+                    if (query.isBlank()) item(key = "settings-category-header:$category") {
+                        Column { Text(settingsCategoryTitle(category), style = MaterialTheme.typography.titleSmall); Text(settingsCategoryDescription(category), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted) }
+                    }
+                    val localMatches = queryMatches(query, "general theme palette language completion submit collapse thinking interface")
+                    if (category == "general" || localMatches) item(key = "settings-local-preferences") {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { LocalPreferencesSection() }
+                    }
+                    catalogSettingsItems(
+                        fieldGroups, fields.size, snapshot, selectedScope, settingsCwd, busy, korean, catalogDrafts,
+                        expandedGroups = expandedGroups,
+                        toggleGroup = { group -> expandedGroups = if (group in expandedGroups) expandedGroups - group else expandedGroups + group },
+                        mutate = ::mutate,
                     )
-                    val fields = catalog.filter { definition ->
-                        if (selectedScope == "global" && definition.path in globallyManagedSettings) return@filter false
-                        val textMatches = query.isNotBlank() && listOf(definition.path, definition.group, definition.label.localized(korean), definition.description.localized(korean)).any { it.contains(query, true) }
-                        if (query.isNotBlank()) textMatches else when (category) {
-                            "administrator" -> definition.admin
-                            in setOf("models", "intelligence", "agents", "tools", "safety") -> definition.category == category && !definition.admin
-                            "system" -> definition.category == "system" && !definition.admin
-                            else -> false
+                    if (modifiedOnly && categoryFields.isNotEmpty() && fields.isEmpty()) item(key = "settings-no-modified") { Text(stringResource(R.string.settings_ux_no_modified), color = OmpColors.TextMuted) }
+                    if (query.isNotBlank() && categoryFields.isEmpty() && !localMatches) item(key = "settings-no-matches") { Text(stringResource(R.string.settings_no_matches), color = OmpColors.TextMuted) }
+                    if (query.isBlank()) item(key = "settings-auxiliary:$category") {
+                        // Pinned: manager panels own dialogs and in-flight requests that must not be
+                        // disposed just because the lazy list scrolled them off screen.
+                        KeepComposedInLazyList {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                when (category) {
+                                    "models" -> { currentModel?.let { Text(stringResource(R.string.settings_current_model, it.displayName(), it.provider), style = MaterialTheme.typography.bodySmall) }; Text(stringResource(R.string.settings_global_model_manager_hint), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted) }
+                                    "roles" -> Text(stringResource(R.string.settings_global_model_manager_hint), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted)
+                                    "providers" -> Text(stringResource(R.string.settings_global_provider_manager_hint), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted)
+                                    "agents" -> { Text(stringResource(R.string.settings_separate_manager_hint), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted); ExtensionAgentsSection(requester, settingsCwd) }
+                                    "tools" -> { Text(stringResource(R.string.settings_separate_manager_hint), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted); ExtensionSettingsPanel(requester, settingsCwd) }
+                                    "system" -> { ConnectionAndUsage(serverUrl, deviceId, connection) { showUsage = true }; SystemControls(requester, deviceId, onUnpair) }
+                                }
+                            }
                         }
                     }
-                    CatalogSettings(fields, snapshot, selectedScope, settingsCwd, busy, korean, catalogDrafts, ::mutate)
-                    val hasCatalogMatches = fields.isNotEmpty()
-                    val auxiliaryMatch = query.isBlank() && category in setOf("roles", "providers", "agents", "tools", "system")
-                    if (query.isNotBlank() && !hasCatalogMatches && !queryMatches(query, "general theme palette language completion submit collapse thinking interface")) Text(stringResource(R.string.settings_no_matches), color = OmpColors.TextMuted)
-                    if (query.isBlank()) when (category) {
-                        "models" -> { currentModel?.let { Text(stringResource(R.string.settings_current_model, it.displayName(), it.provider), style = MaterialTheme.typography.bodySmall) }; Text(stringResource(R.string.settings_global_model_manager_hint), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted) }
-                        "roles" -> Text(stringResource(R.string.settings_global_model_manager_hint), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted)
-                        "providers" -> Text(stringResource(R.string.settings_global_provider_manager_hint), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted)
-                        "agents" -> { Text(stringResource(R.string.settings_separate_manager_hint), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted); ExtensionAgentsSection(requester, settingsCwd) }
-                        "tools" -> { Text(stringResource(R.string.settings_separate_manager_hint), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted); ExtensionSettingsPanel(requester, settingsCwd) }
-                        "system" -> { ConnectionAndUsage(serverUrl, deviceId, connection) { showUsage = true }; SystemControls(requester, deviceId, onUnpair) }
-                    }
-                    @Suppress("UNUSED_VARIABLE") val keepCompilerHappy = auxiliaryMatch
                 }
                 val modelSection = if (query.isNotBlank()) ModelSettingsSection.Hidden else when (category) {
                     "models" -> ModelSettingsSection.Defaults
@@ -257,8 +300,11 @@ fun SettingsSheet(
                     else -> ModelSettingsSection.Hidden
                 }
                 // One composition identity owns provider credentials and OAuth polling for
-                // the entire sheet lifetime, including browse and search transitions.
-                ModelSettingsPanel(requester, settingsCwd, modelSection)
+                // the entire sheet lifetime, including browse and search transitions. The item
+                // key is constant and the item is pinned so scrolling never disposes it.
+                item(key = "settings-model-panel") {
+                    KeepComposedInLazyList { ModelSettingsPanel(requester, settingsCwd, modelSection) }
+                }
             }
         }
     }
@@ -298,34 +344,67 @@ private fun settingsCategoryDescription(id: String): String = stringResource(whe
 
 private fun queryMatches(query: String, haystack: String) = query.isNotBlank() && haystack.contains(query, true)
 
+/** Global keys owned by the dedicated model/provider/agent managers instead of the generic catalog editor. */
+private val GloballyManagedSettings = setOf(
+    "enabledModels", "disabledProviders", "modelProviderOrder", "modelRoles",
+    "task.disabledAgents", "task.agentModelOverrides", "task.agentPrewalk", "task.agentAdvisor",
+)
+
+/** Pins a lazy item so off-screen scrolling never disposes its state, dialogs, or in-flight work. */
 @Composable
-private fun CatalogSettings(
-    fields: List<NativeSettingDefinition>,
+private fun KeepComposedInLazyList(content: @Composable () -> Unit) {
+    val pinnable = LocalPinnableContainer.current
+    DisposableEffect(pinnable) {
+        val handle = pinnable?.pin()
+        onDispose { handle?.release() }
+    }
+    content()
+}
+
+/** Same layer state the editor's state chip reports: a stored value, a stored issue, or a configured secret. */
+private fun catalogSettingModified(definition: NativeSettingDefinition, snapshot: NativeSettingsSnapshot?): Boolean {
+    snapshot ?: return false
+    return nestedSetting(snapshot.settings, definition.path) != null ||
+        settingIssueForPath(snapshot.issues, definition.path) != null ||
+        (definition.secret && snapshot.secretStatus[definition.path] == true)
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+private fun LazyListScope.catalogSettingsItems(
+    groups: Map<String, List<NativeSettingDefinition>>,
+    fieldCount: Int,
     snapshot: NativeSettingsSnapshot?,
     scope: String,
     cwd: String,
     busy: Boolean,
     korean: Boolean,
     drafts: MutableMap<CatalogDraftKey, CatalogDraft>,
+    expandedGroups: List<String>,
+    toggleGroup: (String) -> Unit,
     mutate: (SettingsMutation, Boolean, () -> Unit) -> Unit,
 ) {
-    fields.groupBy { it.group }.forEach { (group, grouped) ->
-        var expanded by rememberSaveable(group) { mutableStateOf(false) }
-        val forceExpanded = fields.size <= 12
-        Surface(Modifier.fillMaxWidth(), color = OmpColors.BgPanel, shape = MaterialTheme.shapes.small, border = BorderStroke(1.dp, OmpColors.Border)) {
-            Column {
-                Row(Modifier.fillMaxWidth().clickable(role = Role.Button) { expanded = !expanded }.heightIn(min = 48.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+    val forceExpanded = fieldCount <= 12
+    groups.forEach { (group, grouped) ->
+        val expanded = forceExpanded || group in expandedGroups
+        stickyHeader(key = "settings-group:$group") {
+            Surface(Modifier.fillMaxWidth(), color = OmpColors.BgPanel, shape = MaterialTheme.shapes.small, border = BorderStroke(1.dp, OmpColors.Border)) {
+                Row(Modifier.fillMaxWidth().clickable(role = Role.Button) { toggleGroup(group) }.heightIn(min = 48.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(group, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
                     Text(grouped.size.toString(), color = OmpColors.TextMuted)
-                    Icon(if (expanded || forceExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
-                }
-                if (expanded || forceExpanded) grouped.forEach { definition ->
-                    key(definition.path, scope, cwd) {
-                        CatalogSettingEditor(definition, snapshot, scope, cwd, busy, korean, drafts) { mutation, success -> mutate(mutation, false, success) }
-                    }
+                    Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
                 }
             }
         }
+        if (expanded) items(grouped, key = { "settings-field:$scope:$cwd:${it.path}" }) { definition ->
+            CatalogSettingEditor(definition, snapshot, scope, cwd, busy, korean, drafts) { mutation, success -> mutate(mutation, false, success) }
+        }
+    }
+}
+
+@Composable
+private fun SettingStateChip(text: String, color: androidx.compose.ui.graphics.Color) {
+    Surface(shape = MaterialTheme.shapes.extraSmall, color = OmpColors.Bg, border = BorderStroke(1.dp, color.copy(alpha = 0.5f))) {
+        Text(text, Modifier.padding(horizontal = 6.dp, vertical = 1.dp), style = MaterialTheme.typography.labelSmall, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -354,18 +433,32 @@ private fun CatalogSettingEditor(
     LaunchedEffect(baseline) {
         if (!draft.dirty && draft.value != baseline) updateDraft(draft.copy(value = baseline, error = null))
     }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         HorizontalDivider(color = OmpColors.Border)
         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Column(Modifier.weight(1f)) {
-                Text(label, style = MaterialTheme.typography.titleSmall)
-                if (definition.description.localized(korean).isNotBlank()) Text(definition.description.localized(korean), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted)
-                Text(definition.path, style = MaterialTheme.typography.labelSmall, color = OmpColors.TextDim)
-                Text(
-                    when { storedIssue != null -> stringResource(R.string.settings_state_stored_issue); override != null -> stringResource(R.string.settings_state_override); scope == "project" -> stringResource(R.string.settings_state_inherited); else -> stringResource(R.string.settings_state_default) },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = OmpColors.TextMuted,
-                )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(label, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(definition.path, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.labelSmall, color = OmpColors.TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    when {
+                        storedIssue != null -> SettingStateChip(stringResource(R.string.settings_ux_chip_issue), MaterialTheme.colorScheme.error)
+                        override != null -> SettingStateChip(stringResource(if (scope == "project") R.string.settings_ux_chip_project else R.string.settings_ux_chip_modified), OmpColors.Accent)
+                        scope == "project" -> SettingStateChip(stringResource(R.string.settings_ux_chip_inherited), OmpColors.TextMuted)
+                        else -> SettingStateChip(stringResource(R.string.settings_ux_chip_default), OmpColors.TextMuted)
+                    }
+                }
+                val description = definition.description.localized(korean)
+                if (description.isNotBlank()) {
+                    var descriptionExpanded by rememberSaveable(definition.path) { mutableStateOf(false) }
+                    Text(
+                        description,
+                        Modifier.clickable(onClickLabel = stringResource(if (descriptionExpanded) R.string.settings_ux_collapse_description else R.string.settings_ux_expand_description)) { descriptionExpanded = !descriptionExpanded },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OmpColors.TextMuted,
+                        maxLines = if (descriptionExpanded) Int.MAX_VALUE else 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 if (storedIssue != null) Text(storedIssue.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 if (scope == "project" && definition.scope == "global") Text(stringResource(R.string.settings_global_only), style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted)
             }
@@ -396,7 +489,7 @@ private fun CatalogSettingEditor(
                 },
             )
             definition.kind != "boolean" -> {
-                OutlinedTextField(draft.value, { updateDraft(draft.copy(value = it, error = null, dirty = it != baseline)) }, enabled = editable, modifier = Modifier.fillMaxWidth(), minLines = if (definition.kind in setOf("object", "array")) 3 else 1, maxLines = if (definition.kind in setOf("object", "array")) 10 else 4, singleLine = definition.kind in setOf("number", "string"), keyboardOptions = KeyboardOptions(keyboardType = if (definition.kind == "number") KeyboardType.Decimal else KeyboardType.Text), isError = draft.error != null, label = { Text(if (definition.kind in setOf("object", "array")) stringResource(R.string.settings_json_value) else stringResource(R.string.settings_value)) })
+                OutlinedTextField(draft.value, { updateDraft(draft.copy(value = it, error = null, dirty = it != baseline)) }, enabled = editable, modifier = Modifier.fillMaxWidth(), minLines = if (definition.kind in setOf("object", "array")) 3 else 1, maxLines = if (definition.kind in setOf("object", "array")) 10 else 4, singleLine = definition.kind in setOf("number", "string"), keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = if (definition.kind == "number") KeyboardType.Decimal else KeyboardType.Text), isError = draft.error != null, label = { Text(if (definition.kind in setOf("object", "array")) stringResource(R.string.settings_json_value) else stringResource(R.string.settings_value)) })
                 TextButton(enabled = editable && draft.value != baseline, modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp), onClick = {
                     try { val parsed = parseSettingDraft(definition, draft.value); submit(SettingsMutation(definition.path, parsed), ::clearDraft) }
                     catch (failure: Exception) { updateDraft(draft.copy(error = failure.message)) }
@@ -421,7 +514,9 @@ private fun OrderedArrayEditor(definition: NativeSettingDefinition, value: Strin
             IconButton(enabled = enabled, onClick = { values.removeAt(index); sync() }, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.Delete, stringResource(R.string.settings_remove)) }
         } }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(addition, { onChange(value, it) }, enabled = enabled, modifier = Modifier.weight(1f), singleLine = true, label = { Text(stringResource(R.string.settings_add_item)) })
+            OutlinedTextField(addition, { onChange(value, it) }, enabled = enabled, modifier = Modifier.weight(1f), singleLine = true, label = { Text(stringResource(R.string.settings_add_item)) },
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { if (enabled && addition.isNotBlank()) { values.add(addition); sync("") } }))
             IconButton(enabled = enabled && addition.isNotBlank(), onClick = { values.add(addition); sync("") }, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.Add, stringResource(R.string.settings_add_item)) }
         }
         TextButton(enabled = enabled, modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp), onClick = onSave) { Text(stringResource(R.string.settings_save)) }
@@ -455,7 +550,7 @@ private fun LocalPreferencesSection() {
 @Composable
 private fun ConnectionAndUsage(serverUrl: String, deviceId: String, connection: ConnectionState, showUsage: () -> Unit) {
     Text(stringResource(R.string.settings_connection), style = MaterialTheme.typography.titleSmall)
-    listOf(stringResource(R.string.settings_relay) to serverUrl, stringResource(R.string.settings_device) to deviceId, stringResource(R.string.settings_status) to connection.toString()).forEach { (label, value) -> Column { Text(label, style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted); SelectionContainer { Text(value) } } }
+    listOf(stringResource(R.string.settings_relay) to serverUrl, stringResource(R.string.settings_device) to deviceId, stringResource(R.string.settings_status) to connectionStatusText(connection)).forEach { (label, value) -> Column { Text(label, style = MaterialTheme.typography.bodySmall, color = OmpColors.TextMuted); SelectionContainer { Text(value) } } }
     OutlinedButton(showUsage, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(stringResource(R.string.settings_usage)) }
 }
 

@@ -1,5 +1,7 @@
 package com.dbchbin.ompgui.remote.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -151,6 +153,9 @@ fun SessionListScreen(
     onOpenSessionFilePreview: (String, String) -> Unit,
     onAddProject: (String) -> Unit = {},
     onRemoveProject: suspend (String) -> Unit = {},
+    sessionsLoaded: Boolean = true,
+    nextRetryAtMillis: Long? = null,
+    onReconnect: () -> Unit = onRefresh,
 ) {
     val context = LocalContext.current
     var overflowOpen by remember { mutableStateOf(false) }
@@ -181,6 +186,7 @@ fun SessionListScreen(
     var confirmDelete by remember { mutableStateOf(false) }
     var confirmArchive by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf(emptySet<String>()) }
+    BackHandler(enabled = selectedIds.isNotEmpty()) { selectedIds = emptySet() }
     var pinnedIds by rememberSaveable { mutableStateOf(emptySet<String>()) }
     var autonamePending by remember { mutableStateOf<String?>(null) }
     var listActionError by remember { mutableStateOf<String?>(null) }
@@ -322,18 +328,12 @@ fun SessionListScreen(
             Spacer(Modifier.width(8.dp))
             Text(stringResource(R.string.new_session), color = OmpColors.Text)
         }
-        if (connection != ConnectionState.Connected) {
-            Text(
-                text = when (connection) {
-                    ConnectionState.Connecting -> stringResource(R.string.status_connecting)
-                    ConnectionState.Failed -> stringResource(R.string.status_failed)
-                    else -> stringResource(R.string.status_idle)
-                },
-                color = OmpColors.TextMuted,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
-        }
+        ConnectionBanner(
+            connection = connection,
+            nextRetryAtMillis = nextRetryAtMillis,
+            onReconnect = onReconnect,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        )
         if (!error.isNullOrBlank()) {
             Text(
                 error,
@@ -413,13 +413,26 @@ fun SessionListScreen(
                 .fillMaxWidth()
                 .weight(1f),
         ) {
-            if (groups.isEmpty()) {
-                Text(
-                    stringResource(if (searchActive) R.string.session_search_no_matches else R.string.sessions_empty),
-                    color = OmpColors.TextMuted,
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(24.dp),
-                )
+            if (!sessionsLoaded && sessions.isEmpty() && connection != ConnectionState.Failed) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(
+                        color = OmpColors.Accent,
+                        modifier = Modifier.semantics { contentDescription = context.getString(R.string.conn_ux_loading_sessions) },
+                    )
+                }
+            } else if (groups.isEmpty()) {
+                Column(Modifier.padding(24.dp)) {
+                    Text(
+                        stringResource(if (searchActive) R.string.session_search_no_matches else R.string.sessions_empty),
+                        color = OmpColors.TextMuted,
+                        fontSize = 14.sp,
+                    )
+                    if (connection == ConnectionState.Failed) {
+                        OutlinedButton(onClick = onReconnect, modifier = Modifier.padding(top = 12.dp).heightIn(min = 48.dp)) {
+                            Text(stringResource(R.string.conn_ux_retry), color = OmpColors.Text)
+                        }
+                    }
+                }
             } else {
                 LazyColumn(
                     state = listState,

@@ -17,7 +17,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -290,7 +293,7 @@ private fun ExtensionSkillsSection(requester: RelayRequester, cwd: String) {
             if (result.has("installs")) Text(result.getString("installs"), color = OmpColors.TextMuted)
             TextButton(onClick = { packageInput = result.getString("package") }, enabled = !operation.pending) { Text(stringResource(R.string.extension_skills_use_package)) }
         }
-        OutlinedTextField(packageInput, { packageInput = it }, label = { Text(stringResource(R.string.extension_skills_package_label)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+        OutlinedTextField(packageInput, { packageInput = it }, label = { Text(stringResource(R.string.extension_skills_package_label)) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii))
         ExtensionScope(installScope, !operation.pending) { installScope = it }
         Button(shape = MaterialTheme.shapes.small, enabled = !operation.pending && packageInput.isNotBlank(), onClick = {
             confirmation = context.getString(R.string.extension_skills_confirm_install, packageInput.trim(), installScope) to JSONObject().put("package", packageInput.trim()).put("scope", installScope).put("action", "skills.install")
@@ -383,7 +386,7 @@ private fun ExtensionPluginsSection(requester: RelayRequester, cwd: String) {
         TextButton(enabled = !operation.pending, onClick = { change("update", null, installScope) }) { Text(stringResource(R.string.extension_plugins_update_all, installScope)) }
         } else {
         Text(stringResource(R.string.extension_plugins_trust_hint), color = OmpColors.TextMuted)
-        OutlinedTextField(source, { source = it }, label = { Text(stringResource(R.string.extension_plugins_source_label)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+        OutlinedTextField(source, { source = it }, label = { Text(stringResource(R.string.extension_plugins_source_label)) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = KeyboardType.Text))
         ExtensionScope(installScope, !operation.pending) { installScope = it }
         Button(shape = MaterialTheme.shapes.small, enabled = !operation.pending && source.isNotBlank(), onClick = { change("install", source.trim(), installScope) }) { Text(stringResource(R.string.extension_plugins_install)) }
         }

@@ -65,19 +65,6 @@ const BUNDLED_CATALOG: Record<string, Partial<AgentDefinition>> = {
     tools: ["read", "grep", "glob", "lsp", "ast_grep"],
     systemPrompt: "Discover potential security vulnerabilities and return concrete evidence and remediation guidance.",
   },
-  librarian: {
-    description: "Researches external libraries and APIs by reading source code. Returns definitive, source-verified answers.",
-    model: "@smol",
-    thinkingLevel: "minimal",
-    tools: ["read", "grep", "glob", "bash", "lsp", "web_search", "ast_grep"],
-    systemPrompt: "Research library APIs and source documentation; provide definitive, source-verified answers.",
-  },
-  designer: {
-    description: "UI/UX specialist for design implementation, review, visual refinement",
-    model: "@designer",
-    tools: ["read", "write", "edit"],
-    systemPrompt: "Design and implement polished, accessible user interfaces following project conventions.",
-  },
   sonic: {
     description: "Low-reasoning agent for strictly mechanical updates or data collection only",
     model: "@smol",
