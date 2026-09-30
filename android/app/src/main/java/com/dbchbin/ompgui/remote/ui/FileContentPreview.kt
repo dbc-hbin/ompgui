@@ -7,18 +7,37 @@ import android.media.MediaPlayer
 import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import kotlin.math.abs
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -107,12 +126,12 @@ fun FileContentPreview(
             kind == "text" && extension in setOf("md", "markdown", "mdown") -> {
                 MarkdownText(text, Modifier.fillMaxWidth().padding(12.dp))
             }
-            kind == "text" -> RichPreview(text, if (extension in setOf("html", "htm")) RichPreviewKind.Html else RichPreviewKind.Code,
-                Modifier.fillMaxWidth().height(420.dp), language = when (extension) {
+            kind == "text" -> RichPreviewViewer(text, if (extension in setOf("html", "htm")) RichPreviewKind.Html else RichPreviewKind.Code,
+                file.optString("name"), language = when (extension) {
                     "kt", "kts" -> "kotlin"; "js", "mjs", "cjs" -> "javascript"; "ts" -> "typescript"; "py" -> "python"
                     "rs" -> "rust"; "sh" -> "bash"; "yml" -> "yaml"; else -> extension
                 })
-            html != null -> RichPreview(checkNotNull(html), RichPreviewKind.Html, Modifier.fillMaxWidth().height(420.dp))
+            html != null -> RichPreviewViewer(checkNotNull(html), RichPreviewKind.Html, file.optString("name"))
             uri != null && kind == "image" && mime != "image/svg+xml" -> RasterPreview(checkNotNull(uri), file.optString("name"))
             uri != null && kind == "pdf" -> PdfPreview(checkNotNull(uri))
             uri != null && kind == "audio" -> AudioPreview(checkNotNull(uri))
@@ -121,6 +140,108 @@ fun FileContentPreview(
         }
     }
     }
+}
+
+/** Sheet-sized rich viewer with a wrap toggle (code) and a fullscreen dialog sharing the same state. */
+@Composable
+private fun RichPreviewViewer(content: String, kind: RichPreviewKind, name: String, language: String = "") {
+    var wrapLines by rememberSaveable { mutableStateOf(false) }
+    var fullscreen by rememberSaveable { mutableStateOf(false) }
+    val wrapToggle: @Composable () -> Unit = {
+        if (kind == RichPreviewKind.Code) FilterChip(selected = wrapLines, onClick = { wrapLines = !wrapLines },
+            label = { Text(stringResource(R.string.file_ux_wrap_lines)) }, modifier = Modifier.heightIn(min = 48.dp))
+    }
+    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.End) {
+        wrapToggle()
+        IconButton(onClick = { fullscreen = true }, modifier = Modifier.size(48.dp)) {
+            Icon(Icons.Default.Fullscreen, stringResource(R.string.file_ux_fullscreen), tint = OmpColors.TextMuted)
+        }
+    }
+    // The inline WebView stays composed underneath so returning keeps its scroll position.
+    RichPreview(content, kind, Modifier.fillMaxWidth().height(420.dp), language = language, wrapLines = wrapLines)
+    if (fullscreen) Dialog(onDismissRequest = { fullscreen = false },
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        OmpDialogSystemBars(edgeToEdgeSheet = true)
+        Column(Modifier.fillMaxSize().background(OmpColors.Bg).windowInsetsPadding(WindowInsets.safeDrawing)) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
+                wrapToggle()
+                IconButton(onClick = { fullscreen = false }, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.Default.Close, stringResource(R.string.file_ux_close_fullscreen), tint = OmpColors.TextMuted)
+                }
+            }
+            HorizontalDivider(color = OmpColors.Border)
+            RichPreview(content, kind, Modifier.fillMaxWidth().weight(1f), language = language, wrapLines = wrapLines)
+        }
+    }
+}
+
+private const val MaxZoom = 5f
+private const val DoubleTapZoom = 2.5f
+
+/**
+ * Pinch-zoom (1x..5x), clamped pan and double-tap 1x/2.5x for a bitmap. State is keyed by the
+ * bitmap, so a new page/image always starts unzoomed. At 1x single-finger drags are left to the
+ * parent list; [onSwipe] (-1 previous, +1 next) fires for a clear one-finger horizontal fling.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun ZoomableBitmap(bitmap: Bitmap, description: String, modifier: Modifier, onSwipe: ((Int) -> Unit)? = null) {
+    var scale by remember(bitmap) { mutableFloatStateOf(1f) }
+    var offset by remember(bitmap) { mutableStateOf(Offset.Zero) }
+    var viewport by remember { mutableStateOf(IntSize.Zero) }
+    val image = remember(bitmap) { bitmap.asImageBitmap() }
+    val swipeThreshold = with(LocalDensity.current) { 64.dp.toPx() }
+    val latestSwipe by rememberUpdatedState(onSwipe)
+    fun clamp(value: Offset, zoom: Float): Offset {
+        val maxX = viewport.width * (zoom - 1f) / 2f
+        val maxY = viewport.height * (zoom - 1f) / 2f
+        return Offset(value.x.coerceIn(-maxX, maxX), value.y.coerceIn(-maxY, maxY))
+    }
+    val transform = rememberTransformableState { zoomChange, panChange, _ ->
+        val next = (scale * zoomChange).coerceIn(1f, MaxZoom)
+        offset = clamp(offset * (next / scale) + panChange, next)
+        scale = next
+    }
+    // Installed once per bitmap; zoom is checked when the gesture ends so pinch frames never
+    // recompose this function (scale is read only in layer/gesture lambdas).
+    val swipe = if (onSwipe == null) Modifier else Modifier.pointerInput(bitmap) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            var total = Offset.Zero
+            var multiTouch = false
+            while (true) {
+                val event = awaitPointerEvent()
+                if (event.changes.count { it.pressed } > 1) multiTouch = true
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                total = change.position - down.position
+                if (!change.pressed) break
+            }
+            // Observe only: vertical list scrolling and pinch keep their own consumers.
+            if (scale == 1f && !multiTouch && abs(total.x) > swipeThreshold && abs(total.x) > 2 * abs(total.y)) {
+                latestSwipe?.invoke(if (total.x < 0) 1 else -1)
+            }
+        }
+    }
+    Image(image, description, modifier
+        .clipToBounds()
+        .onSizeChanged { viewport = it }
+        .pointerInput(bitmap) {
+            detectTapGestures(onDoubleTap = { tap ->
+                if (scale > 1f) { scale = 1f; offset = Offset.Zero }
+                else {
+                    // Keep the tapped point under the finger while zooming in.
+                    val center = Offset(viewport.width / 2f, viewport.height / 2f)
+                    offset = clamp((center - tap) * (DoubleTapZoom - 1f), DoubleTapZoom)
+                    scale = DoubleTapZoom
+                }
+            })
+        }
+        .then(swipe)
+        .transformable(transform, canPan = { scale > 1f })
+        .graphicsLayer { scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y })
 }
 
 @Composable
@@ -144,7 +265,7 @@ private fun RasterPreview(uri: Uri, name: String) {
         catch (error: Exception) { failure = error.message }
     }
     if (bitmap == null && failure == null) LinearProgressIndicator(Modifier.fillMaxWidth())
-    bitmap?.let { Image(it.asImageBitmap(), name, Modifier.fillMaxWidth().heightIn(max = 420.dp).padding(12.dp)) }
+    bitmap?.let { ZoomableBitmap(it, name, Modifier.fillMaxWidth().heightIn(max = 420.dp).padding(12.dp)) }
     failure?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 }
 
@@ -186,7 +307,8 @@ private fun PdfPreview(uri: Uri) {
         }
     }
     if (bitmap == null && failure == null) LinearProgressIndicator(Modifier.fillMaxWidth())
-    bitmap?.let { Image(it.asImageBitmap(), stringResource(R.string.file_preview_pdf_page, page + 1), Modifier.fillMaxWidth().height(420.dp).padding(4.dp)) }
+    bitmap?.let { ZoomableBitmap(it, stringResource(R.string.file_preview_pdf_page, page + 1), Modifier.fillMaxWidth().height(420.dp).padding(4.dp),
+        onSwipe = { delta -> if (page + delta in 0 until count) page += delta }) }
     failure?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 }
 

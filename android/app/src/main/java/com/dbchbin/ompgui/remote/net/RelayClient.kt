@@ -2,6 +2,8 @@ package com.dbchbin.ompgui.remote.net
 
 import android.app.Application
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -15,6 +17,7 @@ import com.dbchbin.ompgui.remote.relay.parseRecalledDraft
 import com.dbchbin.ompgui.remote.relay.reconcileMessageQueue
 import com.dbchbin.ompgui.remote.relay.AttachmentSource
 import com.dbchbin.ompgui.remote.relay.AttachmentTransfer
+import com.dbchbin.ompgui.remote.relay.ChatRequests
 import com.dbchbin.ompgui.remote.relay.ClientFrame
 import com.dbchbin.ompgui.remote.relay.EventProjector
 import com.dbchbin.ompgui.remote.relay.PairingPolicy
@@ -55,6 +58,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import org.json.JSONObject
+
+internal fun resolvedBranchLeafId(requestedLeafId: String?, persistedLeafId: String?): String? =
+    requestedLeafId ?: persistedLeafId
 
 /**
  * Process-scoped owner of the relay WebSocket and all connection/UI state.
@@ -212,9 +218,65 @@ class RelayClient private constructor(
 
     fun refreshMessageQueue() {
         val session = openedSessionId ?: return
-        scopedRequest("sessions", "command", JSONObject().put("id", session)
-            .put("command", JSONObject().put("type", "get_message_queue"))) { result ->
+        scopedRequest(
+            "sessions",
+            "command",
+            JSONObject().put("id", session)
+                .put("command", JSONObject().put("type", "get_message_queue")),
+            onError = {},
+        ) { result ->
             applyMessageQueue(result.optJSONObject("result") ?: result)
+        }
+    }
+
+    fun loadEarlierMessages() {
+        val state = _ui.value
+        val session = openedSessionId ?: return
+        val pageRange = ChatRequests.previousLivePage(state.transcriptOffset) ?: return
+        if (state.earlierMessagesLoading || awaitingSnapshot) return
+        val generation = sessionGeneration
+        val leafId = state.branchLeafId
+        _ui.update { it.copy(earlierMessagesLoading = true, earlierMessagesError = null) }
+        requestScope.launch {
+            try {
+                val response = request(
+                    ChatRequests.DOMAIN_SESSIONS,
+                    ChatRequests.ACTION_HISTORY,
+                    ChatRequests.liveHistoryArgs(session, leafId, pageRange.first, pageRange.count()),
+                )
+                val page = ChatRequests.parseHistoryPage(response)
+                if (!ChatRequests.isCurrentLiveHistoryRequest(
+                        generation, sessionGeneration, session, openedSessionId,
+                        leafId, _ui.value.branchLeafId, page.leafId,
+                    )) return@launch
+                check(page.offset == pageRange.first && page.messages.length() <= pageRange.count()) {
+                    "Invalid earlier history page"
+                }
+                val earlier = ChatRequests.liveHistoryMessages(page)
+                _ui.update {
+                    it.copy(
+                        messages = ChatRequests.prependEarlierMessages(it.messages, earlier),
+                        transcriptTotal = maxOf(it.transcriptTotal, page.total),
+                        transcriptOffset = page.offset,
+                        earlierMessagesLoading = false,
+                        earlierMessagesError = null,
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (ChatRequests.isCurrentLiveHistoryRequest(
+                        generation, sessionGeneration, session, openedSessionId,
+                        leafId, _ui.value.branchLeafId, null,
+                    )) {
+                    _ui.update {
+                        it.copy(
+                            earlierMessagesLoading = false,
+                            earlierMessagesError = app.getString(R.string.chat_earlier_failed),
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -289,7 +351,10 @@ class RelayClient private constructor(
         requestedLeafId = null
         invalidateRequests("The selected session changed")
         _ui.update { it.copy(
-            messages = emptyList(), running = false, draft = "", chatTitle = "",
+            messages = emptyList(), transcriptTotal = 0, transcriptOffset = 0,
+            transcriptNextOffset = 0, transcriptHasMore = false,
+            earlierMessagesLoading = false, earlierMessagesError = null,
+            running = false, draft = "", chatTitle = "",
             currentModel = null, pickerOpen = false, todos = emptyList(), subagents = emptyList(),
             contextFraction = null, sessionThinkingLevel = null, sessionCwd = null,
             filesPath = "", branches = emptyList(), branchLeafId = null,
@@ -321,7 +386,7 @@ class RelayClient private constructor(
                     invalidateRequests("Relay connection changed")
                     pendingSessionId = openedSessionId
                     awaitingSnapshot = openedSessionId != null
-                    _ui.update { it.copy(extensionStatus = emptyMap(), extensionWidgets = emptyMap()) }
+                    _ui.update { it.copy(extensionStatus = emptyMap(), extensionWidgets = emptyMap(), sessionsRefreshing = false, sessionsLoaded = false) }
                 }
                 _ui.update { it.copy(connection = state) }
                 when (state) {
@@ -342,10 +407,16 @@ class RelayClient private constructor(
             override fun onProtocolError(message: String) {
                 setUiError(message, RelayUiErrorKind.Protocol)
             }
+
+            override fun onRetryScheduled(delayMs: Long?) {
+                val at = delayMs?.let { System.currentTimeMillis() + it }
+                _ui.update { it.copy(nextRetryAtMillis = at) }
+            }
         })
         val device = store.load()
         if (device != null) {
             _ui.update { it.copy(screen = RemoteScreen.Sessions, paired = true) }
+            registerNetworkCallback()
             connection.connectToken(device.relayUrl, device.deviceId, device.token, deviceLabel)
         } else if (!store.isAvailable()) {
             uiErrorKind = RelayUiErrorKind.Pairing
@@ -410,7 +481,58 @@ class RelayClient private constructor(
     }
 
     fun refreshSessions() {
-        connection.send(ClientFrame.SessionsList)
+        if (connection.send(ClientFrame.SessionsList)) {
+            _ui.update { it.copy(sessionsRefreshing = true) }
+        } else {
+            reconnectNow()
+        }
+    }
+
+    /**
+     * User- or network-initiated reconnect: skips any pending backoff. When the
+     * connection gave up (Failed without a scheduled retry), a user request
+     * restarts from the saved device credentials.
+     */
+    fun reconnectNow() {
+        if (connection.reconnectNow()) return
+        if (connection.state != ConnectionState.Failed) return
+        val device = store.load() ?: return
+        connection.connectToken(device.relayUrl, device.deviceId, device.token, deviceLabel)
+    }
+
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    /** Reconnects as soon as a default network appears; kept for as long as a device is paired. */
+    private fun registerNetworkCallback() {
+        if (networkCallback != null) return
+        val manager = app.getSystemService(ConnectivityManager::class.java) ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                handler.post {
+                    if (networkCallback !== this) return@post
+                    val state = connection.state
+                    if (state == ConnectionState.Failed || state == ConnectionState.Connecting) {
+                        connection.reconnectNow()
+                    }
+                }
+            }
+        }
+        try {
+            manager.registerDefaultNetworkCallback(callback, handler)
+            networkCallback = callback
+        } catch (_: RuntimeException) {
+            // SecurityException without ACCESS_NETWORK_STATE, or the per-app callback limit.
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        val callback = networkCallback ?: return
+        networkCallback = null
+        try {
+            app.getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(callback)
+        } catch (_: IllegalArgumentException) {
+            // Already unregistered.
+        }
     }
 
     fun openModelPicker() {
@@ -670,7 +792,12 @@ class RelayClient private constructor(
     fun fetchBranches(id: String) {
         val sessionId = id.trim()
         if (sessionId.isEmpty()) return
-        scopedRequest("sessions", "branches", JSONObject().put("id", sessionId)) { result ->
+        scopedRequest(
+            "sessions",
+            "branches",
+            JSONObject().put("id", sessionId),
+            onError = {},
+        ) { result ->
             if (openedSessionId != sessionId) return@scopedRequest
             val entries = result.getJSONArray("branches")
             val branches = buildList {
@@ -681,7 +808,11 @@ class RelayClient private constructor(
                 }
             }
             _ui.update { it.copy(branches = branches,
-                branchLeafId = requestedLeafId ?: result.optString("leafId").takeIf { leaf -> leaf.isNotBlank() && leaf != "null" }) }
+                branchLeafId = resolvedBranchLeafId(
+                    requestedLeafId,
+                    result.optString("leafId").takeIf { leaf -> leaf.isNotBlank() && leaf != "null" },
+                ),
+            ) }
         }
     }
 
@@ -704,7 +835,12 @@ class RelayClient private constructor(
         val text = query.trim()
         if (directory.isEmpty() || text.isEmpty()) return
         fileMatchQuery = text
-        scopedRequest("files", "search", JSONObject().put("cwd", directory).put("query", text)) { result ->
+        scopedRequest(
+            "files",
+            "search",
+            JSONObject().put("cwd", directory).put("query", text),
+            onError = {},
+        ) { result ->
             if (fileMatchQuery != text) return@scopedRequest
             val entries = result.getJSONArray("matches")
             val matches = buildList {
@@ -768,6 +904,7 @@ class RelayClient private constructor(
         if (opened != null) RelayNotifications.cancelAgentDone(app, opened)
         if (pending != null && pending != opened) RelayNotifications.cancelAgentDone(app, pending)
         RelayForegroundService.stop(app)
+        unregisterNetworkCallback()
         connection.close()
         _ui.value = RemoteUiState(screen = RemoteScreen.Pairing, paired = false)
     }
@@ -823,6 +960,7 @@ class RelayClient private constructor(
                 pairingServerId = serverId
                 if (url != null && token != null) {
                     connection.promoteToToken(url, frame.deviceId, token, deviceLabel)
+                    registerNetworkCallback()
                 }
                 if (saveFailed) {
                     uiErrorKind = RelayUiErrorKind.Pairing
@@ -853,6 +991,7 @@ class RelayClient private constructor(
                 when {
                     PairingPolicy.shouldClearCredentials(frame.code, hasSavedDevice, attempt) -> {
                         store.clear()
+                        unregisterNetworkCallback()
                         RelayForegroundService.stop(app)
                         setUiError(frame.message, RelayUiErrorKind.Pairing, frame.code)
                         _ui.update {
@@ -898,6 +1037,8 @@ class RelayClient private constructor(
                 _ui.update {
                     it.copy(
                         sessions = frame.sessions,
+                        sessionsLoaded = true,
+                        sessionsRefreshing = false,
                         runningIds = frame.runningIds.toSet(),
                     )
                 }
@@ -909,6 +1050,7 @@ class RelayClient private constructor(
                 if (frame.id != openedSessionId) return
                 if (requestedLeafId != null && frame.leafId != requestedLeafId) return
                 awaitingSnapshot = false
+                clearUiErrors(RelayUiErrors.clearKindsOnHealthySnapshot())
                 requestSessionState()
                 fetchBranches(frame.id)
                 val snapshotModel = frame.agent.model
@@ -917,6 +1059,12 @@ class RelayClient private constructor(
                         chatTitle = frame.title?.takeIf { title -> title.isNotBlank() }
                             ?: it.chatTitle,
                         messages = frame.messages,
+                        transcriptTotal = frame.transcript.total,
+                        transcriptOffset = frame.transcript.offset,
+                        transcriptNextOffset = frame.transcript.nextOffset,
+                        transcriptHasMore = frame.transcript.hasMore,
+                        earlierMessagesLoading = false,
+                        earlierMessagesError = null,
                         running = frame.agent.running,
                         currentModel = snapshotModel ?: it.currentModel,
                         sessionCwd = frame.cwd ?: it.sessionCwd,
@@ -969,7 +1117,12 @@ class RelayClient private constructor(
             is ServerFrame.GitStatusResult, is ServerFrame.GitDiffResult -> Unit // Correlated domain requests own Git state.
             is ServerFrame.Branches -> {
                 if (frame.id != openedSessionId) return
-                _ui.update { it.copy(branches = frame.branches, branchLeafId = frame.leafId) }
+                _ui.update {
+                    it.copy(
+                        branches = frame.branches,
+                        branchLeafId = resolvedBranchLeafId(requestedLeafId, frame.leafId),
+                    )
+                }
             }
             is ServerFrame.SessionExported, is ServerFrame.Skills, is ServerFrame.SkillUpdated,
             is ServerFrame.Plugins, is ServerFrame.Mcp, is ServerFrame.McpDeleted, is ServerFrame.McpUpserted,
@@ -1076,17 +1229,19 @@ class RelayClient private constructor(
             }
             is ServerFrame.CmdErr -> {
                 pendingSubagentRosters.remove(frame.req)
-                pendingCmds.remove(frame.req) ?: return
-                setUiError(frame.message, RelayUiErrorKind.Command, frame.code)
+                val command = pendingCmds.remove(frame.req) ?: return
+                if (RelayUiErrors.shouldSurfaceCommandFailure(command)) {
+                    setUiError(frame.message, RelayUiErrorKind.Command, frame.code)
+                }
             }
             is ServerFrame.CmdOk -> {
                 when (pendingCmds.remove(frame.req)) {
-                    "get_state", "set_model" -> {
+                    "get_state" -> applySessionState(frame)
+                    "set_model" -> {
                         clearUiErrors(setOf(RelayUiErrorKind.Command))
                         applySessionState(frame)
                     }
                     "get_subagents" -> {
-                        clearUiErrors(setOf(RelayUiErrorKind.Command))
                         val items = frame.data?.optJSONArray("items")
                             ?: frame.data?.optJSONArray("subagents")
                         val snapshot = parseSubagentChips(items, live = true)
@@ -1110,6 +1265,9 @@ class RelayClient private constructor(
                 }
             }
             is ServerFrame.Error -> {
+                // Error frames carry no op/req; a failed sessions.list (internal_error, busy)
+                // answers only with this, so the pull-to-refresh spinner must stop here too.
+                _ui.update { it.copy(sessionsRefreshing = false) }
                 setUiError(frame.message, RelayUiErrorKind.Protocol, frame.code)
             }
             is ServerFrame.Usage -> {

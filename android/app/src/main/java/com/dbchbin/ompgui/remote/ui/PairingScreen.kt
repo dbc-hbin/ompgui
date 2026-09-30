@@ -25,11 +25,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,14 +43,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -69,6 +76,9 @@ fun PairingScreen(
     val context = LocalContext.current
     var showScanner by remember { mutableStateOf(false) }
     var needCameraMessage by remember { mutableStateOf(false) }
+    var passwordVisible by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val connectEnabled = uri.isNotBlank() && !connecting
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -142,6 +152,15 @@ fun PairingScreen(
                         monospace = true,
                         minLines = 3,
                         singleLine = false,
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.None,
+                            autoCorrectEnabled = false,
+                            keyboardType = KeyboardType.Uri,
+                            imeAction = ImeAction.Next,
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onNext = { focusManager.moveFocus(FocusDirection.Down) },
+                        ),
                     )
                     OmpField(
                         label = stringResource(R.string.pair_password_label),
@@ -150,8 +169,45 @@ fun PairingScreen(
                         monospace = false,
                         minLines = 1,
                         singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        visualTransformation = if (passwordVisible) {
+                            VisualTransformation.None
+                        } else {
+                            PasswordVisualTransformation()
+                        },
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.None,
+                            autoCorrectEnabled = false,
+                            keyboardType = KeyboardType.Password,
+                            imeAction = ImeAction.Done,
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = { if (connectEnabled) onConnect() },
+                        ),
+                        trailing = {
+                            Icon(
+                                imageVector = if (passwordVisible) {
+                                    Icons.Filled.VisibilityOff
+                                } else {
+                                    Icons.Filled.Visibility
+                                },
+                                contentDescription = stringResource(
+                                    if (passwordVisible) {
+                                        R.string.input_ux_hide_password
+                                    } else {
+                                        R.string.input_ux_show_password
+                                    },
+                                ),
+                                tint = OmpColors.TextMuted,
+                                modifier = Modifier
+                                    // 48dp touch target; the field grows slightly to fit it.
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable(role = androidx.compose.ui.semantics.Role.Button) {
+                                        passwordVisible = !passwordVisible
+                                    }
+                                    .padding(12.dp),
+                            )
+                        },
                     )
                 }
                 if (!error.isNullOrBlank()) {
@@ -197,7 +253,7 @@ fun PairingScreen(
                 }
                 OmpButton(
                     outlined = false,
-                    enabled = uri.isNotBlank() && !connecting,
+                    enabled = connectEnabled,
                     onClick = onConnect,
                     label = if (connecting) {
                         stringResource(R.string.pair_connecting)
@@ -230,6 +286,8 @@ private fun OmpField(
     singleLine: Boolean,
     visualTransformation: VisualTransformation = VisualTransformation.None,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: KeyboardActions = KeyboardActions.Default,
+    trailing: @Composable (() -> Unit)? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -258,6 +316,7 @@ private fun OmpField(
                 minLines = minLines,
                 visualTransformation = visualTransformation,
                 keyboardOptions = keyboardOptions,
+                keyboardActions = keyboardActions,
                 textStyle = TextStyle(
                     color = OmpColors.Text,
                     fontSize = 13.sp,
@@ -266,20 +325,26 @@ private fun OmpField(
                 cursorBrush = SolidColor(OmpColors.Text),
                 modifier = Modifier.fillMaxWidth(),
                 decorationBox = { inner ->
-                    Box {
-                        if (value.isEmpty()) {
-                            Text(
-                                text = label,
-                                color = OmpColors.TextDim,
-                                fontSize = 13.sp,
-                                fontFamily = if (monospace) {
-                                    FontFamily.Monospace
-                                } else {
-                                    FontFamily.Default
-                                },
-                            )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            if (value.isEmpty()) {
+                                Text(
+                                    text = label,
+                                    color = OmpColors.TextDim,
+                                    fontSize = 13.sp,
+                                    fontFamily = if (monospace) {
+                                        FontFamily.Monospace
+                                    } else {
+                                        FontFamily.Default
+                                    },
+                                )
+                            }
+                            inner()
                         }
-                        inner()
+                        if (trailing != null) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            trailing()
+                        }
                     }
                 },
             )

@@ -48,6 +48,8 @@ import androidx.compose.ui.unit.sp
 
 private val ircSenderPattern = Regex("agent `([^`\\r\\n<>]+)`")
 
+val LocalThinkingShown = androidx.compose.runtime.staticCompositionLocalOf { true }
+
 /** Message-only rendering; file previews and generic Markdown retain their original behavior. */
 @Composable
 fun MessageText(text: String, modifier: Modifier = Modifier, plainText: Boolean = false) {

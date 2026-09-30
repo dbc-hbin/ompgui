@@ -32,6 +32,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.material.icons.filled.Queue
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -66,6 +71,7 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -80,8 +86,11 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
@@ -133,6 +142,32 @@ private const val MAX_ATTACHMENTS = AttachmentTransfer.MAX_PER_KIND
 private const val MAX_IMAGE_BYTES = AttachmentTransfer.MAX_IMAGE_BYTES
 private const val MAX_TEXT_BYTES = AttachmentTransfer.MAX_TEXT_BYTES
 private val THINKING_LEVELS = listOf("auto", "minimal", "low", "medium", "high", "xhigh", "max")
+
+internal fun transcriptTurnKey(turn: List<DisplayMessage>): String {
+    val last = turn.last()
+    return last.entryId?.takeIf { it.isNotBlank() }?.let { "entry:$it" }
+        ?: "legacy:${last.role}:${last.toolCallId.orEmpty()}:${last.timestamp ?: ""}:${last.text.hashCode()}"
+}
+
+internal fun groupTranscriptMessages(
+    messages: List<DisplayMessage>,
+    callIds: Set<String>,
+    pageBoundaryEntryIds: Set<String> = emptySet(),
+): List<List<DisplayMessage>> {
+    val turns = mutableListOf<MutableList<DisplayMessage>>()
+    for (message in messages) {
+        if ((message.role == "toolResult" || message.role == "tool") && message.toolCallId in callIds) continue
+        val startsLoadedPage = message.entryId?.let(pageBoundaryEntryIds::contains) == true
+        if (startsLoadedPage || message.role == "user" || turns.lastOrNull()?.firstOrNull()?.role == "user" || turns.isEmpty()) {
+            turns.add(mutableListOf(message))
+        } else {
+            turns.last().add(message)
+        }
+    }
+    return turns
+}
+
+private data class TranscriptScrollAnchor(val turnKey: String, val scrollOffset: Int)
 
 private fun guessMimeType(name: String): String {
     return when (name.substringAfterLast('.', "").lowercase(Locale.US)) {
@@ -305,6 +340,10 @@ fun ChatScreen(
     onDismissChatNotice: (String) -> Unit,
     title: String,
     messages: List<DisplayMessage>,
+    transcriptOffset: Int,
+    earlierMessagesLoading: Boolean,
+    earlierMessagesError: String?,
+    onLoadEarlierMessages: () -> Unit,
     draft: String,
     running: Boolean,
     connection: ConnectionState,
@@ -490,12 +529,20 @@ fun ChatScreen(
             try {
                 val response = com.dbchbin.ompgui.remote.relay.ChatRequests.command(requester, sessionId, command)
                 completed(response.optJSONObject("result") ?: response)
-                val stateResponse = com.dbchbin.ompgui.remote.relay.ChatRequests.sessionState(requester, sessionId)
-                runtimeState = stateResponse.optJSONObject("state") ?: stateResponse
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
                 commandError = failure.message ?: context.getString(R.string.chat_error_command_failed)
+                return@launch
+            }
+            try {
+                val stateResponse = com.dbchbin.ompgui.remote.relay.ChatRequests.sessionState(requester, sessionId)
+                runtimeState = stateResponse.optJSONObject("state") ?: stateResponse
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // The command succeeded. Its follow-up state refresh is only
+                // enrichment and must not turn success into a red error banner.
             }
         }
     }
@@ -511,8 +558,10 @@ fun ChatScreen(
             runtimeState = response.optJSONObject("state") ?: response
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
-        } catch (failure: Exception) {
-            commandError = failure.message ?: context.getString(R.string.chat_error_session_state)
+        } catch (_: Exception) {
+            // Best-effort bootstrap enrichment. The snapshot already owns the
+            // connected chat; command failures initiated by the user still
+            // surface through runCommand.
         }
     }
     LaunchedEffect(recalledDraft?.id) {
@@ -618,21 +667,34 @@ fun ChatScreen(
                         ?.optString("toolCallId")?.takeIf { it.isNotBlank() }
                 }
             }.toSet() }
-    val transcriptMessages = remember(messages, callIds) {
-        val turns = mutableListOf<MutableList<DisplayMessage>>()
-        for (message in messages) {
-            if ((message.role == "toolResult" || message.role == "tool") && message.toolCallId in callIds) continue
-            if (message.role == "user" || turns.lastOrNull()?.firstOrNull()?.role == "user" || turns.isEmpty()) {
-                turns.add(mutableListOf(message))
-            } else {
-                turns.last().add(message)
-            }
+    var pageBoundaryEntryIds by remember(sessionId, branchLeafId) { mutableStateOf(emptySet<String>()) }
+    val transcriptMessages = remember(messages, callIds, pageBoundaryEntryIds) {
+        groupTranscriptMessages(messages, callIds, pageBoundaryEntryIds)
+    }
+    val turnIndices = remember(transcriptMessages) {
+        transcriptMessages.mapIndexed { index, turn -> transcriptTurnKey(turn) to index }.toMap()
+    }
+    var earlierScrollAnchor by remember(sessionId) { mutableStateOf<TranscriptScrollAnchor?>(null) }
+    var observedEarlierLoading by remember(sessionId) { mutableStateOf(false) }
+    fun captureEarlierScrollAnchor() {
+        followLocked = false
+        transcriptMessages.firstOrNull()?.firstOrNull()?.entryId?.let { boundary ->
+            pageBoundaryEntryIds = pageBoundaryEntryIds + boundary
         }
-        turns
+        val visibleTurn = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key != "live-history-loader" } ?: return
+        val key = visibleTurn.key as? String ?: return
+        if (key !in turnIndices) return
+        earlierScrollAnchor = TranscriptScrollAnchor(
+            turnKey = key,
+            // scrollToItem offsets are relative to the padded content origin;
+            // viewportStartOffset includes the negative top content padding.
+            scrollOffset = -visibleTurn.offset,
+        )
     }
     suspend fun scrollToLatest() {
         if (transcriptMessages.isEmpty()) return
-        listState.scrollToItem(transcriptMessages.lastIndex)
+        val loaderCount = if (com.dbchbin.ompgui.remote.relay.ChatRequests.shouldShowLiveHistoryLoader(transcriptOffset)) 1 else 0
+        listState.scrollToItem(transcriptMessages.lastIndex + loaderCount)
         // A final message can be taller than the viewport: its top is not the end.
         val layout = listState.layoutInfo
         val lastItem = layout.visibleItemsInfo.lastOrNull() ?: return
@@ -650,6 +712,22 @@ fun ChatScreen(
                 if (source == NestedScrollSource.UserInput && !listState.canScrollForward) followLocked = true
                 return Offset.Zero
             }
+        }
+    }
+    LaunchedEffect(earlierMessagesLoading) {
+        if (earlierMessagesLoading) {
+            followLocked = false
+            if (earlierScrollAnchor == null) captureEarlierScrollAnchor()
+            observedEarlierLoading = true
+        } else if (observedEarlierLoading) {
+            val anchor = earlierScrollAnchor
+            val index = anchor?.let { turnIndices[it.turnKey] }
+            if (anchor != null && index != null) {
+                val loaderCount = if (com.dbchbin.ompgui.remote.relay.ChatRequests.shouldShowLiveHistoryLoader(transcriptOffset)) 1 else 0
+                listState.scrollToItem(index + loaderCount, anchor.scrollOffset)
+            }
+            earlierScrollAnchor = null
+            observedEarlierLoading = false
         }
     }
     LaunchedEffect(messages.size, messages.lastOrNull(), followLocked, listState.layoutInfo.viewportSize.height) {
@@ -726,9 +804,49 @@ fun ChatScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (com.dbchbin.ompgui.remote.relay.ChatRequests.shouldShowLiveHistoryLoader(transcriptOffset)) {
+                item(key = "live-history-loader") {
+                    val loadingLabel = stringResource(R.string.chat_loading_earlier)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .semantics {
+                                liveRegion = LiveRegionMode.Polite
+                                if (earlierMessagesLoading) stateDescription = loadingLabel
+                            },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        OutlinedButton(
+                            enabled = !earlierMessagesLoading,
+                            onClick = {
+                                captureEarlierScrollAnchor()
+                                onLoadEarlierMessages()
+                            },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) {
+                            Text(
+                                text = if (earlierMessagesLoading) loadingLabel
+                                else stringResource(R.string.chat_load_earlier),
+                                color = if (earlierMessagesLoading) OmpColors.TextMuted else OmpColors.Accent,
+                                fontSize = 13.sp,
+                            )
+                        }
+                        if (earlierMessagesError != null) {
+                            Text(
+                                stringResource(R.string.chat_earlier_failed),
+                                color = OmpColors.StatusError,
+                                fontSize = 13.sp,
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                            )
+                        }
+                    }
+                }
+            }
             itemsIndexed(
                 items = transcriptMessages,
-                key = { index, turn -> turn.first().let { message -> message.entryId ?: "${message.role}_${message.toolCallId ?: message.timestamp ?: index}_$index" } },
+                // Loaded page boundaries keep the previously visible turn intact.
+                key = { _, turn -> transcriptTurnKey(turn) },
             ) { _, turn ->
                 val message = turn.first()
                 if (message.role == "user") {
@@ -772,20 +890,35 @@ fun ChatScreen(
                 .padding(bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            val imeVisible = WindowInsets.isImeVisible
             ChatExtensionHost(
                 requester = requester, sessionId = sessionId,
                 requests = extensionDialogs, notices = chatNotices,
                 status = extensionStatus, widgets = extensionWidgets,
                 onDismissNotice = onDismissChatNotice,
                 onDismissRequest = onDismissExtensionDialog,
+                compact = imeVisible,
             )
-            // Todo and subagent details open in modal workspaces.
-            TodoPanel(todos = todos)
-            SubagentPanel(
-                requester = requester,
-                sessionId = sessionId,
-                subagents = subagents,
-            )
+            val queuedCount = if (historicalView) 0 else queuedMessageCount(messageQueue)
+            // Todo, subagent and queue details open in modal workspaces. With the
+            // keyboard up the headers collapse into one row of chips. One FlowRow keeps
+            // call sites stable so each panel's sheet state survives the IME toggling
+            // (tapping a header hides the keyboard).
+            if (todos.isNotEmpty() || subagents.isNotEmpty() || queuedCount > 0) FlowRow(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                maxItemsInEachRow = if (imeVisible) Int.MAX_VALUE else 1,
+            ) {
+                TodoPanel(todos = todos, compact = imeVisible)
+                SubagentPanel(
+                    requester = requester,
+                    sessionId = sessionId,
+                    subagents = subagents,
+                    compact = imeVisible,
+                )
+                QueuePanel(count = queuedCount, onOpen = { openQueue() }, compact = imeVisible)
+            }
             RuntimePanel(
                 expanded = runtimeExpanded && !historicalView,
                 onExpandedChange = { runtimeExpanded = it },
@@ -998,7 +1131,7 @@ private fun ChatTopBar(
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_session_info)) }, leadingIcon = { Icon(Icons.Filled.Info, null, Modifier.size(20.dp)) }, onClick = { menuOpen = false; onOpenStats() })
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_commands)) }, leadingIcon = { Icon(Icons.Filled.Terminal, null, Modifier.size(20.dp)) }, onClick = { menuOpen = false; onOpenCommands() })
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_session_controls)) }, leadingIcon = { Icon(Icons.Filled.Tune, null, Modifier.size(20.dp)) }, enabled = runtimeEnabled, onClick = { menuOpen = false; onOpenRuntime() })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.chat_queue_title)) }, enabled = runtimeEnabled, onClick = { menuOpen = false; onOpenQueue() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.chat_queue_title)) }, leadingIcon = { Icon(Icons.Filled.Queue, null, Modifier.size(20.dp)) }, enabled = runtimeEnabled, onClick = { menuOpen = false; onOpenQueue() })
                     HorizontalDivider(color = OmpColors.Border)
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_menu_settings)) }, leadingIcon = { Icon(Icons.Filled.Settings, null, Modifier.size(20.dp)) }, onClick = { menuOpen = false; onOpenSettings() })
                 }
@@ -1035,6 +1168,7 @@ private fun AssistantTurn(
     results: Map<String, DisplayMessage>,
 ) {
     var expanded by remember(sessionId, leafId, messages.first().entryId) { mutableStateOf(false) }
+    val thinkingShown = LocalThinkingShown.current
     var hasActivity = false
     var pending = false
     var failed = false
@@ -1050,7 +1184,7 @@ private fun AssistantTurn(
         for (index in 0 until content.length()) {
             val block = content.optJSONObject(index) ?: continue
             when (block.optString("type")) {
-                "thinking" -> hasActivity = true
+                "thinking" -> if (thinkingShown) hasActivity = true
                 "toolCall" -> {
                     hasActivity = true
                     val result = results[block.optString("toolCallId")]
@@ -1068,7 +1202,7 @@ private fun AssistantTurn(
                 else -> stringResource(R.string.chat_tool_complete)
             }
             TranscriptDisclosure(
-                label = "${stringResource(R.string.thinking_title)} · ${stringResource(R.string.new_session_tools)} · $status",
+                label = if (thinkingShown) "${stringResource(R.string.thinking_title)} · ${stringResource(R.string.new_session_tools)} · $status" else "${stringResource(R.string.new_session_tools)} · $status",
                 expanded = expanded,
                 loading = pending,
                 failed = failed,
@@ -1116,7 +1250,8 @@ private fun AssistantMessage(
 private fun UserMessage(message: DisplayMessage, requester: RelayRequester, sessionId: String, leafId: String?, actionsEnabled: Boolean, onEdit: (JSONObject) -> Unit, onFork: () -> Unit) {
     val stamp = remember(message.timestamp) { formatTimestamp(message.timestamp) }
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val bubbleMax = maxWidth * 0.85f
+        // Phones: 85% of the row; tablets: cap for readable line length.
+        val bubbleMax = minOf(maxWidth * 0.85f, 720.dp)
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.End,
@@ -1175,6 +1310,8 @@ private fun ComposerCard(
     var utilitiesOpen by remember { mutableStateOf(false) }
     val utilitiesDesc = stringResource(R.string.chat_composer_utilities)
     val usageLabel = usageFraction?.let { "${(it.coerceIn(0.0, 1.0) * 100).toInt()}%" } ?: "—"
+    val usageState = stringResource(R.string.chat_composer_context_usage, usageLabel)
+    val haptics = LocalHapticFeedback.current
     val shape = androidx.compose.material3.MaterialTheme.shapes.medium
     Column(
         modifier = Modifier
@@ -1242,7 +1379,12 @@ private fun ComposerCard(
             }
             Box {
                 IconButton(onClick = { utilitiesOpen = true }, modifier = Modifier.size(48.dp)) {
-                    Box(Modifier.size(28.dp).semantics { contentDescription = utilitiesDesc }, contentAlignment = Alignment.Center) {
+                    // Percent lives in semantics and the utilities menu; text inside a
+                    // 28dp ring overflows at large font scales.
+                    Box(Modifier.size(28.dp).semantics {
+                        contentDescription = utilitiesDesc
+                        if (usageFraction != null) stateDescription = usageState
+                    }, contentAlignment = Alignment.Center) {
                         androidx.compose.foundation.Canvas(Modifier.fillMaxSize().padding(1.dp)) {
                             val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
                             drawCircle(color = OmpColors.Border, style = stroke)
@@ -1252,7 +1394,6 @@ private fun ComposerCard(
                                     useCenter = false, style = stroke)
                             }
                         }
-                        Text(usageLabel, fontSize = 9.sp, color = OmpColors.TextMuted, maxLines = 1)
                     }
                 }
                 DropdownMenu(expanded = utilitiesOpen, onDismissRequest = { utilitiesOpen = false }) {
@@ -1271,7 +1412,15 @@ private fun ComposerCard(
                 else -> R.string.chat_submit_steer
             })
             androidx.compose.material3.TextButton(
-                onClick = { if (stop) onAbort() else onSend() },
+                onClick = {
+                    if (stop) {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onAbort()
+                    } else {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onSend()
+                    }
+                },
                 enabled = active,
                 modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
                 contentPadding = PaddingValues(horizontal = 8.dp),

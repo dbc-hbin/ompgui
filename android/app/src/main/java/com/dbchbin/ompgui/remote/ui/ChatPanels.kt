@@ -178,12 +178,95 @@ fun QueueScreen(
 /** Reduced-motion aware: panels render statically, no animation. */
 private fun panelShape() = RoundedCornerShape(10.dp)
 
+// Small tappable chip used when the IME collapses activity headers into one row.
+@Composable
+fun CompactPanelChip(
+    icon: ImageVector,
+    label: String,
+    description: String,
+    onClick: () -> Unit,
+    highlight: Boolean = false,
+) {
+    val chipShape = RoundedCornerShape(8.dp)
+    Row(
+        modifier = Modifier
+            .heightIn(min = 48.dp)
+            .clip(chipShape)
+            // onClickLabel (not contentDescription) so TalkBack still reads the count label.
+            .clickable(role = Role.Button, onClickLabel = description, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier
+                .clip(chipShape)
+                .background(OmpColors.BgPanel)
+                .border(1.dp, if (highlight) OmpColors.Accent else OmpColors.Border, chipShape)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp), tint = if (highlight) OmpColors.Accent else OmpColors.TextMuted)
+            Text(label, fontSize = 12.sp, color = OmpColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/** Relay-owned items plus prompts queued natively in OMP (separate lists, desktop ChatInput parity). */
+fun queuedMessageCount(queue: com.dbchbin.ompgui.remote.relay.RelayMessageQueue): Int =
+    queue.items.size + (queue.nativeQueuedCount ?: 0)
+
+// ---------------------------------------------------------------------------
+// Queue header above composer (same visual pattern as Todo/Subagent headers).
+// ---------------------------------------------------------------------------
+
+@Composable
+fun QueuePanel(count: Int, onOpen: () -> Unit, compact: Boolean = false) {
+    if (count <= 0) return
+    val label = stringResource(R.string.chat_ux_queue_count, count)
+    val desc = stringResource(R.string.chat_ux_queue_open)
+    if (compact) {
+        CompactPanelChip(icon = Icons.Filled.Queue, label = label, description = desc, onClick = onOpen)
+        return
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(panelShape())
+            .background(OmpColors.BgPanel)
+            .border(1.5.dp, OmpColors.Border, panelShape())
+            .padding(horizontal = 10.dp, vertical = 0.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .clickable(role = Role.Button, onClickLabel = desc, onClick = onOpen)
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 2.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.Filled.Queue, contentDescription = null, modifier = Modifier.size(16.dp), tint = OmpColors.TextMuted)
+            Text(
+                label,
+                modifier = Modifier.weight(1f),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = OmpColors.Text,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Icon(Icons.Filled.ExpandMore, contentDescription = null, modifier = Modifier.size(18.dp), tint = OmpColors.TextDim)
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Todo phases above composer (desktop ComposerPanels/TodoList parity).
 // ---------------------------------------------------------------------------
 
 @Composable
-fun TodoPanel(todos: List<com.dbchbin.ompgui.remote.relay.TodoPhase>) {
+fun TodoPanel(todos: List<com.dbchbin.ompgui.remote.relay.TodoPhase>, compact: Boolean = false) {
     if (todos.isEmpty()) return
     var expanded by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
@@ -195,7 +278,16 @@ fun TodoPanel(todos: List<com.dbchbin.ompgui.remote.relay.TodoPhase>) {
     } else {
         stringResource(R.string.chat_todo_expand)
     }
-    Column(
+    if (compact) CompactPanelChip(
+        icon = Icons.Filled.Checklist,
+        label = stringResource(R.string.chat_activity_todos, done, tasks.size),
+        description = headerDesc,
+        onClick = {
+            focusManager.clearFocus()
+            keyboard?.hide()
+            expanded = true
+        },
+    ) else Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(panelShape())
@@ -333,6 +425,7 @@ fun SubagentPanel(
     requester: RelayRequester,
     sessionId: String,
     subagents: List<com.dbchbin.ompgui.remote.relay.SubagentChip>,
+    compact: Boolean = false,
 ) {
     if (subagents.isEmpty()) return
     var expanded by remember(sessionId) { mutableStateOf(false) }
@@ -347,7 +440,17 @@ fun SubagentPanel(
     } else {
         stringResource(R.string.chat_subagent_expand)
     }
-    Column(
+    if (compact) CompactPanelChip(
+        icon = Icons.Filled.Groups,
+        label = stringResource(R.string.chat_subagent_hub_summary, subagents.size),
+        description = headerDesc,
+        highlight = live > 0,
+        onClick = {
+            focusManager.clearFocus()
+            keyboard?.hide()
+            expanded = true
+        },
+    ) else Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(panelShape())
@@ -555,7 +658,7 @@ private fun SubagentTranscriptDialog(
     ) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onDismiss) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.chat_back), Modifier.size(12.dp), tint = OmpColors.TextMuted)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.chat_back), Modifier.size(18.dp), tint = OmpColors.TextMuted)
             }
             Spacer(Modifier.weight(1f))
             IconButton(onClick = { refresh++ }, enabled = !loading && sessionId.isNotBlank()) {
@@ -1048,7 +1151,7 @@ fun LongMessageText(
         if (showCopy) IconButton(onClick = {
             val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", message.text))
-        }) { Icon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy_content), modifier = Modifier.size(12.dp), tint = OmpColors.TextMuted) }
+        }) { Icon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy_content), modifier = Modifier.size(18.dp), tint = OmpColors.TextMuted) }
         if (collapsible && message.text.length > 4_000) RuntimeChip(
             if (expanded) stringResource(R.string.chat_show_less) else stringResource(R.string.chat_show_full, message.text.length),
             onClick = { expanded = !expanded },
@@ -1111,17 +1214,18 @@ fun TranscriptContent(
         }
     }
     val content = full?.optJSONArray("content") ?: message.content
+    val thinkingShown = LocalThinkingShown.current
     val truncated = message.truncated && full == null
     var localActivityExpanded by remember(sessionId, leafId, message.entryId) { mutableStateOf(false) }
     val showActivity = activityExpanded ?: localActivityExpanded
     val hasActivity = content != null && (0 until content.length()).any {
         val type = content.optJSONObject(it)?.optString("type")
-        type == "thinking" || type == "toolCall"
+        (thinkingShown && type == "thinking") || type == "toolCall"
     }
     Column(Modifier.fillMaxWidth()) {
         Column(contentModifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (hasActivity && activityExpanded == null) TranscriptDisclosure(
-                label = "${stringResource(R.string.thinking_title)} · ${stringResource(R.string.new_session_tools)}",
+                label = if (thinkingShown) "${stringResource(R.string.thinking_title)} · ${stringResource(R.string.new_session_tools)}" else stringResource(R.string.new_session_tools),
                 expanded = showActivity,
                 loading = message.streaming,
                 onClick = { localActivityExpanded = !localActivityExpanded },
@@ -1134,7 +1238,7 @@ fun TranscriptContent(
                         "text" -> LongMessageText(requester, sessionId, message.copy(text = block.optString("text")), showCopy = false, collapsible = message.role != "assistant")
                         "toolCall" -> if (showActivity) TranscriptTool(requester, sessionId, leafId, block, results[block.optString("toolCallId")], truncated)
                         "image" -> if (block.optString("data").isNotEmpty()) HistoryImage(block)
-                        "thinking" -> {
+                        "thinking" -> if (thinkingShown) {
                             var thinking by remember(block) { mutableStateOf<String?>(null) }
                             var thinkingBusy by remember { mutableStateOf(false) }
                             var thinkingFailure by remember { mutableStateOf<String?>(null) }
@@ -1222,12 +1326,12 @@ fun TranscriptContent(
                         val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                         clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", text))
                     }
-                }) { Icon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy_content), Modifier.size(12.dp), tint = OmpColors.TextMuted) }
+                }) { Icon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy_content), Modifier.size(18.dp), tint = OmpColors.TextMuted) }
                 if (message.role == "user" && onEdit != null) IconButton(enabled = actionsEnabled && !busy, modifier = Modifier.size(48.dp), onClick = {
                     perform { onEdit(actionMessage()) }
-                }) { Icon(Icons.Filled.Edit, stringResource(R.string.chat_edit_input), Modifier.size(12.dp), tint = OmpColors.TextMuted) }
+                }) { Icon(Icons.Filled.Edit, stringResource(R.string.chat_edit_input), Modifier.size(18.dp), tint = OmpColors.TextMuted) }
                 if (message.role == "user" && onFork != null) IconButton(enabled = actionsEnabled && !busy && !message.entryId.isNullOrBlank(), modifier = Modifier.size(48.dp), onClick = onFork) {
-                    Icon(Icons.Filled.AccountTree, stringResource(R.string.chat_fork_here), Modifier.size(12.dp), tint = OmpColors.TextMuted)
+                    Icon(Icons.Filled.AccountTree, stringResource(R.string.chat_fork_here), Modifier.size(18.dp), tint = OmpColors.TextMuted)
                 }
             }
         }
@@ -1247,7 +1351,7 @@ private fun TranscriptJson(value: String, initiallyExpanded: Boolean = false) {
         IconButton(onClick = {
             val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", value))
-        }) { Icon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy_content), modifier = Modifier.size(12.dp), tint = OmpColors.TextMuted) }
+        }) { Icon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy_content), modifier = Modifier.size(18.dp), tint = OmpColors.TextMuted) }
     }
     if (expanded) androidx.compose.foundation.text.selection.SelectionContainer {
         Text(value, Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()), color = OmpColors.Text, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
@@ -1308,13 +1412,15 @@ fun ChatExtensionHost(
     requests: List<EventProjector.ChatExtensionRequest>, notices: List<EventProjector.ChatNotice>,
     status: Map<String, String>, widgets: Map<String, List<String>>,
     onDismissNotice: (String) -> Unit, onDismissRequest: (String) -> Unit,
+    compact: Boolean = false,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val currentSessionId by androidx.compose.runtime.rememberUpdatedState(sessionId)
     var error by remember(sessionId, requests.firstOrNull()?.id) { mutableStateOf<String?>(null) }
     var sending by remember(sessionId, requests.firstOrNull()?.id) { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
+    // Keyboard open: keep notices/widgets small so the transcript keeps visible space.
+    Column(Modifier.fillMaxWidth().heightIn(max = if (compact) 96.dp else 220.dp).verticalScroll(rememberScrollState())) {
         ExtensionNoticeList(notices, onDismissNotice)
         status.forEach { (key, value) -> Text("$key: $value", color = OmpColors.Text) }
         widgets.forEach { (key, lines) -> Text("$key\n${lines.joinToString("\n")}", color = OmpColors.Text) }
@@ -1405,7 +1511,9 @@ private fun ChatHistoryContent(requester: RelayRequester, sessionId: String, lea
 @Composable
 private fun HistoryEntry(requester: RelayRequester, sessionId: String, leafId: String?, entryId: String, message: JSONObject, onOpenSession: (String) -> Unit, onEditMessage: (String) -> Unit) {
     val context = LocalContext.current
-    var details by remember { mutableStateOf<String?>(null) }
+    val thinkingShown = LocalThinkingShown.current
+    var thinkingDetails by remember { mutableStateOf<String?>(null) }
+    var actionFeedback by remember { mutableStateOf<String?>(null) }
     var media by remember { mutableStateOf<org.json.JSONArray?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -1445,8 +1553,8 @@ private fun HistoryEntry(requester: RelayRequester, sessionId: String, leafId: S
                 } else {
                     MessageText(block.optString("text"), Modifier.fillMaxWidth())
                 }
-                "thinking" -> RuntimeChip(stringResource(R.string.chat_load_thinking, index + 1), enabled = !busy && entryId.isNotBlank(), onClick = {
-                    perform { details = ChatRequests.thinking(requester, sessionId, entryId, index).getString("thinking"); thinkingExpanded = true }
+                "thinking" -> if (thinkingShown) RuntimeChip(stringResource(R.string.chat_load_thinking, index + 1), enabled = !busy && entryId.isNotBlank(), onClick = {
+                    perform { thinkingDetails = ChatRequests.thinking(requester, sessionId, entryId, index).getString("thinking"); thinkingExpanded = true }
                 })
                 "image" -> HistoryImage(block)
                 else -> {
@@ -1465,12 +1573,13 @@ private fun HistoryEntry(requester: RelayRequester, sessionId: String, leafId: S
     } else {
         MessageText(content?.toString().orEmpty(), plainText = true)
     }
-    details?.let {
+    if (thinkingShown) thinkingDetails?.let {
         RuntimeChip(if (thinkingExpanded) stringResource(R.string.chat_hide_details) else stringResource(R.string.chat_show_details), onClick = { thinkingExpanded = !thinkingExpanded })
         if (thinkingExpanded) androidx.compose.foundation.text.selection.SelectionContainer {
             Text(it, color = OmpColors.TextMuted, fontSize = 13.sp, lineHeight = 20.sp)
         }
     }
+    actionFeedback?.let { Text(it, color = OmpColors.TextMuted, fontSize = 13.sp, lineHeight = 20.sp) }
     media?.let { images -> for (i in 0 until images.length()) images.optJSONObject(i)?.let { HistoryImage(it) } }
     error?.let { Text(it, color = OmpColors.StatusError) }
     if (message.optString("role") == "user") RuntimeChip(stringResource(R.string.chat_copy_to_composer), onClick = {
@@ -1484,7 +1593,7 @@ private fun HistoryEntry(requester: RelayRequester, sessionId: String, leafId: S
             perform {
                 val result = ChatRequests.media(requester, sessionId, entryId)
                 media = result.getJSONArray("images")
-                details = context.getString(R.string.chat_media_summary, media?.length() ?: 0, result.optInt("missingCount"))
+                actionFeedback = context.getString(R.string.chat_media_summary, media?.length() ?: 0, result.optInt("missingCount"))
             }
         })
         if (message.optString("role") == "user") RuntimeChip(stringResource(R.string.chat_fork_here), enabled = !busy, onClick = {
@@ -1492,7 +1601,7 @@ private fun HistoryEntry(requester: RelayRequester, sessionId: String, leafId: S
                 val command = JSONObject().put("type", "fork").put("entryId", entryId)
                 if (!leafId.isNullOrBlank()) command.put("leafId", leafId)
                 val result = ChatRequests.command(requester, sessionId, command).getJSONObject("result")
-                if (result.optBoolean("cancelled")) details = context.getString(R.string.chat_fork_cancelled)
+                if (result.optBoolean("cancelled")) actionFeedback = context.getString(R.string.chat_fork_cancelled)
                 else onOpenSession(result.getString("newSessionId"))
             }
         })

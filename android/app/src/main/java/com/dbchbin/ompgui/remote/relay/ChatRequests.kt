@@ -79,11 +79,27 @@ object ChatRequests {
         return cmd
     }
 
-    fun historyArgs(id: String, leafId: String? = null, offset: Int = 0, limit: Int = 100): JSONObject {
+    fun historyArgs(id: String, leafId: String? = null, offset: Int = 0, limit: Int = 50): JSONObject {
+        require(offset >= 0) { "History offset must not be negative" }
+        require(limit in 1..50) { "History pages must contain at most 50 entries" }
         val args = JSONObject().put("id", id).put("offset", offset).put("limit", limit)
         if (!leafId.isNullOrBlank()) args.put("leafId", leafId)
         return args
     }
+
+    fun liveHistoryArgs(id: String, leafId: String?, offset: Int, limit: Int): JSONObject {
+        require(offset >= 0) { "History offset must not be negative" }
+        require(limit in 1..50) { "Live history pages must contain at most 50 entries" }
+        return historyArgs(id, leafId, offset, limit).put("online", true)
+    }
+
+    fun previousLivePage(offset: Int): IntRange? {
+        if (offset <= 0) return null
+        val start = (offset - 50).coerceAtLeast(0)
+        return start until offset
+    }
+
+    fun shouldShowLiveHistoryLoader(offset: Int): Boolean = offset > 0
 
     data class HistoryPage(
         val messages: JSONArray,
@@ -103,11 +119,47 @@ object ChatRequests {
             todoPhases = data.optJSONArray("todoPhases") ?: JSONArray(),
             total = data.optInt("total", 0),
             offset = data.optInt("offset", 0),
-            limit = data.optInt("limit", 100),
+            limit = data.optInt("limit", 50),
             hasMore = data.optBoolean("hasMore", false),
             leafId = data.optString("leafId").trim().takeIf { it.isNotEmpty() },
         )
     }
+
+    fun liveHistoryMessages(page: HistoryPage): List<DisplayMessage> = buildList {
+        for (index in 0 until page.messages.length()) {
+            val message = page.messages.optJSONObject(index) ?: continue
+            val parsed = parseDisplayMessage(message) ?: continue
+            val entryId = page.entryIds.optString(index).trim().takeIf { it.isNotEmpty() }
+                ?: parsed.entryId?.takeIf { it.isNotBlank() }
+                ?: continue
+            add(parsed.copy(entryId = entryId))
+        }
+    }
+
+    fun prependEarlierMessages(
+        current: List<DisplayMessage>,
+        earlier: List<DisplayMessage>,
+    ): List<DisplayMessage> {
+        val seen = current.mapNotNullTo(mutableSetOf()) { it.entryId }
+        val prepend = earlier.filter { message ->
+            val entryId = message.entryId ?: return@filter false
+            seen.add(entryId)
+        }
+        return prepend + current
+    }
+
+    fun isCurrentLiveHistoryRequest(
+        requestGeneration: Long,
+        currentGeneration: Long,
+        requestSessionId: String,
+        currentSessionId: String?,
+        requestLeafId: String?,
+        currentLeafId: String?,
+        responseLeafId: String?,
+    ): Boolean = requestGeneration == currentGeneration &&
+        requestSessionId == currentSessionId &&
+        requestLeafId == currentLeafId &&
+        (responseLeafId == null || responseLeafId == requestLeafId)
 
     data class SubagentTranscriptPage(
         val messages: JSONArray,
@@ -178,7 +230,7 @@ object ChatRequests {
         id: String,
         leafId: String? = null,
         offset: Int = 0,
-        limit: Int = 100,
+        limit: Int = 50,
     ): JSONObject = requester.request(DOMAIN_SESSIONS, ACTION_HISTORY, historyArgs(id, leafId, offset, limit))
 
     suspend fun thinking(

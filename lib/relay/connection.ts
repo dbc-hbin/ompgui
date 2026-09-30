@@ -64,9 +64,7 @@ import {
   upsertRelayMcp,
 } from "./extensions";
 import { getUsage, type UsageFetchResult } from "../usage";
-import { invalidateModelsCache } from "../models-cache";
-import { disposeUtilityRpc } from "../omp/rpc-utility";
-import { mergeNativeSettings, readNativeSettings, writeNativeSettings, type NativeSettings } from "../omp/settings-config";
+import { applyNativeSettings, getNativeSettings } from "../omp/settings-service";
 
 const deviceConnections = new Map<string, Set<() => void>>();
 export function revokeRelayDeviceConnections(deviceId: string): void {
@@ -597,6 +595,10 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
             ...(snapshot.cwd ? { cwd: snapshot.cwd } : {}),
             leafId: snapshot.leafId,
             messages: snapshot.messages,
+            total: snapshot.total,
+            offset: snapshot.offset,
+            nextOffset: snapshot.nextOffset,
+            hasMore: snapshot.hasMore,
             agent: snapshot.agent,
           });
           try {
@@ -728,6 +730,10 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
             ...(opened.snapshot.cwd ? { cwd: opened.snapshot.cwd } : {}),
             leafId: opened.snapshot.leafId,
             messages: opened.snapshot.messages,
+            total: opened.snapshot.total,
+            offset: opened.snapshot.offset,
+            nextOffset: opened.snapshot.nextOffset,
+            hasMore: opened.snapshot.hasMore,
             agent: opened.snapshot.agent,
           });
         } catch (error) {
@@ -858,30 +864,24 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
       }
       case "settings.get": {
         try {
-          const data = readNativeSettings();
-          send({ op: "settings", settings: data.settings as Record<string, unknown> });
-        } catch (error) {
-          send({ op: "error", code: "settings_read_failed", message: String(error) });
+          const snapshot = await getNativeSettings({
+            ...(frame.scope !== undefined ? { scope: frame.scope } : {}),
+            ...(frame.cwd !== undefined ? { cwd: frame.cwd } : {}),
+          });
+          send({ op: "settings", ...snapshot });
+        } catch {
+          send({ op: "error", code: "settings_read_failed", message: "Settings read failed" });
         }
         return;
       }
       case "settings.update": {
         try {
-          const current = readNativeSettings();
-          const next = mergeNativeSettings(current.settings, frame.settings as NativeSettings);
-          writeNativeSettings(next);
-          const patchRecord = frame.settings as Record<string, unknown>;
-          const registryInvalidated = patchRecord.enabledModels !== undefined
-            || patchRecord.disabledProviders !== undefined
-            || patchRecord.modelProviderOrder !== undefined;
-          if (registryInvalidated) {
-            invalidateModelsCache();
-            disposeUtilityRpc();
-          }
-          const updated = readNativeSettings();
-          send({ op: "settings_updated", success: true, settings: updated.settings as Record<string, unknown> });
-        } catch (error) {
-          send({ op: "settings_updated", success: false, error: String(error) });
+          const result = await applyNativeSettings(frame);
+          send({ op: "settings_updated", ...result });
+        } catch {
+          // This deployed compatibility transport has no confirmation fields;
+          // risky writes therefore fail closed rather than bypassing policy.
+          send({ op: "settings_updated", success: false, error: "Settings update failed" });
         }
         return;
       }
@@ -909,6 +909,10 @@ export function attachRelayConnection(socket: RelaySocket, deps: Partial<RelayCo
             ...(opened.snapshot.cwd ? { cwd: opened.snapshot.cwd } : {}),
             leafId: opened.snapshot.leafId,
             messages: opened.snapshot.messages,
+            total: opened.snapshot.total,
+            offset: opened.snapshot.offset,
+            nextOffset: opened.snapshot.nextOffset,
+            hasMore: opened.snapshot.hasMore,
             agent: opened.snapshot.agent,
           });
           if (!snapshotSent) {

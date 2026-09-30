@@ -46,12 +46,7 @@
  * - mcp.delete {cwd,name} -> {name}
  */
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "../file-access";
-import {
-  mergeNativeSettings,
-  readNativeSettings,
-  writeNativeSettings,
-  type NativeSettings,
-} from "../omp/settings-config";
+import { mutateNativeSettings, type NativeSettings } from "../omp/settings-config";
 import { mergeMcpServers, parseMcpListOutput, type McpLiveServer } from "../omp/mcp-config";
 import { getRpcSession } from "../rpc-manager";
 import { asString } from "../type-guards";
@@ -384,13 +379,13 @@ export async function handleExtensionsRequest(
     case "agents.setDisabled": {
       const name = requireName(args.name);
       if (typeof args.disabled !== "boolean") throw new RelaySessionError("invalid_args", "disabled must be a boolean");
-      const current = readNativeSettings();
-      const list = new Set(Array.isArray(current.settings.task?.disabledAgents) ? current.settings.task.disabledAgents : []);
-      if (args.disabled) list.add(name);
-      else list.delete(name);
-      const next = mergeNativeSettings(current.settings, { task: { disabledAgents: [...list] } } as NativeSettings);
       try {
-        writeNativeSettings(next);
+        await mutateNativeSettings((current) => {
+          const list = new Set(Array.isArray(current.task?.disabledAgents) ? current.task.disabledAgents : []);
+          if (args.disabled) list.add(name);
+          else list.delete(name);
+          return { task: { disabledAgents: [...list] } } as NativeSettings;
+        });
       } catch (error) {
         throw new RelaySessionError("agent_settings_failed", error instanceof Error ? error.message : String(error));
       }
@@ -402,28 +397,29 @@ export async function handleExtensionsRequest(
       if (kind !== "model" && kind !== "prewalk" && kind !== "advisor") {
         throw new RelaySessionError("invalid_args", "kind must be model, prewalk, or advisor");
       }
-      const current = readNativeSettings();
-      const task = current.settings.task ?? {};
-      const taskPatch: NonNullable<NativeSettings["task"]> = {};
-      const patch: NativeSettings = { task: taskPatch };
-      if (kind === "model") {
-        const overrides: Record<string, string | string[]> = { ...(task.agentModelOverrides ?? {}) };
-        if (args.value === undefined || args.value === null || args.value === "") delete overrides[name];
-        else if (typeof args.value === "string" && args.value.trim()) overrides[name] = args.value.trim();
-        else if (Array.isArray(args.value) && args.value.every((entry) => typeof entry === "string" && entry.trim())) {
-          overrides[name] = args.value as string[];
-        } else throw new RelaySessionError("invalid_args", "value must be a non-empty model selector or list");
-        taskPatch.agentModelOverrides = overrides;
-      } else {
-        const key = kind === "prewalk" ? "agentPrewalk" : "agentAdvisor";
-        const map: Record<string, boolean | string> = { ...(task[key] ?? {}) };
-        if (args.value === undefined || args.value === null || args.value === "") delete map[name];
-        else if (typeof args.value === "boolean" || typeof args.value === "string") map[name] = args.value;
-        else throw new RelaySessionError("invalid_args", "value must be a boolean or string");
-        taskPatch[key] = map;
-      }
       try {
-        writeNativeSettings(mergeNativeSettings(current.settings, patch));
+        await mutateNativeSettings((current) => {
+          const task = current.task ?? {};
+          const taskPatch: NonNullable<NativeSettings["task"]> = {};
+          if (kind === "model") {
+            const overrides: Record<string, string | string[]> = { ...(task.agentModelOverrides ?? {}) };
+            if (args.value === undefined || args.value === null || args.value === "") delete overrides[name];
+            else if (typeof args.value === "string" && args.value.trim()) overrides[name] = args.value.trim();
+            else if (Array.isArray(args.value) && args.value.every((entry) => typeof entry === "string" && entry.trim())) {
+              overrides[name] = args.value as string[];
+            } else throw new RelaySessionError("invalid_args", "value must be a non-empty model selector or list");
+            taskPatch.agentModelOverrides = overrides;
+          } else {
+            const key = kind === "prewalk" ? "agentPrewalk" : "agentAdvisor";
+            const map: Record<string, string> = { ...(task[key] ?? {}) };
+            if (args.value === undefined || args.value === null || args.value === "") delete map[name];
+            else if (typeof args.value === "boolean") map[name] = args.value ? "on" : "off";
+            else if (typeof args.value === "string" && args.value.trim()) map[name] = args.value.trim();
+            else throw new RelaySessionError("invalid_args", "value must be an on/off selector or model pattern");
+            taskPatch[key] = map;
+          }
+          return { task: taskPatch } as NativeSettings;
+        });
       } catch (error) {
         throw new RelaySessionError("agent_settings_failed", error instanceof Error ? error.message : String(error));
       }

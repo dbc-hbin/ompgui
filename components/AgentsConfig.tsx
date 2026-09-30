@@ -14,6 +14,28 @@ type Props = {
 };
 
 type ScopeFilter = "all" | AgentSource;
+type AgentOverrideType = "model" | "prewalk" | "advisor";
+
+function canonicalSelector(value: unknown): string | undefined {
+  if (value === true) return "on";
+  if (value === false) return "off";
+  return typeof value === "string" ? value : undefined;
+}
+
+function selectorEnabled(value: unknown): boolean {
+  const selector = canonicalSelector(value);
+  return selector !== undefined && selector !== "off";
+}
+
+function canonicalSelectorMap(value: unknown): Record<string, string> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  const result: Record<string, string> = {};
+  for (const [name, selector] of Object.entries(value)) {
+    const canonical = canonicalSelector(selector);
+    if (canonical !== undefined) result[name] = canonical;
+  }
+  return result;
+}
 
 export function AgentsConfig({ cwd, onSaved }: Props) {
   const { t } = useI18n();
@@ -123,8 +145,8 @@ export function AgentsConfig({ cwd, onSaved }: Props) {
 
   const updateAgentOverride = async (
     agentName: string,
-    overrideType: "model" | "prewalk" | "advisor",
-    value: string | boolean | undefined,
+    overrideType: AgentOverrideType,
+    value: string | undefined,
   ) => {
     try {
       const settingsRes = await fetch("/api/omp-settings");
@@ -141,7 +163,7 @@ export function AgentsConfig({ cwd, onSaved }: Props) {
         }
         task.agentModelOverrides = overrides;
       } else if (overrideType === "prewalk") {
-        const prewalks = { ...(task.agentPrewalk || {}) };
+        const prewalks = canonicalSelectorMap(task.agentPrewalk);
         if (value === undefined) {
           delete prewalks[agentName];
         } else {
@@ -149,7 +171,7 @@ export function AgentsConfig({ cwd, onSaved }: Props) {
         }
         task.agentPrewalk = prewalks;
       } else if (overrideType === "advisor") {
-        const advisors = { ...(task.agentAdvisor || {}) };
+        const advisors = canonicalSelectorMap(task.agentAdvisor);
         if (value === undefined) {
           delete advisors[agentName];
         } else {
@@ -412,10 +434,12 @@ function AgentCard({
   onToggleDisabled: (disabled: boolean) => void;
   onEdit: () => void;
   onDelete: () => void;
-  onUpdateOverride: (type: "model" | "prewalk" | "advisor", val: string | boolean | undefined) => void;
+  onUpdateOverride: (type: AgentOverrideType, val: string | undefined) => void;
 }) {
   const { t } = useI18n();
   const isCustom = agent.source === "user" || agent.source === "project";
+  const advisorEnabled = selectorEnabled(agent.advisorOverride);
+  const prewalkEnabled = selectorEnabled(agent.prewalkOverride);
   const isReadOnly = agent.tools?.every((tool) => tool === "read" || tool === "grep" || tool === "glob" || tool.startsWith("web_"));
 
   const scopeBadgeColor =
@@ -532,33 +556,35 @@ function AgentCard({
         <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap" }}>
           <button
             type="button"
-            onClick={() => onUpdateOverride("advisor", agent.advisorOverride === true ? false : true)}
+            aria-pressed={advisorEnabled}
+            onClick={() => onUpdateOverride("advisor", advisorEnabled ? "off" : "on")}
             style={{
               padding: "3px 7px",
               borderRadius: "var(--radius-control)",
               border: "1px solid var(--border)",
-              background: agent.advisorOverride ? "color-mix(in srgb, var(--accent) 15%, transparent)" : "var(--bg)",
-              color: agent.advisorOverride ? "var(--accent)" : "var(--text-dim)",
+              background: advisorEnabled ? "color-mix(in srgb, var(--accent) 15%, transparent)" : "var(--bg)",
+              color: advisorEnabled ? "var(--accent)" : "var(--text-dim)",
               fontSize: "var(--text-sm)",
               cursor: "pointer",
             }}
           >
-            {t("agentsConfig.advisor")}: {agent.advisorOverride ? "on" : "off"}
+            {t("agentsConfig.advisor")}: {advisorEnabled ? "on" : "off"}
           </button>
           <button
             type="button"
-            onClick={() => onUpdateOverride("prewalk", agent.prewalkOverride === true ? false : true)}
+            aria-pressed={prewalkEnabled}
+            onClick={() => onUpdateOverride("prewalk", prewalkEnabled ? "off" : "on")}
             style={{
               padding: "3px 7px",
               borderRadius: "var(--radius-control)",
               border: "1px solid var(--border)",
-              background: agent.prewalkOverride ? "color-mix(in srgb, var(--accent) 15%, transparent)" : "var(--bg)",
-              color: agent.prewalkOverride ? "var(--accent)" : "var(--text-dim)",
+              background: prewalkEnabled ? "color-mix(in srgb, var(--accent) 15%, transparent)" : "var(--bg)",
+              color: prewalkEnabled ? "var(--accent)" : "var(--text-dim)",
               fontSize: "var(--text-sm)",
               cursor: "pointer",
             }}
           >
-            {t("agentsConfig.prewalk")}: {agent.prewalkOverride ? "on" : "off"}
+            {t("agentsConfig.prewalk")}: {prewalkEnabled ? "on" : "off"}
           </button>
         </div>
 

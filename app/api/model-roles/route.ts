@@ -21,7 +21,7 @@ export async function PUT(request: Request) {
     const roles = Object.fromEntries(Object.entries(body.roles).filter((entry): entry is [string, string] =>
       typeof entry[1] === "string" && entry[0].trim().length > 0 && entry[1].trim().length > 0,
     ));
-    writeModelRoles(roles);
+    await writeModelRoles(roles);
     invalidateModelsCache();
     return NextResponse.json({ success: true, roles });
   } catch (error) {

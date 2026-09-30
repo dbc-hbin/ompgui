@@ -155,7 +155,9 @@ function inputShellStyle({ invalid }: InputShellStyleOptions): CSSProperties {
   return {
     padding: "var(--space-3) calc(var(--space-4) + var(--space-1) / 2)",
     background: "var(--bg)",
-    border: `1px solid ${invalid ? "var(--accent)" : "var(--border)"}`,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: invalid ? "var(--accent)" : "var(--border)",
     borderRadius: "var(--radius-control)",
     color: "var(--text)",
     fontSize: "var(--text-md)",
@@ -193,6 +195,7 @@ export interface TextInputProps {
   name?: string;
   style?: CSSProperties;
   className?: string;
+  "aria-label"?: string;
 }
 
 export function TextInput({
@@ -211,6 +214,7 @@ export function TextInput({
   name,
   style,
   className,
+  "aria-label": ariaLabel,
 }: TextInputProps) {
   const [focused, setFocused] = useState(false);
   const isInvalid = Boolean(invalid || error);
@@ -226,6 +230,7 @@ export function TextInput({
       autoComplete={autoComplete}
       spellCheck={spellCheck}
       aria-invalid={isInvalid || undefined}
+      aria-label={ariaLabel}
       onFocus={() => setFocused(true)}
       onBlur={() => {
         setFocused(false);
@@ -257,6 +262,10 @@ export interface NumInputProps {
   name?: string;
   style?: CSSProperties;
   className?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  "aria-label"?: string;
 }
 
 export function NumInput({
@@ -271,6 +280,10 @@ export function NumInput({
   name,
   style,
   className,
+  min,
+  max,
+  step,
+  "aria-label": ariaLabel,
 }: NumInputProps) {
   const [focused, setFocused] = useState(false);
   const isInvalid = Boolean(invalid || error);
@@ -280,10 +293,14 @@ export function NumInput({
       name={name}
       type="number"
       value={value}
+      min={min}
+      max={max}
+      step={step}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       disabled={disabled}
       aria-invalid={isInvalid || undefined}
+      aria-label={ariaLabel}
       onFocus={() => setFocused(true)}
       onBlur={() => {
         setFocused(false);
@@ -302,6 +319,8 @@ export function NumInput({
 
 /* ─── Secret (password) input with show / hide ─── */
 
+type MaskedTextAreaStyle = CSSProperties & { WebkitTextSecurity: "none" | "disc" };
+
 export interface SecretInputProps {
   value: string;
   onChange: (v: string) => void;
@@ -317,10 +336,12 @@ export interface SecretInputProps {
   autoComplete?: string;
   autoFocus?: boolean;
   required?: boolean;
+  multiline?: boolean;
   onKeyDown?: KeyboardEventHandler<HTMLInputElement>;
   style?: CSSProperties;
   className?: string;
   "aria-describedby"?: string;
+  "aria-label"?: string;
 }
 
 export function SecretInput({
@@ -338,10 +359,12 @@ export function SecretInput({
   autoComplete = "off",
   autoFocus,
   required,
+  multiline = false,
   onKeyDown,
   style,
   className,
   "aria-describedby": ariaDescribedBy,
+  "aria-label": ariaLabel,
 }: SecretInputProps) {
   const [visible, setVisible] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -351,36 +374,73 @@ export function SecretInput({
     if (!value) setVisible(false);
   }, [value]);
 
+  const maskedTextAreaStyle: MaskedTextAreaStyle = {
+    ...inputShellStyle({ invalid: isInvalid }),
+    ...focusGlowStyle(focused, isInvalid),
+    paddingRight: "var(--control-touch, 44px)",
+    minHeight: 92,
+    resize: "vertical",
+    fontFamily: "var(--font-mono)",
+    WebkitTextSecurity: visible ? "none" : "disc",
+    opacity: disabled ? 0.6 : 1,
+  };
+
   return (
     <div style={{ position: "relative", width: "100%", ...style }} className={className}>
-      <input
-        id={id}
-        name={name}
-        type={visible ? "text" : "password"}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        disabled={disabled}
-        autoComplete={autoComplete}
-        autoFocus={autoFocus}
-        required={required}
-        onKeyDown={onKeyDown}
-        spellCheck={false}
-        aria-invalid={isInvalid || undefined}
-        aria-describedby={ariaDescribedBy}
-        onFocus={() => setFocused(true)}
-        onBlur={() => {
-          setFocused(false);
-          onBlurValidate?.();
-        }}
-        style={{
-          ...inputShellStyle({ invalid: isInvalid }),
-          ...focusGlowStyle(focused, isInvalid),
-          paddingRight: "var(--control-touch, 44px)",
-          fontFamily: "var(--font-mono)",
-          opacity: disabled ? 0.6 : 1,
-        }}
-      />
+      {multiline ? (
+        <textarea
+          id={id}
+          name={name}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          disabled={disabled}
+          autoComplete={autoComplete}
+          autoFocus={autoFocus}
+          required={required}
+          spellCheck={false}
+          rows={Math.min(12, Math.max(4, value.split("\n").length))}
+          aria-invalid={isInvalid || undefined}
+          aria-label={ariaLabel}
+          aria-describedby={ariaDescribedBy}
+          onFocus={() => setFocused(true)}
+          onBlur={() => {
+            setFocused(false);
+            onBlurValidate?.();
+          }}
+          style={maskedTextAreaStyle}
+        />
+      ) : (
+        <input
+          id={id}
+          name={name}
+          type={visible ? "text" : "password"}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          disabled={disabled}
+          autoComplete={autoComplete}
+          autoFocus={autoFocus}
+          required={required}
+          onKeyDown={onKeyDown}
+          spellCheck={false}
+          aria-invalid={isInvalid || undefined}
+          aria-label={ariaLabel}
+          aria-describedby={ariaDescribedBy}
+          onFocus={() => setFocused(true)}
+          onBlur={() => {
+            setFocused(false);
+            onBlurValidate?.();
+          }}
+          style={{
+            ...inputShellStyle({ invalid: isInvalid }),
+            ...focusGlowStyle(focused, isInvalid),
+            paddingRight: "var(--control-touch, 44px)",
+            fontFamily: "var(--font-mono)",
+            opacity: disabled ? 0.6 : 1,
+          }}
+        />
+      )}
       <button
         type="button"
         onClick={() => setVisible((v) => !v)}
@@ -390,8 +450,8 @@ export function SecretInput({
         style={{
           position: "absolute",
           right: 0,
-          top: "50%",
-          transform: "translateY(-50%)",
+          top: multiline ? 0 : "50%",
+          transform: multiline ? undefined : "translateY(-50%)",
           width: "var(--control-touch, 44px)",
           height: "var(--control-touch, 44px)",
           minWidth: "var(--control-touch, 44px)",

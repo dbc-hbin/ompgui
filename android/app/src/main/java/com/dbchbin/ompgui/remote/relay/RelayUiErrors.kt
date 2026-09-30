@@ -43,6 +43,14 @@ object RelayUiErrors {
         else -> false
     }
 
+    fun shouldSurfaceCommandFailure(command: String): Boolean =
+        command != "get_state" && command != "get_subagents"
+
+    fun clearKindsOnHealthySnapshot(): Set<RelayUiErrorKind> = setOf(
+        RelayUiErrorKind.Request,
+        RelayUiErrorKind.Session,
+    )
+
     fun clearKindsOnLeaveChat(): Set<RelayUiErrorKind> = setOf(
         RelayUiErrorKind.Request,
         RelayUiErrorKind.Command,

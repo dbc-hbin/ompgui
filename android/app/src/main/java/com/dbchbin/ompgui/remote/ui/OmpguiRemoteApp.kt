@@ -11,10 +11,14 @@ import java.util.Locale
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,9 +47,11 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
     val backDispatcherOwner = requireNotNull(androidx.activity.compose.LocalOnBackPressedDispatcherOwner.current)
     val preferences = remember(context) { AppPreferences.prefs(context) }
     var language by remember { mutableStateOf(AppPreferences.getLanguage(context, Locale.getDefault().language)) }
+    var thinkingShown by remember { mutableStateOf(AppPreferences.isThinkingShown(context)) }
     DisposableEffect(preferences) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, changedKey ->
             if (changedKey == AppPreferences.KEY_LANGUAGE) language = AppPreferences.getLanguage(context, Locale.getDefault().language)
+            if (changedKey == AppPreferences.KEY_SHOW_THINKING) thinkingShown = AppPreferences.isThinkingShown(context)
         }
         preferences.registerOnSharedPreferenceChangeListener(listener)
         onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
@@ -89,6 +95,7 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
         LocalMarkdownNavigation provides MarkdownNavigation(state.sessionCwd) { path ->
             state.sessionCwd?.let { cwd -> filePreview = cwd to path }
         },
+        LocalThinkingShown provides thinkingShown,
     ) {
     key(language) {
     RemoteTheme {
@@ -112,17 +119,8 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
             }
         }
         Surface {
-            when (val screen = state.screen) {
-                is RemoteScreen.Pairing -> PairingScreen(
-                    uri = state.pairingUri,
-                    password = state.password,
-                    error = state.error,
-                    connecting = state.connection == ConnectionState.Connecting,
-                    onUriChange = viewModel::setPairingUri,
-                    onPasswordChange = viewModel::setPassword,
-                    onConnect = viewModel::pair,
-                )
-                is RemoteScreen.Sessions -> SessionListScreen(
+            val sessionList: @Composable () -> Unit = {
+                SessionListScreen(
                     requester = viewModel.requester,
                     initialDraft = newSessionDraft,
                     onSlashSelected = { newSessionDraft = it },
@@ -132,7 +130,10 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
                     runningIds = state.runningIds,
                     connection = state.connection,
                     error = state.error,
-                    refreshing = state.connection == ConnectionState.Connecting,
+                    refreshing = state.sessionsRefreshing || state.connection == ConnectionState.Connecting,
+                    sessionsLoaded = state.sessionsLoaded,
+                    nextRetryAtMillis = state.nextRetryAtMillis,
+                    onReconnect = viewModel::reconnectNow,
                     onRefresh = viewModel::refreshSessions,
                     onOpen = ::openSession,
                     onUnpair = { drafts.clear(); newSessionDraft = ""; filePreview = null; viewModel.unpair() },
@@ -163,7 +164,8 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
                     onAddProject = viewModel::addProject,
                     onRemoveProject = viewModel::removeProject,
                 )
-                is RemoteScreen.Chat -> {
+            }
+            val chatPane: @Composable (RemoteScreen.Chat) -> Unit = { screen ->
                     val thinkingLevel = state.sessionThinkingLevel
                         ?: settings?.optString("defaultThinkingLevel")?.takeIf { it.isNotBlank() }
                         ?: "auto"
@@ -198,6 +200,10 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
                         onOpenPalette = { viewModel.fetchSlash(); chatPaletteOpen = true },
                         title = state.chatTitle.ifBlank { screen.sessionId },
                         messages = state.messages,
+                        transcriptOffset = state.transcriptOffset,
+                        earlierMessagesLoading = state.earlierMessagesLoading,
+                        earlierMessagesError = state.earlierMessagesError,
+                        onLoadEarlierMessages = viewModel::loadEarlierMessages,
                         draft = state.draft,
                         running = state.running,
                         connection = state.connection,
@@ -268,6 +274,31 @@ fun OmpguiRemoteApp(viewModel: RemoteViewModel) {
                             onDismiss = { chatUsageOpen = false },
                         )
                     }
+            }
+            // Window width from the configuration: it recomposes on every size/density change,
+            // whereas constraints-only measurement lagged until the next input after `wm size`.
+            val twoPane = LocalConfiguration.current.screenWidthDp.dp >= AdaptiveTwoPaneMinWidth
+            Box(Modifier.fillMaxSize()) {
+                val screen = state.screen
+                if (screen !is RemoteScreen.Pairing) {
+                    // One call site for Sessions and Chat in both widths, so the list and chat keep
+                    // their state when a session opens and when the window crosses the two-pane width.
+                    AdaptiveListDetail(
+                        twoPane = twoPane,
+                        detailOpen = screen is RemoteScreen.Chat,
+                        list = sessionList,
+                        detail = { if (screen is RemoteScreen.Chat) chatPane(screen) else AdaptiveEmptyDetail() },
+                    )
+                } else {
+                    PairingScreen(
+                        uri = state.pairingUri,
+                        password = state.password,
+                        error = state.error,
+                        connecting = state.connection == ConnectionState.Connecting,
+                        onUriChange = viewModel::setPairingUri,
+                        onPasswordChange = viewModel::setPassword,
+                        onConnect = viewModel::pair,
+                    )
                 }
             }
             if (chatPaletteOpen) {

@@ -93,6 +93,8 @@ class RelayConnection(
         fun onState(state: ConnectionState)
         fun onFrame(frame: ServerFrame)
         fun onProtocolError(message: String)
+        /** Backoff reconnect scheduled [delayMs] from now, or null once it is cancelled or started. */
+        fun onRetryScheduled(delayMs: Long?) {}
     }
 
     @Volatile
@@ -108,6 +110,7 @@ class RelayConnection(
     private var reconnectHello: ClientFrame.Hello? = null
     private var backoffMs = INITIAL_BACKOFF_MS
     private var reconnectGeneration = 0
+    private var retryPending = false
 
     fun setListener(listener: Listener?) {
         this.listener = listener
@@ -180,10 +183,36 @@ class RelayConnection(
         pendingHello = null
         transport?.close()
         transport = null
+        clearRetry()
         emitState(ConnectionState.Idle)
     }
 
+    /**
+     * Cancels a scheduled backoff and reconnects with the saved token hello right away.
+     * Returns false when there is nothing to reconnect: closed, not in token mode,
+     * already connected, or a live connect attempt is in flight.
+     */
+    @Synchronized
+    fun reconnectNow(): Boolean {
+        if (closed.get() || mode != Mode.Token) return false
+        val url = reconnectUrl ?: return false
+        val hello = reconnectHello ?: return false
+        if (state == ConnectionState.Connected) return false
+        if (state == ConnectionState.Connecting && !retryPending && transport != null) return false
+        backoffMs = INITIAL_BACKOFF_MS
+        pendingHello = hello
+        start(url)
+        return true
+    }
+
+    private fun clearRetry() {
+        if (!retryPending) return
+        retryPending = false
+        listener?.onRetryScheduled(null)
+    }
+
     private fun start(url: String) {
+        clearRetry()
         reconnectGeneration += 1
         assembler.clear()
         transport?.close()
@@ -286,6 +315,8 @@ class RelayConnection(
         val generation = reconnectGeneration
         val delay = backoffMs
         backoffMs = (backoffMs * 2).coerceAtMost(MAX_BACKOFF_MS)
+        retryPending = true
+        listener?.onRetryScheduled(delay)
         schedule(delay) {
             dispatch {
                 if (closed.get() || generation != reconnectGeneration) return@dispatch

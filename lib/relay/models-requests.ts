@@ -12,7 +12,7 @@
  *   (mirrors `app/api/models/route.ts`, including its provider-family
  *   allowlist for the /fast eligibility flag), `readDisabledProviders`.
  * - roles: `readModelRoles`/`writeModelRoles` (mirrors `/api/model-roles`).
- * - registry: `readNativeSettings`/`mergeNativeSettings`/`writeNativeSettings`
+ * - registry: `readNativeSettings`/`mutateNativeSettings`/`writeNativeSettings`
  *   + `assertNoAmbiguousModelScopes` (mirrors `/api/omp-settings`).
  * - providers.enable: `enableProvider` (mirrors `/api/providers/enable`).
  * - providers.get/update/validate/test: redacted models.yml merge
@@ -35,7 +35,7 @@
  *   store; the panel shows terminal guidance instead of fake success.
  *
  * Action table (domain `models`):
- * - catalog.get {} -> {models:[{provider,id,name,thinkingLevels,supportsFastMode,contextWindow?}],defaultModel:{provider,modelId}|null,connectedProviders:[{id,name,disabled}],unavailable?}
+ * - catalog.get {} -> {models:[{provider,id,name,thinkingLevels,supportsFastMode,kind?,webSearch?,contextWindow?}],kindModels:[{provider,id,name,kind}],defaultModel:{provider,modelId}|null,connectedProviders:[{id,name,disabled}],unavailable?}
  * - catalog.search {query,provider?,baseUrl?,limit?} -> {models,recommendation,source} (public models.dev, shared web cache)
  * - roles.get {} -> {path,roles:Record<string,string>}
  * - roles.set {roles:Record<string,string>} -> {roles} (non-empty entries kept, like the desktop PUT filter)
@@ -85,6 +85,7 @@ import {
 import {
   enableProvider,
   readDisabledProviders,
+  listKindModels,
   readModelRoles,
   writeModelRoles,
 } from "../omp/model-roles";
@@ -96,7 +97,7 @@ import {
   type OmpModel,
 } from "../omp/rpc-utility";
 import {
-  mergeNativeSettings,
+  mutateNativeSettings,
   readNativeSettings,
   writeNativeSettings,
   type NativeSettings,
@@ -169,12 +170,15 @@ export const NATIVE_MODEL_ROLES = [
   "slow",
   "vision",
   "plan",
-  "designer",
   "commit",
   "tiny",
+  "memory",
   "task",
   "advisor",
 ] as const;
+
+/** Native OMP kind roles (image/web/speech/...), shown below the chat roles. */
+export const KIND_MODEL_ROLES = ["image", "web", "speech", "dictation", "judge"] as const;
 
 const API_KEY_WRITE_GUIDANCE =
   "ompgui cannot manage stored API keys. Run `omp` in a terminal and use /login (or /logout), " +
@@ -306,13 +310,19 @@ function toOmpModel(value: { id: string; provider: string }): OmpModel {
   if ("contextWindow" in value && typeof value.contextWindow === "number") {
     model.contextWindow = value.contextWindow;
   }
+  if ("kind" in value && typeof value.kind === "string") model.kind = value.kind;
+  if ("webSearch" in value && typeof value.webSearch === "string") model.webSearch = value.webSearch;
   return model;
 }
 
 /** Full uncapped catalog mirroring `app/api/models/route.ts`: every available
- * model plus the OMP-resolved default, thinking levels, and connected
- * providers. Never throws: load failure yields an empty flagged list. */
-export async function getModelsCatalog(): Promise<Record<string, unknown>> {
+ * chat model plus non-chat `kindModels` for kind roles, the OMP-resolved
+ * default, thinking levels, and connected providers. Never throws: load
+ * failure yields an empty flagged list. */
+export async function getModelsCatalog(options: { includeKindModels?: boolean } = {}): Promise<Record<string, unknown>> {
+  // RPC lists chat models only; the CLI covers every catalog kind. Only the
+  // role editor needs it, so plain model listings skip the extra omp spawn.
+  const kindModelsPromise = options.includeKindModels ? listKindModels() : undefined;
   let available: OmpModel[];
   try {
     const response = await runUtilityCommand<{ models?: unknown }>(
@@ -367,6 +377,8 @@ export async function getModelsCatalog(): Promise<Record<string, unknown>> {
       provider: model.provider,
       thinkingLevels: thinkingLevelsFor(model),
       supportsFastMode: supportsFastMode(model),
+      ...(model.kind !== undefined ? { kind: model.kind } : {}),
+      ...(model.webSearch !== undefined ? { webSearch: model.webSearch } : {}),
       ...(typeof model.contextWindow === "number" &&
       Number.isFinite(model.contextWindow) &&
       model.contextWindow > 0
@@ -405,7 +417,8 @@ export async function getModelsCatalog(): Promise<Record<string, unknown>> {
   } catch {
     // Default model is cosmetic — the catalog is still useful without it.
   }
-  return { models, defaultModel, thinkingLevels, connectedProviders };
+  const kindModels = kindModelsPromise ? await kindModelsPromise : undefined;
+  return { models, ...(kindModels ? { kindModels } : {}), defaultModel, thinkingLevels, connectedProviders };
 }
 
 // ── Native registry (enabledModels / disabledProviders / order) ──────────────
@@ -459,10 +472,9 @@ async function setNativeRegistry(args: Record<string, unknown>): Promise<Record<
       }
     }
   }
+  let updatedSettings: NativeSettings;
   try {
-    const current = readNativeSettings();
-    const next = mergeNativeSettings(current.settings, patch);
-    writeNativeSettings(next);
+    updatedSettings = await writeNativeSettings(patch);
   } catch (error) {
     throw new ModelsRequestError(
       "registry_write_failed",
@@ -471,8 +483,7 @@ async function setNativeRegistry(args: Record<string, unknown>): Promise<Record<
   }
   invalidateModelsCache();
   disposeUtilityRpc();
-  const updated = readNativeSettings();
-  return { settings: registrySubset(updated.settings), path: updated.path };
+  return { settings: registrySubset(updatedSettings), path: readNativeSettings().path };
 }
 
 // ── models.yml redacted registry ─────────────────────────────────────────────
@@ -590,7 +601,7 @@ function fallbackSubset(settings: NativeSettings): Record<string, unknown> {
   return out;
 }
 
-function setFallback(args: Record<string, unknown>): Record<string, unknown> {
+async function setFallback(args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const retry: NonNullable<NativeSettings["retry"]> = {};
   let present = false;
   if (args.chains !== undefined) {
@@ -656,10 +667,8 @@ function setFallback(args: Record<string, unknown>): Record<string, unknown> {
     );
   }
   try {
-    const current = readNativeSettings();
-    const next = mergeNativeSettings(current.settings, { retry });
-    writeNativeSettings(next);
-    return { retry: fallbackSubset(next) };
+    const updated = await mutateNativeSettings(() => ({ retry }));
+    return { retry: fallbackSubset(updated) };
   } catch (error) {
     if (error instanceof ModelsRequestError) throw error;
     throw new ModelsRequestError(
@@ -783,7 +792,7 @@ async function runModelLogin(entry: PendingModelLogin): Promise<void> {
     const ready = await proc.waitReady(READY_TIMEOUT_MS);
     await proc.negotiateProtocol(ready);
     await proc.sendCommand({ type: "login", providerId: entry.provider }, LOGIN_TIMEOUT_MS);
-    enableProvider(entry.provider);
+    await enableProvider(entry.provider);
     invalidateModelsCache();
     disposeUtilityRpc();
     entry.phase = "success";
@@ -974,7 +983,7 @@ export async function cancelAllModelLogins(): Promise<void> {
 
 // ── Domain dispatch ──────────────────────────────────────────────────────────
 
-function setModelRoles(args: Record<string, unknown>): Record<string, unknown> {
+async function setModelRoles(args: Record<string, unknown>): Promise<Record<string, unknown>> {
   if (typeof args.roles !== "object" || args.roles === null || Array.isArray(args.roles)) {
     throw new ModelsRequestError("invalid_args", "roles must be an object");
   }
@@ -992,7 +1001,7 @@ function setModelRoles(args: Record<string, unknown>): Record<string, unknown> {
     roles[key] = value;
   }
   try {
-    writeModelRoles(roles);
+    await writeModelRoles(roles);
   } catch (error) {
     throw new ModelsRequestError(
       "roles_write_failed",
@@ -1020,7 +1029,7 @@ export async function handleModelsRequest(
   }
   switch (requireAction(action)) {
     case "catalog.get":
-      return getModelsCatalog();
+      return getModelsCatalog({ includeKindModels: true });
     case "catalog.search": {
       try {
         return { ...await searchPublicModelCatalog({
@@ -1065,7 +1074,7 @@ export async function handleModelsRequest(
     case "providers.enable": {
       const provider = requireProviderId(args.provider);
       try {
-        enableProvider(provider);
+        await enableProvider(provider);
       } catch (error) {
         throw new ModelsRequestError(
           "provider_enable_failed",

@@ -218,6 +218,8 @@ interface RuntimeModelEntry {
   name: string;
   provider: string;
   thinkingLevels?: string[];
+  kind?: string;
+  webSearch?: string;
 }
 
 interface ConnectedProvider {
@@ -320,9 +322,33 @@ function NativeRegistryDetail({ models, connectedProviders, onChanged }: { model
 }
 
 const COMPOSER_MODELS_STORAGE_KEY = "omp-composer-models";
-const NATIVE_MODEL_ROLES = ["default", "smol", "slow", "vision", "plan", "designer", "commit", "tiny", "task", "advisor"];
+const NATIVE_MODEL_ROLES = ["default", "smol", "slow", "vision", "plan", "commit", "tiny", "memory", "task", "advisor"];
+// omp kind roles (model-browser.ts KIND_ROLE_IDS); `accepts` mirrors omp's per-role model filter.
+const KIND_MODEL_ROLES = ["image", "web", "speech", "dictation", "judge"];
+
+function roleAcceptsModel(role: string, model: RuntimeModelEntry): boolean {
+  const kind = model.kind ?? "chat";
+  switch (role) {
+    case "tiny":
+    case "memory":
+      return kind === "tiny" || kind === "chat";
+    case "image":
+      return kind === "image";
+    case "web":
+      return kind === "search" || (kind === "chat" && model.webSearch !== undefined);
+    case "speech":
+      return kind === "tts";
+    case "dictation":
+      return kind === "stt";
+    case "judge":
+      return kind === "judge" || kind === "tiny" || kind === "chat";
+    default:
+      return kind === "chat";
+  }
+}
 
 function ModelRolesDetail({ models }: { models: RuntimeModelEntry[] }) {
+  const { t } = useI18n();
   const [roles, setRoles] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -363,34 +389,44 @@ function ModelRolesDetail({ models }: { models: RuntimeModelEntry[] }) {
     setRoles((values) => ({ ...values, [role]: modelValue ? `${modelValue}${effort ? `:${effort}` : ""}` : "" }));
   };
 
+  const renderRole = (role: string) => (
+    <div key={role} className="model-role-row" style={{ display: "grid", gridTemplateColumns: "132px minmax(0, 1fr) minmax(110px, 0.35fr)", alignItems: "center", gap: 10, fontSize: "var(--text-md)" }}>
+      <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <span style={{ color: "var(--text)" }}>{t(`modelsConfig.role.${role}`)}</span>
+        <code style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>{role}</code>
+      </div>
+      {(() => {
+        const raw = roles[role] ?? "";
+        const selectedModel = raw.replace(/:([^,:]+)$/, "");
+        const selectedThinking = raw.match(/:([^,:]+)$/)?.[1] ?? "";
+        const accepted = models.filter((item) => roleAcceptsModel(role, item));
+        const model = accepted.find((item) => `${item.provider}/${item.id}` === selectedModel);
+        const modelKnown = !selectedModel || Boolean(model);
+        return <>
+          <select aria-label={`Model override for ${role}`} value={selectedModel} onChange={(event) => updateRoleModel(role, event.target.value)} style={{ minWidth: 0, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg)", color: "var(--text)", fontSize: "var(--text-md)" }}>
+            <option value="">No override</option>
+            {!modelKnown && <option value={selectedModel}>{selectedModel} (not currently available)</option>}
+            {accepted.map((item) => <option key={`${item.provider}:${item.id}`} value={`${item.provider}/${item.id}`}>{item.name || item.id} ({item.provider}/{item.id})</option>)}
+          </select>
+          <select aria-label={`Thinking level for ${role}`} value={selectedThinking} disabled={!model} onChange={(event) => updateRoleThinking(role, event.target.value)} style={{ minWidth: 0, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg)", color: "var(--text)", fontSize: "var(--text-md)", opacity: model ? 1 : 0.55 }}>
+            <option value="">Model default</option>
+            {(model?.thinkingLevels ?? []).filter((level) => level !== "off").map((level) => <option key={level} value={level}>{level}</option>)}
+          </select>
+        </>;
+      })()}
+    </div>
+  );
+
   return <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
     <div>
       <SectionTitle>OMP Model Roles</SectionTitle>
       <p style={{ margin: "4px 0 0", fontSize: "var(--text-md)", color: "var(--text-muted)", lineHeight: 1.5 }}>Saved natively in <code>~/.omp/agent/config.yml</code>. Choose an OMP model and its supported reasoning level for each role.</p>
     </div>
-    {loading ? <div style={{ color: "var(--text-muted)", fontSize: "var(--text-md)" }}>Loading roles...</div> : NATIVE_MODEL_ROLES.map((role) => (
-      <div key={role} className="model-role-row" style={{ display: "grid", gridTemplateColumns: "82px minmax(0, 1fr) minmax(110px, 0.35fr)", alignItems: "center", gap: 10, fontSize: "var(--text-md)" }}>
-        <code style={{ color: "var(--text-muted)" }}>{role}</code>
-        {(() => {
-          const raw = roles[role] ?? "";
-          const selectedModel = raw.replace(/:([^,:]+)$/, "");
-          const selectedThinking = raw.match(/:([^,:]+)$/)?.[1] ?? "";
-          const model = models.find((item) => `${item.provider}/${item.id}` === selectedModel);
-          const modelKnown = !selectedModel || Boolean(model);
-          return <>
-            <select aria-label={`Model override for ${role}`} value={selectedModel} onChange={(event) => updateRoleModel(role, event.target.value)} style={{ minWidth: 0, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg)", color: "var(--text)", fontSize: "var(--text-md)" }}>
-              <option value="">No override</option>
-              {!modelKnown && <option value={selectedModel}>{selectedModel} (not currently available)</option>}
-              {models.map((item) => <option key={`${item.provider}:${item.id}`} value={`${item.provider}/${item.id}`}>{item.name || item.id} ({item.provider}/{item.id})</option>)}
-            </select>
-            <select aria-label={`Thinking level for ${role}`} value={selectedThinking} disabled={!model} onChange={(event) => updateRoleThinking(role, event.target.value)} style={{ minWidth: 0, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg)", color: "var(--text)", fontSize: "var(--text-md)", opacity: model ? 1 : 0.55 }}>
-              <option value="">Model default</option>
-              {(model?.thinkingLevels ?? []).filter((level) => level !== "off").map((level) => <option key={level} value={level}>{level}</option>)}
-            </select>
-          </>;
-        })()}
-      </div>
-    ))}
+    {loading ? <div style={{ color: "var(--text-muted)", fontSize: "var(--text-md)" }}>Loading roles...</div> : <>
+      {NATIVE_MODEL_ROLES.map(renderRole)}
+      <SectionTitle>{t("modelsConfig.kindRoles")}</SectionTitle>
+      {KIND_MODEL_ROLES.map(renderRole)}
+    </>}
     {error && <div role="alert" style={{ color: "var(--status-error)", fontSize: "var(--text-md)" }}>{error}</div>}
     <button type="button" onClick={() => void save()} disabled={loading || saving} style={{ alignSelf: "flex-start", padding: "7px 12px", border: "none", borderRadius: "var(--radius-control)", background: "var(--accent)", color: "var(--on-accent)", cursor: saving ? "wait" : "pointer", fontSize: "var(--text-md)", fontWeight: 600 }}>{saving ? "Saving..." : "Save OMP roles"}</button>
   </div>;
@@ -1806,6 +1842,7 @@ export function ModelsConfig({ onSaved, onDirtyChange }: { onSaved?: () => void;
   const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
   const [apiKeyProviders, setApiKeyProviders] = useState<ApiKeyProvider[]>([]);
   const [runtimeModels, setRuntimeModels] = useState<RuntimeModelEntry[]>([]);
+  const [kindModels, setKindModels] = useState<RuntimeModelEntry[]>([]);
   const [connectedProviders, setConnectedProviders] = useState<ConnectedProvider[]>([]);
   const [runtimeModelsLoading, setRuntimeModelsLoading] = useState(true);
   const [visibleModelKeys, setVisibleModelKeys] = useState<Set<string> | null>(null);
@@ -1841,6 +1878,7 @@ export function ModelsConfig({ onSaved, onDirtyChange }: { onSaved?: () => void;
       if (options?.force) invalidateClientModels();
       const data = await loadClientModels("", { force: options?.force });
       setRuntimeModels(data.modelList ?? []);
+      setKindModels(data.kindModels ?? []);
       setConnectedProviders(data.connectedProviders ?? []);
     } catch {
       // Keep the last successful runtime list; a failed refresh is not an empty registry.
@@ -2105,7 +2143,7 @@ export function ModelsConfig({ onSaved, onDirtyChange }: { onSaved?: () => void;
       if (!p) return null;
       return <ApiKeyDetail key={p.id} provider={p} />;
     }
-    if (selection.type === "roles") return <ModelRolesDetail models={runtimeModels} />;
+    if (selection.type === "roles") return <ModelRolesDetail models={[...runtimeModels, ...kindModels]} />;
     if (selection.type === "registry") return <NativeRegistryDetail models={runtimeModels} connectedProviders={connectedProviders} onChanged={() => loadRuntimeModels({ force: true })} />;
     if (selection.type === "picker") return (
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>

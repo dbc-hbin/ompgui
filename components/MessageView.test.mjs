@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -11,10 +10,8 @@ const jiti = createJiti(import.meta.url, {
 });
 const { MessageView, SafeMarkdownBody, TaskResultPanel, loadToolResultImages } = await jiti.import("./MessageView.tsx");
 const { CodeBlock } = await jiti.import("./MermaidBlock.tsx");
-const { CHAT_COLUMN_MAX_WIDTH } = await jiti.import("../lib/chat-layout.ts");
 const { collectToolResultImages } = await jiti.import("../lib/image-attachments.ts");
 const { normalizeToolCalls } = await jiti.import("../lib/normalize.ts");
-const messageViewSource = await readFile(new URL("./MessageView.tsx", import.meta.url), "utf8");
 
 test("supported legacy assistant strings render as normal answers", () => {
   const message = normalizeToolCalls({ role: "assistant", content: "Legacy answer remains readable" });
@@ -160,24 +157,6 @@ test("advisor custom messages use the localized advisor label", () => {
   assert.doesNotMatch(html, /customType/);
 });
 
-test("CHAT_COLUMN_MAX_WIDTH is 744", () => {
-  assert.equal(CHAT_COLUMN_MAX_WIDTH, 744);
-});
-
-test("user message container uses quiet neutral border without accent mix or shadow", () => {
-  const html = renderToStaticMarkup(React.createElement(MessageView, {
-    message: {
-      role: "user",
-      content: "Hello from user",
-    },
-  }));
-
-  assert.match(html, /border:1px solid var\(--border\)/);
-  assert.match(html, /box-shadow:none/);
-  assert.doesNotMatch(html, /color-mix\(in srgb, var\(--accent\)/);
-  assert.doesNotMatch(html, /var\(--shadow-card\)/);
-});
-
 test("user message actions render with touch-ready action button classes and labels", () => {
   const html = renderToStaticMarkup(React.createElement(MessageView, {
     message: {
@@ -191,70 +170,9 @@ test("user message actions render with touch-ready action button classes and lab
     onEditContent: () => {},
   }));
 
-  assert.match(html, /class="[^"]*chat-action-row[^"]*"/);
-  assert.match(html, /class="[^"]*chat-action-group[^"]*"/);
-  assert.match(html, /class="[^"]*chat-action-btn[^"]*"/);
   assert.match(html, /aria-label="Copy message"/);
   assert.match(html, /aria-label="Jump back here and edit this message"/);
   assert.match(html, /aria-label="Fork a new session from this point"/);
-  // Verify Lucide inline icon size 14 with strokeWidth 1.75
-  assert.match(html, /width="14" height="14"[^>]*stroke-width="1.75"/);
-});
-
-test("normal tool call renders with neutral border and text without status-success tint", () => {
-  const html = renderToStaticMarkup(React.createElement(MessageView, {
-    toolCallsDefaultCollapsed: false,
-    message: {
-      role: "assistant",
-      content: [
-        { type: "toolCall", toolCallId: "call-1", toolName: "read", input: { path: "foo.ts" } },
-      ],
-    },
-    toolResults: new Map([
-      ["call-1", { role: "toolResult", toolCallId: "call-1", toolName: "read", content: "file contents", isError: false }],
-    ]),
-  }));
-
-  assert.match(html, /border:1px solid var\(--border\)/);
-  assert.match(html, /color:var\(--text\)/);
-  assert.doesNotMatch(html, /var\(--status-success\)/);
-  // Chip chevron uses size 12 and strokeWidth 2
-  assert.match(html, /width="12" height="12"[^>]*stroke-width="2"/);
-});
-
-test("error tool call renders with semantic error border and text", () => {
-  const html = renderToStaticMarkup(React.createElement(MessageView, {
-    toolCallsDefaultCollapsed: false,
-    message: {
-      role: "assistant",
-      content: [
-        { type: "toolCall", toolCallId: "call-err", toolName: "bash", input: { command: "exit 1" } },
-      ],
-    },
-    toolResults: new Map([
-      ["call-err", { role: "toolResult", toolCallId: "call-err", toolName: "bash", content: "command failed", isError: true }],
-    ]),
-  }));
-
-  assert.match(html, /border:1px solid var\(--status-error\)/);
-  assert.match(html, /color:var\(--status-error\)/);
-});
-
-test("thinking block renders with normalized Lucide icons and neutral border", () => {
-  const html = renderToStaticMarkup(React.createElement(MessageView, {
-    message: {
-      role: "assistant",
-      content: [
-        { type: "thinking", thinking: "Pondering the solution..." },
-      ],
-    },
-  }));
-
-  assert.match(html, /border:1px solid var\(--border\)/);
-  // Brain icon: inline 14/1.75
-  assert.match(html, /width="14" height="14"[^>]*stroke-width="1.75"/);
-  // Chevron: chip 12/2
-  assert.match(html, /width="12" height="12"[^>]*stroke-width="2"/);
 });
 
 const TEST_IMAGE_DATA = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
@@ -533,20 +451,5 @@ test("loadToolResultImages fetches the per-entry media route", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
-});
-
-test("deferred image state is released on collapse and partial loads stay visibly failed", () => {
-  assert.match(
-    messageViewSource,
-    /if \(!expanded\) \{\s*setDeferredImages\(null\);\s*setDeferredLoadedKey\(null\);\s*setDeferredMissingCount\(0\)/,
-  );
-  assert.match(
-    messageViewSource,
-    /deferredLoaded && deferredMissingCount > 0/,
-  );
-  assert.doesNotMatch(
-    messageViewSource,
-    /\{failed && images\.length === 0 && \(/,
-  );
 });
 

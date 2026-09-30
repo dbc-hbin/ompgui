@@ -83,6 +83,36 @@ class ModelSettingsPanelTest {
     }
 
     @Test
+    fun kindRolesOnlyOfferModelsOmpAccepts() {
+        val data = JSONObject()
+            .put(
+                "models",
+                JSONArray()
+                    .put(JSONObject().put("provider", "p").put("id", "chat"))
+                    .put(JSONObject().put("provider", "p").put("id", "web-chat").put("webSearch", "gemini")),
+            )
+            .put(
+                "kindModels",
+                JSONArray()
+                    .put(JSONObject().put("provider", "p").put("id", "tiny").put("kind", "tiny"))
+                    .put(JSONObject().put("provider", "p").put("id", "img").put("kind", "image"))
+                    .put(JSONObject().put("provider", "p").put("id", "tts").put("kind", "tts"))
+                    .put(JSONObject().put("provider", "p").put("id", "search").put("kind", "search")),
+            )
+        val catalog = parseModelCatalog(data)
+        assertEquals(listOf("chat", "web-chat"), catalog.models.map { it.id })
+        val models = catalog.models + catalog.kindModels
+        fun accepted(role: String) = models.filter { roleAcceptsModel(role, it) }.map { it.id }
+        assertEquals(listOf("chat", "web-chat"), accepted("default"))
+        assertEquals(listOf("chat", "web-chat", "tiny"), accepted("memory"))
+        assertEquals(listOf("img"), accepted("image"))
+        assertEquals(listOf("web-chat", "search"), accepted("web"))
+        assertEquals(listOf("tts"), accepted("speech"))
+        assertEquals(emptyList<String>(), accepted("dictation"))
+        assertEquals(listOf("chat", "web-chat", "tiny"), accepted("judge"))
+    }
+
+    @Test
     fun parsesRolesSkippingBlankSelectors() {
         val data = JSONObject().put(
             "roles",

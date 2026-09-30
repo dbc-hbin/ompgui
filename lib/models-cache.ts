@@ -1,6 +1,8 @@
 export interface ModelsData {
   models: Record<string, string>;
-  modelList: { id: string; name: string; provider: string; supportsFastMode?: boolean; contextWindow?: number }[];
+  modelList: { id: string; name: string; provider: string; supportsFastMode?: boolean; contextWindow?: number; kind?: string; webSearch?: string }[];
+  /** Non-chat models for omp kind roles (image/web/speech/dictation/judge). */
+  kindModels?: { id: string; name: string; provider: string; kind: string }[];
   defaultModel: { provider: string; modelId: string } | null;
   thinkingLevels: Record<string, string[]>;
   connectedProviders?: { id: string; name: string; disabled: boolean }[];

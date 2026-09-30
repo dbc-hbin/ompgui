@@ -132,6 +132,81 @@ class RelayFramesTest {
         assertEquals(1, snapshot.messages.size)
         assertEquals("user", snapshot.messages[0].role)
         assertTrue(snapshot.agent.ready)
+        assertEquals(1, snapshot.transcript.total)
+        assertEquals(0, snapshot.transcript.offset)
+        assertEquals(1, snapshot.transcript.nextOffset)
+        assertFalse(snapshot.transcript.hasMore)
+    }
+
+    @Test
+    fun snapshotPagingUsesBoundedMetadataAndSafeLegacyDefaults() {
+        val paged = parseServerFrame(
+            """{"op":"session.snapshot","id":"sess-1","total":120,"offset":70,"nextOffset":120,"hasMore":false,"messages":[{"role":"user","entryId":"entry-70","text":"oldest visible"}]}""",
+        ) as ServerFrame.Snapshot
+        assertEquals(120, paged.transcript.total)
+        assertEquals(70, paged.transcript.offset)
+        assertEquals(120, paged.transcript.nextOffset)
+        assertFalse(paged.transcript.hasMore)
+
+        val malformed = parseTranscriptPageInfo(
+            JSONObject().put("total", -1).put("offset", -5).put("nextOffset", 999),
+            messageCount = 2,
+        )
+        assertEquals(2, malformed.total)
+        assertEquals(0, malformed.offset)
+        assertEquals(2, malformed.nextOffset)
+    }
+
+    @Test
+    fun fullBoundedSnapshotAndPreviousPageFormAContiguousTranscript() {
+        val snapshotMessages = JSONArray()
+        for (index in 20 until 120) {
+            snapshotMessages.put(
+                JSONObject().put("role", "user").put("entryId", "entry-$index").put("text", "message $index"),
+            )
+        }
+        val snapshot = parseServerFrame(
+            JSONObject().put("op", "session.snapshot").put("id", "session")
+                .put("messages", snapshotMessages).put("total", 120).put("offset", 20)
+                .put("nextOffset", 120).put("hasMore", false).toString(),
+        ) as ServerFrame.Snapshot
+        assertEquals(100, snapshot.messages.size)
+        assertEquals("entry-20", snapshot.messages.first().entryId)
+        assertEquals(0 until 20, ChatRequests.previousLivePage(snapshot.transcript.offset))
+
+        val earlierMessages = JSONArray()
+        val earlierIds = JSONArray()
+        for (index in 0 until 20) {
+            earlierMessages.put(JSONObject().put("role", "user").put("text", "message $index"))
+            earlierIds.put("entry-$index")
+        }
+        val earlier = ChatRequests.liveHistoryMessages(
+            ChatRequests.parseHistoryPage(
+                JSONObject().put("messages", earlierMessages).put("entryIds", earlierIds)
+                    .put("total", 120).put("offset", 0).put("limit", 20),
+            ),
+        )
+        assertEquals(
+            (0 until 120).map { "entry-$it" },
+            ChatRequests.prependEarlierMessages(snapshot.messages, earlier).map { it.entryId },
+        )
+
+        val legacy = parseServerFrame(
+            JSONObject().put("op", "session.snapshot").put("id", "legacy")
+                .put("messages", snapshotMessages).toString(),
+        ) as ServerFrame.Snapshot
+        assertEquals(100, legacy.messages.size)
+        assertEquals(100, legacy.transcript.total)
+        assertEquals(0, legacy.transcript.offset)
+        assertEquals(100, legacy.transcript.nextOffset)
+
+        snapshotMessages.put(JSONObject().put("role", "user").put("entryId", "entry-120").put("text", "too many"))
+        assertNull(
+            parseServerFrame(
+                JSONObject().put("op", "session.snapshot").put("id", "session")
+                    .put("messages", snapshotMessages).toString(),
+            ),
+        )
     }
 
     @Test

@@ -40,6 +40,10 @@ export interface OmpModel {
     effortMap?: Record<string, string>;
   };
   input?: string[];
+  /** Model kind (chat when absent); decides which model roles accept it. */
+  kind?: string;
+  /** Native web-search backend for chat models; the `web` role accepts these. */
+  webSearch?: string;
   contextWindow?: number | null;
   maxTokens?: number | null;
   cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };

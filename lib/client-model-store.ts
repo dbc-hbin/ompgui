@@ -2,7 +2,8 @@ export const CLIENT_MODELS_TTL_MS = 30_000;
 
 export type ClientModelsResponse = {
   models: Record<string, string>;
-  modelList: { id: string; name: string; provider: string; supportsFastMode?: boolean; contextWindow?: number }[];
+  modelList: { id: string; name: string; provider: string; supportsFastMode?: boolean; contextWindow?: number; kind?: string; webSearch?: string }[];
+  kindModels?: { id: string; name: string; provider: string; kind: string }[];
   defaultModel: { provider: string; modelId: string } | null;
   thinkingLevels: Record<string, string[]>;
   thinkingLevelMaps?: Record<string, Record<string, string | null>>;
@@ -113,6 +114,7 @@ function parseModels(data: unknown): ClientModelsResponse {
   return {
     models: value.models && typeof value.models === "object" ? value.models : {},
     modelList: Array.isArray(value.modelList) ? value.modelList : [],
+    ...(Array.isArray(value.kindModels) ? { kindModels: value.kindModels } : {}),
     defaultModel: value.defaultModel ?? null,
     thinkingLevels: value.thinkingLevels && typeof value.thinkingLevels === "object" ? value.thinkingLevels : {},
     ...(value.thinkingLevelMaps ? { thinkingLevelMaps: value.thinkingLevelMaps } : {}),

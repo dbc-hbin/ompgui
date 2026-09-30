@@ -65,19 +65,6 @@ const BUNDLED_CATALOG: Record<string, Partial<AgentDefinition>> = {
     tools: ["read", "grep", "glob", "lsp", "ast_grep"],
     systemPrompt: "Discover potential security vulnerabilities and return concrete evidence and remediation guidance.",
   },
-  librarian: {
-    description: "Researches external libraries and APIs by reading source code. Returns definitive, source-verified answers.",
-    model: "@smol",
-    thinkingLevel: "minimal",
-    tools: ["read", "grep", "glob", "bash", "lsp", "web_search", "ast_grep"],
-    systemPrompt: "Research library APIs and source documentation; provide definitive, source-verified answers.",
-  },
-  designer: {
-    description: "UI/UX specialist for design implementation, review, visual refinement",
-    model: "@designer",
-    tools: ["read", "write", "edit"],
-    systemPrompt: "Design and implement polished, accessible user interfaces following project conventions.",
-  },
   sonic: {
     description: "Low-reasoning agent for strictly mechanical updates or data collection only",
     model: "@smol",
@@ -229,8 +216,8 @@ export async function discoverAgents(cwd: string = process.cwd()): Promise<{
   }
 
   const agentModelOverrides = (taskSettings.agentModelOverrides as Record<string, string | string[]>) || {};
-  const agentPrewalk = (taskSettings.agentPrewalk as Record<string, boolean | string>) || {};
-  const agentAdvisor = (taskSettings.agentAdvisor as Record<string, boolean | string>) || {};
+  const agentPrewalk = (taskSettings.agentPrewalk as Record<string, string>) || {};
+  const agentAdvisor = (taskSettings.agentAdvisor as Record<string, string>) || {};
   const disabledAgents = new Set(Array.isArray(taskSettings.disabledAgents) ? taskSettings.disabledAgents : []);
 
   for (const agent of allFound) {
@@ -243,10 +230,12 @@ export async function discoverAgents(cwd: string = process.cwd()): Promise<{
         agent.overrideModel = agentModelOverrides[agent.name];
       }
       if (agent.name in agentPrewalk) {
-        agent.prewalkOverride = agentPrewalk[agent.name];
+        const value = agentPrewalk[agent.name];
+        agent.prewalkOverride = value === "on" ? true : value === "off" ? false : value;
       }
       if (agent.name in agentAdvisor) {
-        agent.advisorOverride = agentAdvisor[agent.name];
+        const value = agentAdvisor[agent.name];
+        agent.advisorOverride = value === "on" ? true : value === "off" ? false : value;
       }
       if (disabledAgents.has(agent.name)) {
         agent.disabled = true;

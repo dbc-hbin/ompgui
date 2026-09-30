@@ -45,6 +45,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import android.content.res.Resources
 import com.dbchbin.ompgui.remote.R
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -350,7 +351,7 @@ private fun McpEditor(requester: RelayRequester, cwd: String, initial: McpDraft,
                     }
                     TextButton(enabled = !busy, onClick = { change(draft.copy(args = draft.args + "")) }) { Text(stringResource(R.string.extension_mcp_add_argument)) }
                 } else {
-                    McpField(draft.url, { change(draft.copy(url = it)) }, stringResource(R.string.extension_mcp_server_url), !busy)
+                    McpField(draft.url, { change(draft.copy(url = it)) }, stringResource(R.string.extension_mcp_server_url), !busy, keyboardType = KeyboardType.Uri)
                 }
                 HorizontalDivider(color = OmpColors.Border)
                 Text(stringResource(R.string.extension_mcp_connection_options), style = MaterialTheme.typography.titleSmall, color = OmpColors.Text)
@@ -391,8 +392,8 @@ private fun McpEditor(requester: RelayRequester, cwd: String, initial: McpDraft,
 }
 
 @Composable
-private fun McpField(value: String, onChange: (String) -> Unit, label: String, enabled: Boolean) {
-    OutlinedTextField(value = value, onValueChange = onChange, label = { Text(label) }, enabled = enabled, singleLine = true, textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace), modifier = Modifier.fillMaxWidth())
+private fun McpField(value: String, onChange: (String) -> Unit, label: String, enabled: Boolean, keyboardType: KeyboardType = KeyboardType.Text) {
+    OutlinedTextField(value = value, onValueChange = onChange, label = { Text(label) }, enabled = enabled, singleLine = true, keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = keyboardType), textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace), modifier = Modifier.fillMaxWidth())
 }
 
 @Composable
