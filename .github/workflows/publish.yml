@@ -42,6 +42,10 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: android-actions/setup-android@v3
+        with:
+          # v3's default also installs the obsolete `tools` package, which
+          # current runner cmdline-tools no longer provide.
+          packages: platform-tools
       - name: Install Android SDK
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
       - name: Assemble, unit test and lint Android
