@@ -2,7 +2,7 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-> **Android APK (Android 12+)** — Use the Kotlin companion app to connect to a remote ompgui server, with a read-only offline snapshot of the latest session. [Download ompgui Remote v0.7.11](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.11/ompgui-remote-v0.7.11.apk) · [Release notes](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.11)
+> **Android APK (Android 12+)** — Use the Kotlin companion app to connect to a remote ompgui server, with a read-only offline snapshot of the latest session. [Download ompgui Remote v0.7.12](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.12/ompgui-remote-v0.7.12.apk) · [Release notes](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.12)
 
 > The Kotlin companion app in `android/` uses authenticated `/relay` WebSockets for session/history controls and rich online transcripts with linked messages, tool calls/results/errors, and media references, plus offline Mermaid diagrams and code highlighting and inline image/PDF/audio/HTML/Markdown/DOCX previews. Online history is independent of the protected offline snapshot: bounded previews fetch full text through `sessions.content` and paginate media references, rather than truncating the transcript at 4,000 characters. Offline cache privacy restrictions remain unchanged. Visible-only file auto-refresh preserves unsaved edits; browsing supports allowed hidden files and archive search. Models/settings include the public models.dev catalog, advanced OMP settings, and actual per-session MCP runtime status shown separately from configuration. Attachments are streamed into staging rather than packed into one giant phone JSON payload: up to 10 images at 10 MiB each and, independently, 10 text attachments at 256 KiB each. OMP's own image normalization and provider-specific image-count limi…
 >
@@ -54,7 +54,7 @@ ompgui --port 8080              # custom port
 ompgui --hostname 0.0.0.0       # expose on a trusted network
 ompgui -p 8080 -H 0.0.0.0       # combine options
 ompgui --no-open                # do not open the browser automatically
-ompgui --password "a-long-random-password" # password-only sign-in without POSIX inline-env syntax
+ompgui --password "a-long-random-password" # local sign-in and an extra pairing factor
 
 PORT=8080 ompgui                # environment variable is also supported
 OMP_WEB_HOSTNAME=0.0.0.0 ompgui # explicit network exposure
@@ -67,7 +67,7 @@ OMP_WEB_NO_OPEN=1 ompgui        # useful when running as a background service
 # ompgui --password "a-long-random-password"
 ```
 
-Set `OMP_WEB_PASSWORD` (or pass `--password`) to protect the interface and every API endpoint with a themed, password-only sign-in screen. A successful sign-in creates an HTTP-only signed session cookie for 30 days; changing the configured password invalidates existing sessions. Leaving the variable unset disables authentication. Remote use still requires HTTPS through a trusted reverse proxy or VPN so the password and session cookie cannot be intercepted. On Windows the env-variable syntax is `$env:OMP_WEB_PASSWORD="..."`; `ompgui --password "..."` works in every shell without that extra step.
+`OMP_WEB_PASSWORD` (or `--password`) protects direct localhost access and adds a password check when enrolling a device. Local password sessions last 30 days and are invalidated when the password changes. Remote web access always requires a registered device, including when no password is set; a password or old password-session cookie alone cannot authorize it. Use HTTPS remotely. On Windows, `ompgui --password "..."` works without inline environment-variable syntax.
 
 ### macOS background service
 
@@ -98,9 +98,9 @@ The browser GUI exposes these controls under **Settings → System & Updates →
 
 For accessing `ompgui` from mobile devices (iPhone, iPad, Android) or external laptops, **using [Tailscale](https://tailscale.com/) is strongly recommended**. Tailscale creates a private, point-to-point WireGuard mesh VPN between your devices without exposing your host machine to the public internet or requiring port forwarding.
 
-### 1. Configure Password (Required for Remote Access)
+### 1. Configure an Additional Pairing Password
 
-When binding to external network interfaces, setting a password is required to secure the workspace:
+The CLI requires a password when binding to external interfaces. Behind Tailscale Serve/Funnel, keep the default loopback binding; a password is an optional extra pairing factor, not a substitute for device registration:
 
 ```bash
 # CLI option: bind to all interfaces with a password
@@ -115,20 +115,21 @@ OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompgui
 1. **Install Tailscale**: Download and sign into [Tailscale](https://tailscale.com/download) on both your host machine and your mobile device using the same account.
 2. **Start ompgui on your host machine**:
    ```bash
-   ompgui --hostname 0.0.0.0 --password "your-strong-password"
+   ompgui --password "your-strong-password"
    ```
 3. **Access from your mobile browser**:
-   - Navigate to your host's Tailscale IP (e.g. `100.x.y.z`) or MagicDNS machine name:
+   - Use the HTTPS Serve/Funnel address configured for ompgui:
      ```text
-     http://100.x.y.z:30177
-     # Or with MagicDNS enabled:
-     http://my-macbook:30177
+     https://host.ts.net:8443
      ```
-4. **Log in**: Enter your configured password to securely control and chat with your coding agent on mobile.
+4. **Register the browser**: On the host, open Settings → Connect Devices or run `ompgui pair --url wss://host.ts.net:8443/relay` with the actual ompgui HTTPS/Funnel address. Open the printed **Browser** link on the remote device, enter the workspace password if configured, and select **Pair this browser**. For direct tailnet access, configure HTTPS first. The browser and phone links share one ten-minute offer: only one can consume it; generate another for the next device.
+5. **Manage access**: `ompgui devices` and `ompgui devices revoke <id>` use the same registration list as the Android APK. Settings → Connect Devices also lists and revokes both clients. Revocation closes active browser streams and relay connections and rejects subsequent web requests.
 
 ### Security and troubleshooting
 
 - The server binds to `127.0.0.1` by default. A non-loopback hostname is an explicit opt-in and should only be used behind a trusted network boundary; ompgui is not safe to expose publicly.
+- Reverse proxies must preserve the external Host and forwarding/Funnel headers. A proxy that strips them and rewrites Host to localhost makes remote traffic indistinguishable from direct local access.
+- Browser enrollment reuses APK relay authentication and `~/.omp/agent/ompgui-relay.json`. The browser holds a 30-day, host-scoped HTTP-only device cookie; the server stores only the token hash. Registration identifies a credential, not physical hardware: copying its token/cookie copies access until revocation.
 - File APIs are allow-listed to the selected workspace, its valid Git worktrees, session-referenced directories, and explicitly selected roots. Paths are canonicalized to reject traversal and symlink escapes.
 - `omp` is resolved from `OMP_WEB_OMP_BIN` first, then `PATH`. If live chat cannot start, run `omp --version` in the same terminal or set `OMP_WEB_OMP_BIN` to the executable's absolute path.
 - Session history remains native OMP JSONL. OMP owns live-session writes; ompgui reads the files directly and only performs explicit title, archive, and delete maintenance when it is not racing a live OMP write.
@@ -157,7 +158,7 @@ OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompgui
 | --- | --- |
 | `PORT` | Server port (default `30177`; `-p/--port` wins) |
 | `OMP_WEB_HOSTNAME` | Bind hostname (default `127.0.0.1`; `-H/--hostname` wins) |
-| `OMP_WEB_PASSWORD` / `--password` | Password for the sign-in screen; `--password` works in every shell (PowerShell/CMD) without ` $env:` syntax |
+| `OMP_WEB_PASSWORD` / `--password` | Local sign-in password and additional device-enrollment factor; remote access still requires a registered device |
 | `OMP_WEB_NO_OPEN` | Set to `1`/`true` to skip auto-opening the browser |
 | `OMP_WEB_OMP_BIN` | Absolute path to the `omp` binary when it is not on `PATH` |
 | `PI_CODING_AGENT_DIR` | Point at another omp agent directory (default `~/.omp/agent`) |

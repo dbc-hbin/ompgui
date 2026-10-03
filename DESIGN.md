@@ -199,10 +199,12 @@ connectivity or account access.
 ## Security contract
 
 - Bind loopback-only by default. A non-loopback hostname is an explicit opt-in.
-- `OMP_WEB_PASSWORD` protects every route with a password-only sign-in screen.
-  Successful sign-in creates an HTTP-only, signed cookie with a 30-day expiry;
-  changing the configured password invalidates existing sessions. Exposed
-  deployments require HTTPS through a trusted reverse proxy or VPN.
+- Remote web requests require the same registered-device tokens as the APK
+  relay, including when no password is configured. Password-session cookies
+  only authorize direct localhost access; `OMP_WEB_PASSWORD` also adds an
+  enrollment password check. Local sessions expire after 30 days or a password
+  change. Remote deployments require HTTPS. Proxies must preserve the external
+  Host and forwarding/Funnel evidence rather than impersonating localhost.
 - API requests are origin-checked. Do not add browser-to-host execution paths
   that bypass this boundary.
 - Untrusted file responses own their restrictive content security policy;
@@ -215,11 +217,17 @@ connectivity or account access.
   symlink escapes.
 - Secrets, raw API keys, and auth database contents never appear in API
   responses, logs, or the browser.
-- `/relay` is a WebSocket for paired phone remotes on the same Next.js port
-  (Tailscale Funnel 443). It is not cookie-authenticated. A Mac-side pairing
-  offer (Settings → Connect Phone, or `/pair` / `ompgui pair`) issues a
-  one-time secret; the phone then holds a device token whose hash is stored
-  in `~/.omp/agent/ompgui-relay.json`.
+- `/relay` is a device-authenticated WebSocket on the same Next.js port. A
+  host-side offer (Settings → Connect Devices, `/pair`, or `ompgui pair`) issues
+  one secret usable by either the phone or browser, once within ten minutes.
+  Browser enrollment uses a thin `/api/web-auth/pair` HTTP adapter over
+  `authenticateRelayHello`, returning a host-scoped, HTTP-only device cookie
+  (30 days, SameSite=Lax, Secure on HTTPS). Both transports use token hashes in
+  `~/.omp/agent/ompgui-relay.json` and the same list/revoke operations. Revocation
+  closes live browser streams and relay connections and rejects future requests;
+  removing the last device never reopens remote access. A registered device is
+  a bearer credential, not hardware attestation; copied tokens retain authority
+  until revoked.
   Pairing secrets and tokens are never logged. After authenticated hello,
   correlated domain requests expose a finite, validated action set for
   `sessions`, `files`, `models`, `extensions`, and `system`, alongside session

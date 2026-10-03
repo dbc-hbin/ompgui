@@ -2,7 +2,7 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-> **Android APK（Android 12+）** — 使用 Kotlin 配套应用连接远程 ompgui 服务器，并查看最新会话的只读离线快照。[下载 ompgui Remote v0.7.11](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.11/ompgui-remote-v0.7.11.apk) · [发行说明](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.11)
+> **Android APK（Android 12+）** — 使用 Kotlin 配套应用连接远程 ompgui 服务器，并查看最新会话的只读离线快照。[下载 ompgui Remote v0.7.12](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.12/ompgui-remote-v0.7.12.apk) · [发行说明](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.12)
 
 > `android/` 中的实验性原生 Compose 客户端使用经过身份验证的 `/relay` WebSocket，提供会话/历史记录控制、带链接的消息、离线 Mermaid 图表与代码语法高亮，以及图片/PDF/音频/HTML/Markdown/DOCX 内联预览。文件仅在界面可见时自动刷新，并保留未保存的编辑；支持浏览允许访问的隐藏文件和搜索归档。模型与设置包括公开的 models.dev 目录、高级 OMP 设置，以及与配置状态分开显示的各会话实际 MCP 运行状态。附件通过流式传输暂存，而不是在手机端打包成一个巨大的 JSON：图片最多 10 个，每个 10 MiB；文本附件独立计数，最多 10 个，每个 256 KiB。OMP 自身的图像规范化处理和各提供商的图片数量限制仍然适用。
 >
@@ -53,7 +53,7 @@ ompgui --hostname 0.0.0.0       # 在可信网络中暴露服务
 ompgui -p 8080 -H 0.0.0.0       # 组合使用
 ompgui --no-open                # 不自动打开浏览器
 
-ompgui --password "a-long-random-password" # 启用仅密码登录（Windows 同样适用）
+ompgui --password "a-long-random-password" # 本地登录及设备注册时的额外验证
 
 PORT=8080 ompgui                # 也支持环境变量
 OMP_WEB_HOSTNAME=0.0.0.0 ompgui # 显式暴露到网络
@@ -62,7 +62,7 @@ OMP_WEB_PASSWORD='a-long-random-password' ompgui # 环境变量形式（POSIX）
 OMP_WEB_NO_OPEN=1 ompgui        # 作为后台服务运行时很有用
 ```
 
-设置 `OMP_WEB_PASSWORD` 可通过与主题集成的仅密码登录页面保护界面和所有 API 端点。登录成功后，会创建有效期为 30 天的 HTTP-only 签名会话 Cookie；留空则关闭认证。远程访问仍需通过受信任反向代理或 VPN 提供 HTTPS，以保护密码和会话 Cookie。默认仅监听 `127.0.0.1`；不要将 ompgui 直接暴露到互联网。
+`OMP_WEB_PASSWORD` 或 `--password` 用于保护直接 localhost 访问，并在设备注册时额外验证密码。本地会话有效期为 30 天，修改密码会使其失效。无论是否设置密码，远程 Web 访问都必须使用已注册设备；仅凭密码或旧密码会话 Cookie 无法访问。远程连接请使用 HTTPS。
 
 ### macOS 后台服务
 
@@ -93,9 +93,9 @@ macOS 浏览器 GUI 的 **Settings → System & Updates → Background service**
 
 从移动设备（iPhone、iPad、Android）或外部笔记本访问 `ompgui` 时，**强烈推荐使用 [Tailscale](https://tailscale.com/) 虚拟专用网（VPN）**。它通过端到端加密的点对点 Mesh 网络连接设备，无需端口转发或暴露公网 IP。
 
-### 1. 配置访问密码（远程访问必备）
+### 1. 配置设备注册的额外密码
 
-当绑定到外部网络接口时，必须配置密码以保护工作区：
+CLI 在绑定外部接口时要求密码。通过 Tailscale Serve/Funnel 访问时请保留默认回环绑定；密码仅是注册时的额外验证，不能替代设备注册：
 
 ```bash
 # CLI 选项：绑定到所有网络接口并设置密码
@@ -110,16 +110,17 @@ OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompgui
 1. **安装 Tailscale**：在宿主电脑和移动设备上安装 [Tailscale](https://tailscale.com/download) 并登录同一账户。
 2. **在宿主电脑上启动 ompgui**：
    ```bash
-   ompgui --hostname 0.0.0.0 --password "your-strong-password"
+   ompgui --password "your-strong-password"
    ```
 3. **在移动端浏览器中访问**：
-   - 访问宿主电脑的 Tailscale IP（如 `100.x.y.z`）或 MagicDNS 机器名：
+   - 使用已连接到 ompgui 的 HTTPS Serve/Funnel 地址：
      ```text
-     http://100.x.y.z:30177
-     # 或启用 MagicDNS 时
-     http://my-macbook:30177
+     https://host.ts.net:8443
      ```
-4. **登录**：输入设置的密码即可在移动设备上安全地与编程智能体进行实时交互与操作。
+4. **注册浏览器**：在宿主电脑的 Settings → Connect Devices 创建链接，或运行 `ompgui pair --url wss://host.ts.net:8443/relay` 并指定实际 ompgui HTTPS/Funnel 地址。在远程浏览器打开输出的 **Browser** 链接，若设置了密码则输入，然后选择配对浏览器。直接 tailnet 访问也应先配置 HTTPS。浏览器与手机链接共享同一个十分钟一次性注册请求，只能由其中一个使用；为下一台设备重新生成链接。
+5. **撤销访问**：使用 `ompgui devices`、`ompgui devices revoke <id>` 或 Settings → Connect Devices。它们与 Android APK 共享设备列表和撤销逻辑；撤销会关闭活动 Web 流及中继连接，并拒绝后续请求。
+
+反向代理必须保留外部 Host 和 forwarding/Funnel 头。删除这些头并把 Host 改为 localhost，会使远程请求无法与直接本地请求区分。浏览器复用 APK 中继认证及 `~/.omp/agent/ompgui-relay.json`，持有有效期为 30 天、仅限当前主机的 HttpOnly 设备 Cookie；服务器只保存令牌哈希。这是凭据注册而非物理设备证明：复制令牌或 Cookie 即可在撤销前获得相同权限。
 
 ## 功能特性
 
@@ -142,7 +143,7 @@ OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompgui
 | --- | --- |
 | `PORT` | 服务器端口（默认 `30177`；`-p/--port` 优先） |
 | `OMP_WEB_HOSTNAME` | 绑定主机名（默认 `127.0.0.1`；`-H/--hostname` 优先） |
-| `OMP_WEB_PASSWORD` | 登录页面使用的可选密码 |
+| `OMP_WEB_PASSWORD` | 本地登录及设备注册时的额外验证密码；远程仍需已注册设备 |
 | `OMP_WEB_NO_OPEN` | 设为 `1`/`true` 可跳过自动打开浏览器 |
 | `OMP_WEB_OMP_BIN` | `omp` 不在 `PATH` 中时，指向其二进制文件的绝对路径 |
 | `PI_CODING_AGENT_DIR` | 指向其他 omp agent 目录（默认 `~/.omp/agent`） |

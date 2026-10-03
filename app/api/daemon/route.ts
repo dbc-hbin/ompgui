@@ -2,14 +2,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { parseJsonWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
 import { daemonCommand } from "@/lib/daemon";
 import { isApiRequestOriginAllowed } from "@/lib/request-security";
-import { isValidWebSession, isWebPasswordEnabled, OMPGUI_SESSION_COOKIE, OMP_WEB_SESSION_COOKIE } from "@/lib/web-auth";
+import { isWebRequestAuthorized } from "@/lib/web-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 function authorize(request: NextRequest) {
   if (!isApiRequestOriginAllowed(request)) return NextResponse.json({ error: "Cross-origin API requests are not allowed" }, { status: 403 });
-  if (isWebPasswordEnabled() && !isValidWebSession(request.cookies.get(OMPGUI_SESSION_COOKIE)?.value ?? request.cookies.get(OMP_WEB_SESSION_COOKIE)?.value)) {
+  if (!isWebRequestAuthorized(request)) {
     return NextResponse.json({ error: "Password required", code: "password_required" }, { status: 401 });
   }
   return null;

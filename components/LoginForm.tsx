@@ -1,42 +1,67 @@
 "use client";
 
 import { LockKeyhole } from "lucide-react";
-import { FormEvent, useState } from "react";
-import { Button, Field, SecretInput } from "@/components/ui/field";
+import type { FormEvent } from "react";
+import { useLayoutEffect, useState } from "react";
+import { Button, Field, SecretInput, TextInput } from "@/components/ui/field";
+import { useI18n } from "@/lib/i18n";
 
 export function LoginForm() {
+  const { t } = useI18n();
+  const [secret, setSecret] = useState("");
+  const [label, setLabel] = useState("");
+  const [pairPassword, setPairPassword] = useState("");
+  const [pairError, setPairError] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [submitting, setSubmitting] = useState<"pair" | "local" | null>(null);
 
-  async function signIn(event: FormEvent<HTMLFormElement>) {
+  useLayoutEffect(() => {
+    const fragment = new URLSearchParams(window.location.hash.slice(1));
+    const offeredSecret = fragment.get("pair");
+    if (offeredSecret !== null) {
+      // Remove the one-time secret before effects or form requests can run.
+      window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
+      setSecret(offeredSecret);
+    }
+  }, []);
+
+  async function signIn(event: FormEvent<HTMLFormElement>, pairing: boolean) {
     event.preventDefault();
-    setSubmitting(true);
-    setError(null);
+    const setFailure = pairing ? setPairError : setError;
+    setSubmitting(pairing ? "pair" : "local");
+    setFailure(null);
     try {
-      const response = await fetch("/api/web-auth/session", {
+      const response = await fetch(pairing ? "/api/web-auth/pair" : "/api/web-auth/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify(pairing ? { secret: secret.trim(), label: label.trim() || undefined, password: pairPassword } : { password }),
       });
       if (!response.ok) {
-        setError("Incorrect password. Please try again.");
+        setFailure(t(pairing ? "webLogin.pairFailed" : "webLogin.localFailed"));
+        return;
+      }
+      const body: unknown = await response.json();
+      if (body === null || typeof body !== "object" || !("ok" in body) || body.ok !== true) {
+        setFailure(t("webLogin.connectionFailed"));
         return;
       }
       window.location.assign("/");
     } catch {
-      setError("Could not sign in. Please check your connection and try again.");
+      setFailure(t("webLogin.connectionFailed"));
     } finally {
-      setSubmitting(false);
+      setSubmitting(null);
     }
   }
 
   return (
-    <main style={{ flex: 1, display: "grid", placeItems: "center", padding: 20, background: "var(--bg)" }}>
+    <main style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", alignItems: "center", overflowY: "auto", padding: 20, background: "var(--bg)" }}>
       <section
         aria-labelledby="login-title"
         style={{
           width: "min(100%, 380px)",
+          flexShrink: 0,
+          margin: "auto",
           padding: "32px",
           background: "var(--bg-panel)",
           border: "1px solid var(--border)",
@@ -68,7 +93,7 @@ export function LoginForm() {
             color: "var(--text)",
           }}
         >
-          Welcome back
+          {t("webLogin.title")}
         </h1>
         <p
           style={{
@@ -78,37 +103,72 @@ export function LoginForm() {
             lineHeight: 1.5,
           }}
         >
-          Enter the password for this ompgui workspace.
+          {t("webLogin.description")}
         </p>
-        <form onSubmit={signIn} style={{ display: "grid", gap: 14 }}>
-          <Field label="Password" error={error} required>
+        <form id="web-pair-form" onSubmit={(event) => void signIn(event, true)} style={{ display: "grid", gap: 14 }}>
+          <Field label={t("webLogin.secret")} hint={t("webLogin.secretHint")} required>
             <SecretInput
-              id="web-password"
-              name="password"
-              value={password}
-              error={error}
-              onChange={(value) => {
-                setPassword(value);
-                if (error) setError(null);
-              }}
-              autoComplete="current-password"
-              autoFocus
+              id="web-pair-secret"
+              name="secret"
+              value={secret}
+              onChange={(value) => { setSecret(value); setPairError(null); }}
+              autoComplete="off"
               required
-              showLabel="Show password"
-              hideLabel="Hide password"
-              placeholder="••••••••"
+              showLabel={t("webLogin.showSecret")}
+              hideLabel={t("webLogin.hideSecret")}
             />
           </Field>
-          <Button
-            type="submit"
-            variant="primary"
-            busy={submitting}
-            disabled={submitting}
-            style={{ width: "100%", minHeight: 36 }}
-          >
-            {submitting ? "Unlocking…" : "Unlock workspace"}
+          <Field label={t("webLogin.label")} hint={t("webLogin.labelHint")}>
+            <TextInput id="web-pair-label" name="label" value={label} onChange={setLabel} autoComplete="off" />
+          </Field>
+          <Field label={t("webLogin.password")} hint={t("webLogin.passwordHint")} error={pairError}>
+            <SecretInput
+              id="web-pair-password"
+              name="password"
+              value={pairPassword}
+              error={pairError}
+              onChange={(value) => { setPairPassword(value); setPairError(null); }}
+              autoComplete="current-password"
+              showLabel={t("webLogin.showPassword")}
+              hideLabel={t("webLogin.hidePassword")}
+            />
+          </Field>
+          <Button type="submit" variant="primary" busy={submitting === "pair"} disabled={submitting !== null} style={{ width: "100%", minHeight: 36 }}>
+            {t(submitting === "pair" ? "webLogin.pairing" : "webLogin.pair")}
           </Button>
         </form>
+        <details style={{ marginTop: 24, color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
+          <summary style={{ cursor: "pointer" }}>{t("webLogin.localTitle")}</summary>
+          <p style={{ lineHeight: 1.5 }}>{t("webLogin.localHint")}</p>
+          <form id="web-local-form" onSubmit={(event) => void signIn(event, false)} style={{ display: "grid", gap: 14 }}>
+            <Field label={t("webLogin.password")} error={error} required>
+              <SecretInput
+                id="web-password"
+                name="password"
+                value={password}
+                error={error}
+                onChange={(value) => {
+                  setPassword(value);
+                  if (error) setError(null);
+                }}
+                autoComplete="current-password"
+                required
+                showLabel={t("webLogin.showPassword")}
+                hideLabel={t("webLogin.hidePassword")}
+                placeholder="••••••••"
+              />
+            </Field>
+            <Button
+              type="submit"
+              variant="primary"
+              busy={submitting === "local"}
+              disabled={submitting !== null}
+              style={{ width: "100%", minHeight: 36 }}
+            >
+              {t(submitting === "local" ? "webLogin.unlocking" : "webLogin.unlock")}
+            </Button>
+          </form>
+        </details>
       </section>
     </main>
   );

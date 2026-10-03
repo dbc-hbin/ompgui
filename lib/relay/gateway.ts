@@ -1,6 +1,9 @@
-import { Server as HttpServer, type IncomingMessage } from "node:http";
+import { Server as HttpServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Server as HttpsServer } from "node:https";
 import type { Duplex } from "node:stream";
+import { randomBytes } from "node:crypto";
+import { authorizeWebRequest, isDirectLocalRequest } from "../web-access";
+import { getWebDeviceId, OMPGUI_DEVICE_COOKIE, readWebCookie } from "../web-auth";
 import { attachRelayConnection } from "./connection";
 import { completeRelayUpgrade, isRelayUpgradePath } from "./websocket";
 
@@ -8,7 +11,6 @@ const MAX_RELAY_CONNECTIONS = 8;
 const PING_INTERVAL_MS = 30_000;
 
 declare global {
-  var __ompguiRelayGatewayAttached: boolean | undefined;
   var __ompguiRelayConnectionCount: number | undefined;
 }
 
@@ -77,25 +79,36 @@ export function handleRelayUpgrade(req: IncomingMessage, socket: Duplex, head: B
 
 function patchServerEmit(ServerCtor: typeof HttpServer | typeof HttpsServer): void {
   const original = ServerCtor.prototype.emit;
-  if ((original as { __ompguiRelay?: boolean }).__ompguiRelay) return;
+  if ("__ompguiWebAccess" in original) return;
 
   function emit(this: HttpServer, event: string | symbol, ...args: unknown[]): boolean {
+    if ((event === "request" || event === "checkContinue" || event === "checkExpectation") &&
+      !authorizeWebRequest(args[0] as IncomingMessage, args[1] as ServerResponse)) return true;
     if (event === "upgrade") {
       const req = args[0] as IncomingMessage;
       if (isRelayUpgradePath(req.url)) {
         handleRelayUpgrade(req, args[1] as Duplex, (args[2] as Buffer) ?? Buffer.alloc(0));
         return true;
       }
+      if (!isDirectLocalRequest(req) && !getWebDeviceId(readWebCookie(req.headers.cookie, OMPGUI_DEVICE_COOKIE))) {
+        const socket = args[1] as Duplex;
+        socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+        return true;
+      }
     }
     return original.call(this, event, ...args);
   }
-  (emit as { __ompguiRelay?: boolean }).__ompguiRelay = true;
+  Object.defineProperty(emit, "__ompguiWebAccess", { value: true });
   ServerCtor.prototype.emit = emit as typeof original;
+  if (ServerCtor.prototype.emit !== emit) throw new Error("Failed to attach HTTP device authorization gate");
 }
 
 export function attachRelayGateway(): void {
-  if (globalThis.__ompguiRelayGatewayAttached) return;
-  globalThis.__ompguiRelayGatewayAttached = true;
+  // Next listens before instrumentation finishes. Its Node proxy shares this
+  // process environment and rejects queued requests without a raw-gate proof.
+  if (!("__ompguiWebAccess" in HttpServer.prototype.emit) || !process.env.__OMPGUI_WEB_ACCESS_NONCE) {
+    process.env.__OMPGUI_WEB_ACCESS_NONCE = randomBytes(32).toString("base64url");
+  }
   patchServerEmit(HttpServer);
   patchServerEmit(HttpsServer);
 }

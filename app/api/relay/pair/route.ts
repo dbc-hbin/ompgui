@@ -43,7 +43,13 @@ export async function POST(request: Request) {
 
   try {
     const offer = createPairingOffer({ relayUrl: url, ttlMs });
+    const browserUrl = new URL(offer.relayUrl);
+    browserUrl.protocol = browserUrl.protocol === "wss:" ? "https:" : "http:";
+    browserUrl.pathname = "/login";
+    browserUrl.search = "";
+    browserUrl.hash = `pair=${offer.secret}`;
     return NextResponse.json({
+      browserUrl: browserUrl.toString(),
       uri: buildPairingUri({ version: 1, url: offer.relayUrl, serverId: offer.serverId, secret: offer.secret }),
       expiresAt: offer.expiresAt,
       relayUrl: offer.relayUrl,

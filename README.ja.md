@@ -2,7 +2,7 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-> **Android APK (Android 12+)** — Kotlin 製のコンパニオンアプリでリモートの ompgui サーバーに接続し、最新セッションの読み取り専用オフラインスナップショットを利用できます。[ompgui Remote v0.7.11 をダウンロード](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.11/ompgui-remote-v0.7.11.apk) · [リリースノート](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.11)
+> **Android APK (Android 12+)** — Kotlin 製のコンパニオンアプリでリモートの ompgui サーバーに接続し、最新セッションの読み取り専用オフラインスナップショットを利用できます。[ompgui Remote v0.7.12 をダウンロード](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.12/ompgui-remote-v0.7.12.apk) · [リリースノート](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.12)
 
 > `android/` の実験的なネイティブ Compose クライアントは、認証済みの `/relay` WebSocket を使用し、セッション・履歴の操作、リンク付きメッセージ、オフラインの Mermaid 図とコードの構文強調、画像/PDF/音声/HTML/Markdown/DOCX のインラインプレビューを提供します。ファイルの自動更新は表示中のみ動作し、未保存の編集を保持します。許可された隠しファイルの閲覧とアーカイブ検索にも対応します。モデル・設定には公開 models.dev カタログ、高度な OMP 設定、構成とは別に表示されるセッションごとの実際の MCP 実行状態が含まれます。添付ファイルは端末上で巨大な単一 JSON にまとめず、ストリーミングでステージングします。画像は各 10 MiB で最大 10 件、テキスト添付は独立した枠で各 256 KiB、最大 10 件です。OMP 自体の画像正規化とプロバイダーごとの画像数制限は引き続き適用されます。
 >
@@ -53,7 +53,7 @@ ompgui --hostname 0.0.0.0       # 信頼できるネットワークに公開
 ompgui -p 8080 -H 0.0.0.0       # オプションを組み合わせる
 ompgui --no-open                # ブラウザを自動的に開かない
 
-ompgui --password "a-long-random-password" # パスワードのみのサインインを有効化（Windows でも同様）
+ompgui --password "a-long-random-password" # ローカルログインと端末登録時の追加認証
 
 PORT=8080 ompgui                # 環境変数にも対応
 OMP_WEB_HOSTNAME=0.0.0.0 ompgui # ネットワーク公開を明示的に有効化
@@ -62,7 +62,7 @@ OMP_WEB_PASSWORD='a-long-random-password' ompgui # 環境変数でも同様（PO
 OMP_WEB_NO_OPEN=1 ompgui        # バックグラウンドサービスとして実行する場合に便利
 ```
 
-`OMP_WEB_PASSWORD` を設定すると、テーマに統合されたパスワードのみのサインイン画面で UI とすべての API エンドポイントを保護できます。サインイン後は HTTP-only の署名付きセッションクッキーが 30 日間有効です。未設定なら認証は無効です。リモート利用では、パスワードとセッションクッキーを守るため、信頼できるリバースプロキシまたは VPN 経由の HTTPS が必要です。ompgui をインターネットへ直接公開しないでください。
+`OMP_WEB_PASSWORD` または `--password` は localhost への直接接続を保護し、端末登録時の追加認証にも使われます。ローカルセッションは 30 日間有効で、パスワード変更で無効になります。リモート Web 接続には、パスワードの設定有無に関係なく登録済み端末が必要です。パスワードや従来のセッション Cookie だけでは接続できません。リモートでは HTTPS を使用してください。
 
 ### macOS のバックグラウンドサービス
 
@@ -93,9 +93,9 @@ macOS のブラウザ GUI では **Settings → System & Updates → Background 
 
 モバイル端末（iPhone、iPad、Android）や外部のノートPCから `ompgui` にアクセスする場合は、**[Tailscale](https://tailscale.com/) の利用を強く推奨します**。ポート開放やグローバルIPの公開なしに、端末間の暗号化メッシュVPNを通じて最も安全にリモートアクセスできます。
 
-### 1. パスワードの設定（セキュリティ上必須）
+### 1. 端末登録用の追加パスワード
 
-ネットワークインターフェースにバインドする場合は、必ずパスワードを設定して認証を保護してください。
+CLI は外部インターフェースへのバインドにパスワードを要求します。Tailscale Serve/Funnel 経由では既定のループバックを維持してください。パスワードは登録時の追加確認であり、端末登録の代わりにはなりません。
 
 ```bash
 # CLI オプションでパスワードを設定して全インターフェースにバインド
@@ -110,16 +110,17 @@ OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompgui
 1. **Tailscale をインストール**: ホストPCとモバイル端末に [Tailscale](https://tailscale.com/download) をインストールし、同一アカウントでログインします。
 2. **ホストPCで ompgui を起動**:
    ```bash
-   ompgui --hostname 0.0.0.0 --password "your-strong-password"
+   ompgui --password "your-strong-password"
    ```
 3. **モバイルブラウザからアクセス**:
-   - ホストPCの Tailscale IP（例: `100.x.y.z`）または MagicDNS マシン名でアクセスします:
+   - ompgui に接続した HTTPS Serve/Funnel アドレスを使います:
      ```text
-     http://100.x.y.z:30177
-     # または MagicDNS 有効時
-     http://my-macbook:30177
+     https://host.ts.net:8443
      ```
-4. **ログイン**: 設定したパスワードを入力すると、モバイル端末から安全にコーディングエージェントを操作・対話できます。
+4. **ブラウザを登録**: ホストの Settings → Connect Devices、または `ompgui pair --url wss://host.ts.net:8443/relay` に実際の ompgui HTTPS/Funnel アドレスを指定してリンクを発行します。リモートで **Browser** リンクを開き、設定済みの場合はパスワードを入力してブラウザをペアリングします。tailnet への直接接続も HTTPS を先に設定してください。ブラウザと電話のリンクは同じ 10 分間の一回限りの登録要求を共有し、片方だけが使用できます。次の端末には新しいリンクを発行してください。
+5. **登録を解除**: `ompgui devices`、`ompgui devices revoke <id>`、または Settings → Connect Devices を使います。Android APK と同じ一覧と失効処理を使い、解除後は Web ストリームとリレー接続を閉じて以後の要求を拒否します。
+
+リバースプロキシは外部 Host と forwarding/Funnel ヘッダーを保持してください。ヘッダーを削除して Host を localhost に書き換えるとローカル接続と区別できません。ブラウザも APK のリレー認証と `~/.omp/agent/ompgui-relay.json` を再利用し、30 日間のホスト限定 HttpOnly Cookie を持ちます。サーバーはトークンのハッシュのみ保存します。これは物理端末の証明ではなく資格情報の登録です。トークンや Cookie をコピーすると、失効まで同じ権限を持ちます。
 
 ## 機能
 
@@ -142,7 +143,7 @@ OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompgui
 | --- | --- |
 | `PORT` | サーバーポート（デフォルト `30177`。`-p/--port` が優先） |
 | `OMP_WEB_HOSTNAME` | バインドするホスト名（デフォルト `127.0.0.1`。`-H/--hostname` が優先） |
-| `OMP_WEB_PASSWORD` | サインイン画面用の任意のパスワード |
+| `OMP_WEB_PASSWORD` | ローカルログインと端末登録時の追加認証用。リモートには登録済み端末が必要 |
 | `OMP_WEB_NO_OPEN` | `1`/`true` を設定するとブラウザの自動起動をスキップ |
 | `OMP_WEB_OMP_BIN` | `omp` バイナリが `PATH` にない場合の絶対パス |
 | `PI_CODING_AGENT_DIR` | 別の omp エージェントディレクトリを指定（デフォルト `~/.omp/agent`） |

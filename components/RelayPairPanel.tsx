@@ -8,6 +8,7 @@ import { pairingQrSvg } from "@/lib/qr-svg";
 
 interface PairResponse {
   uri: string;
+  browserUrl: string;
   expiresAt: number;
   relayUrl: string;
   serverId: string;
@@ -16,8 +17,6 @@ interface PairResponse {
 interface DeviceRow {
   id: string;
   label: string;
-  createdAt: string;
-  lastSeenAt: string;
 }
 
 export function RelayPairPanel({ embedded = false }: { embedded?: boolean }) {
@@ -28,7 +27,7 @@ export function RelayPairPanel({ embedded = false }: { embedded?: boolean }) {
   const [devices, setDevices] = useState<DeviceRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"phone" | "browser" | null>(null);
   const qrSvg = useMemo(() => (offer ? pairingQrSvg(offer.uri) : null), [offer]);
 
   const refresh = useCallback(async () => {
@@ -45,8 +44,14 @@ export function RelayPairPanel({ embedded = false }: { embedded?: boolean }) {
         setStatusUrl(suggestedUrl);
       }
       if (devicesRes.ok) {
-        const body = await devicesRes.json() as { devices?: DeviceRow[] };
-        setDevices(body.devices ?? []);
+        const body: unknown = await devicesRes.json();
+        if (body !== null && typeof body === "object" && "devices" in body && Array.isArray(body.devices)) {
+          setDevices(body.devices.filter((device: unknown): device is DeviceRow =>
+            device !== null && typeof device === "object" &&
+            "id" in device && typeof device.id === "string" &&
+            "label" in device && typeof device.label === "string",
+          ));
+        }
       }
     } catch {
       // Status refresh is best-effort; pairing can still be created.
@@ -60,19 +65,28 @@ export function RelayPairPanel({ embedded = false }: { embedded?: boolean }) {
   async function createOffer() {
     setBusy(true);
     setError(null);
-    setCopied(false);
+    setCopied(null);
     try {
       const response = await fetch("/api/relay/pair", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(relayUrl.trim() ? { url: relayUrl.trim() } : {}),
       });
-      const body = await response.json() as PairResponse & { error?: string };
+      const body: unknown = await response.json();
       if (!response.ok) {
-        setError(body.error ?? t("relayPair.createFailed"));
+        setError(t("relayPair.createFailed"));
         return;
       }
-      setOffer(body);
+      if (body === null || typeof body !== "object" ||
+          !("uri" in body) || typeof body.uri !== "string" ||
+          !("browserUrl" in body) || typeof body.browserUrl !== "string" ||
+          !("expiresAt" in body) || typeof body.expiresAt !== "number" || !Number.isFinite(body.expiresAt) ||
+          !("relayUrl" in body) || typeof body.relayUrl !== "string" ||
+          !("serverId" in body) || typeof body.serverId !== "string") {
+        setError(t("relayPair.createFailed"));
+        return;
+      }
+      setOffer({ uri: body.uri, browserUrl: body.browserUrl, expiresAt: body.expiresAt, relayUrl: body.relayUrl, serverId: body.serverId });
       setRelayUrl(body.relayUrl);
       await refresh();
     } catch {
@@ -82,13 +96,13 @@ export function RelayPairPanel({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
-  async function copyUri() {
+  async function copyLink(kind: "phone" | "browser") {
     if (!offer) return;
     try {
-      await navigator.clipboard.writeText(offer.uri);
-      setCopied(true);
+      await navigator.clipboard.writeText(kind === "browser" ? offer.browserUrl : offer.uri);
+      setCopied(kind);
     } catch {
-      setCopied(false);
+      setCopied(null);
     }
   }
 
@@ -180,26 +194,33 @@ export function RelayPairPanel({ embedded = false }: { embedded?: boolean }) {
                 </p>
               </div>
             ) : null}
-            <label style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>{t("relayPair.linkLabel")}</label>
-            <textarea
-              readOnly
-              value={offer.uri}
-              rows={4}
-              style={{
-                width: "100%",
-                resize: "vertical",
-                fontFamily: "var(--font-mono)",
-                fontSize: "var(--text-sm)",
-                padding: 10,
-                borderRadius: "var(--radius-control)",
-                border: "1px solid var(--border)",
-                background: "var(--bg)",
-                color: "var(--text)",
-              }}
-            />
-            <Button type="button" variant="secondary" onClick={() => void copyUri()}>
-              {copied ? t("relayPair.copied") : t("relayPair.copy")}
-            </Button>
+            {(["browser", "phone"] as const).map((kind) => (
+              <div key={kind} style={{ display: "grid", gap: 8 }}>
+                <label htmlFor={"relay-pair-" + kind} style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
+                  {t(kind === "browser" ? "relayPair.browserLinkLabel" : "relayPair.linkLabel")}
+                </label>
+                <textarea
+                  id={"relay-pair-" + kind}
+                  readOnly
+                  value={kind === "browser" ? offer.browserUrl : offer.uri}
+                  rows={kind === "browser" ? 3 : 4}
+                  style={{
+                    width: "100%",
+                    resize: "vertical",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "var(--text-sm)",
+                    padding: 10,
+                    borderRadius: "var(--radius-control)",
+                    border: "1px solid var(--border)",
+                    background: "var(--bg)",
+                    color: "var(--text)",
+                  }}
+                />
+                <Button type="button" variant="secondary" onClick={() => void copyLink(kind)}>
+                  {copied === kind ? t("relayPair.copied") : t(kind === "browser" ? "relayPair.copyBrowser" : "relayPair.copy")}
+                </Button>
+              </div>
+            ))}
             <p style={{ margin: 0, color: "var(--text-dim)", fontSize: "var(--text-sm)" }}>
               {t("relayPair.expires", { time: new Date(offer.expiresAt).toLocaleTimeString() })}
             </p>
@@ -232,10 +253,12 @@ export function RelayPairPanel({ embedded = false }: { embedded?: boolean }) {
   }
 
   return (
-    <main style={{ flex: 1, display: "grid", placeItems: "center", padding: 20, background: "var(--bg)" }}>
+    <main style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", alignItems: "center", overflowY: "auto", padding: 20, background: "var(--bg)" }}>
       <section
         style={{
           width: "min(100%, 520px)",
+          flexShrink: 0,
+          margin: "auto",
           padding: 32,
           background: "var(--bg-panel)",
           border: "1px solid var(--border)",

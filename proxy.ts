@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { isApiRequestOriginAllowed, shouldCheckApiRequestOrigin } from "@/lib/request-security";
-import { isValidWebSession, isWebPasswordEnabled, OMPGUI_SESSION_COOKIE, OMP_WEB_SESSION_COOKIE } from "@/lib/web-auth";
+import { getWebRequestAccess, isWebRequestAuthorized } from "@/lib/web-auth";
 
 export function proxy(request: NextRequest) {
   if (
@@ -10,27 +10,21 @@ export function proxy(request: NextRequest) {
   ) {
     return NextResponse.json({ error: "Cross-origin API requests are not allowed" }, { status: 403 });
   }
-  if (!isWebPasswordEnabled()) {
-    return request.nextUrl.pathname === "/login"
-      ? NextResponse.redirect(new URL("/", request.url))
-      : NextResponse.next();
-  }
-
   const { pathname } = request.nextUrl;
-  const hasSession = isValidWebSession(request.cookies.get(OMPGUI_SESSION_COOKIE)?.value ?? request.cookies.get(OMP_WEB_SESSION_COOKIE)?.value);
-  if (pathname === "/login") {
-    return hasSession ? NextResponse.redirect(new URL("/", request.url)) : NextResponse.next();
-  }
-  if (pathname === "/api/web-auth/session") return NextResponse.next();
+  // Keep login renderable for fragment-based enrollment, even without a password.
+  if (pathname === "/login" || pathname === "/api/web-auth/pair") return NextResponse.next();
+  if (pathname === "/api/web-auth/session" && getWebRequestAccess(request) === "local") return NextResponse.next();
   // Device-token auth happens after the WebSocket upgrade, not via cookie.
   if (pathname === "/relay") return NextResponse.next();
-  if (hasSession) return NextResponse.next();
+  if (isWebRequestAuthorized(request)) return NextResponse.next();
   if (pathname.startsWith("/api/")) {
-    return NextResponse.json({ error: "Password required", code: "password_required" }, { status: 401 });
+    return getWebRequestAccess(request) === "local"
+      ? NextResponse.json({ error: "Password required", code: "password_required" }, { status: 401 })
+      : NextResponse.json({ error: "Registered device required", code: "device_required" }, { status: 401 });
   }
   return NextResponse.redirect(new URL("/login", request.url));
 }
 
 // The sign-in screen still needs its Next.js JavaScript and CSS before a
 // session exists; these are public build assets, not workspace data.
-export const config = { matcher: "/((?!_next/static|_next/image|favicon.ico).*)" };
+export const config = { matcher: "/((?!_next/static/|favicon.ico$).*)" };

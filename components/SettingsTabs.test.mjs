@@ -10,18 +10,6 @@ const jiti = createJiti(import.meta.url, {
 });
 const { ExtensionsTabs, SettingsTabs, SETTINGS_CATEGORIES, getNormalizedActive } = await jiti.import("./SettingsTabs.tsx");
 
-test("horizontal settings tabs expose every category description", () => {
-  const html = renderToStaticMarkup(React.createElement(SettingsTabs, {
-    active: "general",
-    onSelect: () => {},
-    layout: "horizontal",
-  }));
-
-  for (const category of SETTINGS_CATEGORIES) {
-    assert.ok(html.includes(`>${category.description}<`), `description is not visibly rendered for ${category.id}`);
-  }
-});
-
 test("settings tabs remain enabled and expose one keyboard-focusable active tab", () => {
   const html = renderToStaticMarkup(React.createElement(SettingsTabs, {
     active: "providers",

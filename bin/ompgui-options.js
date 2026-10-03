@@ -28,8 +28,8 @@ Commands:
   service enable | disable Toggle login auto-start without stopping or removing config
   service uninstall        Stop service and remove its configuration
   update                   Update ompgui to the latest version
-  pair                     Create a one-time phone pairing link
-  devices                  List or revoke paired phone devices`);
+  pair                     Create one-time phone and browser pairing links
+  devices                  List or revoke paired devices`);
 }
 function parseLaunchOptions(args = process.argv.slice(2), env = process.env) {
   const { values: cliArgs, positionals } = parseArgs({ args, options: { port:{type:"string",short:"p"}, hostname:{type:"string",short:"H"}, password:{type:"string"}, help:{type:"boolean",short:"h"}, version:{type:"boolean"}, "no-open":{type:"boolean"}, url:{type:"string"}, json:{type:"boolean"}, defer:{type:"boolean"} }, strict:false, allowPositionals:true });

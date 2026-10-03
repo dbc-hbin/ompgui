@@ -2,7 +2,7 @@
 
 [English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
 
-> **Android APK (Android 12+)** — Kotlin 보조 앱으로 원격 ompgui 서버에 연결하고, 최신 세션의 읽기 전용 오프라인 스냅샷을 이용할 수 있습니다. [ompgui Remote v0.7.11 다운로드](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.11/ompgui-remote-v0.7.11.apk) · [릴리스 노트](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.11)
+> **Android APK (Android 12+)** — Kotlin 보조 앱으로 원격 ompgui 서버에 연결하고, 최신 세션의 읽기 전용 오프라인 스냅샷을 이용할 수 있습니다. [ompgui Remote v0.7.12 다운로드](https://github.com/dbc-hbin/ompgui/releases/download/v0.7.12/ompgui-remote-v0.7.12.apk) · [릴리스 노트](https://github.com/dbc-hbin/ompgui/releases/tag/v0.7.12)
 
 > `android/`의 실험용 네이티브 Compose 클라이언트는 인증된 `/relay` WebSocket을 사용하며, 세션/기록 제어와 링크·도구 호출·결과·오류·미디어 참조를 포함하는 풍부한 온라인 대화 기록, 오프라인 Mermaid 다이어그램 및 코드 구문 강조, 이미지/PDF/오디오/HTML/Markdown/DOCX 인라인 미리보기를 제공합니다. 온라인 기록은 보호된 오프라인 스냅샷과 별개입니다. 크기가 제한된 미리보기에서 `sessions.content`로 전체 텍스트를 나누어 가져오고 미디어 참조도 페이지 단위로 조회하므로 대화 기록을 4,000자로 잘라내지 않습니다. 오프라인 캐시의 개인정보 보호 제한은 그대로 유지됩니다. 파일 자동 새로고침은 화면에 보일 때만 동작하며 저장하지 않은 편집 내용을 보존합니다. 허용된 숨김 파일 탐색과 아카이브 검색도 지원합니다. 모델/설정에서는 공개 models.dev 카탈로그, 고급 OMP 설정, 구성 상태와 구분되는 세션별 실제 MCP 실행 상태를 확인할 수 있습니다. 첨부 파일은 휴대폰에서 하나의 거대한 JSON으로 묶지 않고 스트리밍으로 스테이징하며, 이미지는 개당 10 MiB로 최대 10개, 텍스트 첨부는 별도로 개당 256 KiB로 최대 10개까지 지원합니다. OMP 자체의 이미지 정규화와 제공자별 이미지 개수 제한은 계속 적용됩니다.
 >
@@ -54,7 +54,7 @@ ompgui --port 8080              # 포트 지정
 ompgui --hostname 0.0.0.0       # 신뢰할 수 있는 네트워크에 노출
 ompgui -p 8080 -H 0.0.0.0       # 옵션 조합
 ompgui --no-open                # 브라우저 자동 열기 안 함
-ompgui --password "a-long-random-password" # POSIX 인라인 환경 변수 없이 비밀번호만으로 로그인
+ompgui --password "a-long-random-password" # 로컬 로그인과 기기 등록 시 추가 비밀번호 확인
 
 PORT=8080 ompgui                # 환경 변수도 지원
 OMP_WEB_HOSTNAME=0.0.0.0 ompgui # 네트워크에 명시적으로 노출
@@ -67,7 +67,7 @@ OMP_WEB_NO_OPEN=1 ompgui        # 백그라운드 서비스로 실행할 때 유
 # ompgui --password "a-long-random-password"
 ```
 
-`OMP_WEB_PASSWORD`를 설정하거나 `--password`를 전달하면 테마가 적용된 비밀번호 전용 로그인 화면으로 인터페이스와 모든 API 엔드포인트를 보호합니다. 로그인에 성공하면 30일 동안 유효한 HTTP 전용 서명 세션 쿠키가 생성됩니다. 설정된 비밀번호를 변경하면 기존 세션이 무효화됩니다. 변수를 설정하지 않으면 인증이 비활성화됩니다. 원격 사용 시 비밀번호와 세션 쿠키가 가로채이지 않도록 신뢰할 수 있는 리버스 프록시나 VPN을 통해 HTTPS를 사용해야 합니다. Windows 환경 변수 문법은 `$env:OMP_WEB_PASSWORD="..."`이며, `ompgui --password "..."`는 별도 문법 없이 모든 셸에서 작동합니다.
+`OMP_WEB_PASSWORD` 또는 `--password`는 직접 localhost 접속을 보호하고 기기 등록 시 추가로 비밀번호를 확인합니다. 로컬 비밀번호 세션은 30일 동안 유효하며 비밀번호 변경 시 무효화됩니다. 원격 웹 접속은 비밀번호 설정 여부와 관계없이 등록된 기기만 허용합니다. 비밀번호나 이전 비밀번호 세션 쿠키만으로는 원격 접속할 수 없습니다. 원격에서는 HTTPS를 사용하세요. Windows에서도 `ompgui --password "..."`를 그대로 사용할 수 있습니다.
 
 ### macOS 백그라운드 서비스
 
@@ -98,9 +98,9 @@ macOS 브라우저 GUI의 **Settings → System & Updates → Background service
 
 외부나 모바일 기기(iPhone, iPad, Android)에서 로컬 PC의 `ompgui`에 접속할 때는 **[Tailscale](https://tailscale.com/) 가상 사설망(VPN)을 사용하는 것을 강력히 권장**합니다. 포트 포워딩이나 공인 IP 노출 없이 종단간 암호화(P2P)를 통해 가장 안전하게 원격 접속할 수 있습니다.
 
-### 1. 비밀번호 설정 (보안 필수)
+### 1. 기기 등록용 추가 비밀번호 설정
 
-외부 네트워크에 바인딩할 때는 인증 보호를 위해 반드시 비밀번호를 설정해야 합니다:
+CLI는 외부 인터페이스에 바인딩할 때 비밀번호를 요구합니다. Tailscale Serve/Funnel 뒤에서는 기본 루프백 바인딩을 유지하세요. 비밀번호는 기기 등록 시 추가 확인 수단이며 기기 등록을 대체하지 않습니다:
 
 ```bash
 # CLI 옵션으로 비밀번호 설정 및 전체 네트워크 바인딩
@@ -115,20 +115,21 @@ OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompgui
 1. **Tailscale 설치**: 호스트 PC와 모바일 기기에 [Tailscale](https://tailscale.com/download)을 설치하고 동일한 계정으로 로그인합니다.
 2. **호스트 PC에서 ompgui 실행**:
    ```bash
-   ompgui --hostname 0.0.0.0 --password "your-strong-password"
+   ompgui --password "your-strong-password"
    ```
 3. **모바일 브라우저에서 접속**:
-   - 호스트 PC의 Tailscale IP(예: `100.x.y.z`) 또는 MagicDNS 머신 이름으로 접속합니다:
+   - ompgui에 연결된 HTTPS Serve/Funnel 주소를 사용합니다:
      ```text
-     http://100.x.y.z:30177
-     # 또는 MagicDNS 활성화 시
-     http://my-macbook:30177
+     https://host.ts.net:8443
      ```
-4. **로그인**: 설정한 비밀번호를 입력하면 모바일에서도 안전하게 실시간 코딩 에이전트와 대화하고 작업할 수 있습니다.
+4. **브라우저 등록**: 호스트의 설정 → 기기 연결에서 링크를 만들거나 `ompgui pair --url wss://host.ts.net:8443/relay`에 실제 ompgui HTTPS/Funnel 주소를 지정합니다. 원격 브라우저에서 출력된 **Browser** 링크를 열고, 비밀번호가 설정되어 있으면 입력한 뒤 **이 브라우저 페어링**을 누르세요. 직접 tailnet 접속도 HTTPS를 먼저 구성하세요. 브라우저·휴대폰 링크는 같은 10분짜리 일회용 등록 요청이며 둘 중 하나만 사용할 수 있습니다. 다음 기기에는 새 링크를 발급하세요.
+5. **접속 해제**: `ompgui devices`와 `ompgui devices revoke <id>`는 Android APK와 같은 등록 목록을 사용합니다. 설정 → 기기 연결에서도 두 종류의 클라이언트를 확인·해제할 수 있습니다. 해제하면 활성 웹 스트림과 릴레이 연결이 닫히고 이후 웹 요청이 차단됩니다.
 
 ### 보안 및 문제 해결
 
 - 서버는 기본적으로 `127.0.0.1`에 바인딩됩니다. 루프백이 아닌 호스트 이름은 명시적으로 선택해야 하며 신뢰할 수 있는 네트워크 경계 뒤에서만 사용하세요. ompgui을 공개적으로 노출하는 것은 안전하지 않습니다.
+- 리버스 프록시는 외부 Host와 forwarding/Funnel 헤더를 보존해야 합니다. 이를 지우고 Host를 localhost로 바꾸면 원격 요청을 직접 로컬 접속과 구별할 수 없습니다.
+- 웹도 APK 릴레이 인증과 `~/.omp/agent/ompgui-relay.json`을 재사용합니다. 브라우저는 30일짜리 호스트 한정 HttpOnly 기기 쿠키를 보관하고 서버는 토큰 해시만 저장합니다. 등록은 물리 기기가 아니라 자격 증명을 식별하므로 토큰·쿠키를 복사하면 해제 전까지 같은 권한을 갖습니다.
 - 파일 API는 선택한 워크스페이스, 유효한 Git worktree, 세션에서 참조된 디렉터리, 명시적으로 선택한 루트만 허용합니다. 경로를 정규화하여 경로 탈출과 심볼릭 링크 탈출을 차단합니다.
 - `omp`는 먼저 `OMP_WEB_OMP_BIN`, 다음으로 `PATH`에서 확인합니다. 실시간 채팅을 시작할 수 없으면 같은 터미널에서 `omp --version`을 실행하거나 실행 파일의 절대 경로를 `OMP_WEB_OMP_BIN`에 설정하세요.
 - 세션 기록은 기본 OMP JSONL 형식으로 유지됩니다. 실시간 세션 쓰기는 OMP가 담당하며, ompgui은 직접 파일을 읽고 실시간 OMP 쓰기와 충돌하지 않을 때만 명시적인 제목·보관·삭제 작업을 수행합니다.
@@ -157,7 +158,7 @@ OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD="your-strong-password" ompgui
 | --- | --- |
 | `PORT` | 서버 포트(기본 `30177`; `-p/--port`가 우선) |
 | `OMP_WEB_HOSTNAME` | 바인딩할 호스트 이름(기본 `127.0.0.1`; `-H/--hostname`이 우선) |
-| `OMP_WEB_PASSWORD` / `--password` | 로그인 화면의 비밀번호. `--password`는 PowerShell/CMD에서도 `$env:` 문법 없이 사용 가능 |
+| `OMP_WEB_PASSWORD` / `--password` | 로컬 로그인 및 기기 등록 시 추가 확인용 비밀번호. 원격 접속에는 등록된 기기가 필요 |
 | `OMP_WEB_NO_OPEN` | `1` 또는 `true`로 설정하면 브라우저 자동 열기 건너뜀 |
 | `OMP_WEB_OMP_BIN` | `PATH`에 `omp`가 없을 때 사용할 절대 경로 |
 | `PI_CODING_AGENT_DIR` | 다른 omp 에이전트 디렉터리 지정(기본 `~/.omp/agent`) |

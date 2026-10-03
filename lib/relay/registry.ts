@@ -54,6 +54,25 @@ const LOCK_TIMEOUT_MS = 3_000;
 const LOCK_STALE_MS = 10_000;
 const LOCK_RETRY_MS = 25;
 
+declare global {
+  var __ompguiDeviceRevocations: Map<string, Map<string, Set<() => void>>> | undefined;
+}
+
+export function onRelayDeviceRevoked(deviceId: string, close: () => void): () => void {
+  const registries = globalThis.__ompguiDeviceRevocations ??= new Map();
+  const path = relayRegistryPath();
+  let devices = registries.get(path);
+  if (!devices) registries.set(path, devices = new Map());
+  let listeners = devices.get(deviceId);
+  if (!listeners) devices.set(deviceId, listeners = new Set());
+  listeners.add(close);
+  return () => {
+    listeners.delete(close);
+    if (!listeners.size) devices.delete(deviceId);
+    if (!devices.size) registries.delete(path);
+  };
+}
+
 function sleepSync(ms: number): void {
   const sab = new SharedArrayBuffer(4);
   Atomics.wait(new Int32Array(sab), 0, 0, ms);
@@ -235,7 +254,7 @@ export function listRelayDevices(): RelayDevicePublic[] {
 }
 
 export function revokeRelayDevice(deviceId: string): boolean {
-  return withRegistryLock(() => {
+  const revoked = withRegistryLock(() => {
     const registry = readRegistryUnlocked();
     const next = registry.devices.filter((device) => device.id !== deviceId);
     if (next.length === registry.devices.length) return false;
@@ -243,6 +262,11 @@ export function revokeRelayDevice(deviceId: string): boolean {
     saveRegistryUnlocked(registry);
     return true;
   });
+  if (revoked) {
+    const listeners = globalThis.__ompguiDeviceRevocations?.get(relayRegistryPath())?.get(deviceId);
+    for (const close of listeners ?? []) close();
+  }
+  return revoked;
 }
 
 export function getRelayPairingStatus(now = Date.now()): {
@@ -261,18 +285,26 @@ export function getRelayPairingStatus(now = Date.now()): {
   };
 }
 
-export function authenticateDeviceToken(deviceId: string, token: string, now = Date.now()): {
+/** Browser request checks disable touch to avoid locks and last-seen writes. */
+export function authenticateDeviceToken(deviceId: string, token: string, now = Date.now(), touch = true): {
   serverId: string;
   deviceId: string;
 } | null {
-  return withRegistryLock(() => {
-    const registry = readRegistryUnlocked();
+  const authenticate = (registry: RelayRegistryFile) => {
     const device = registry.devices.find((item) => item.id === deviceId);
     if (!device || !hashesEqual(device.tokenHash, hashSecret(token))) return null;
-    device.lastSeenAt = new Date(now).toISOString();
-    saveRegistryUnlocked(registry);
+    if (touch) {
+      device.lastSeenAt = new Date(now).toISOString();
+      saveRegistryUnlocked(registry);
+    }
     return { serverId: registry.serverId, deviceId: device.id };
-  });
+  };
+  if (touch) return withRegistryLock(() => authenticate(readRegistryUnlocked()));
+  try {
+    return authenticate(parseRelayRegistry(readFileSync(relayRegistryPath(), "utf8")));
+  } catch {
+    return null;
+  }
 }
 
 export type RelayPairingConsumeResult =

@@ -65,6 +65,7 @@ async function runPair(options) {
     body: JSON.stringify(body),
   });
   console.log(offer.uri);
+  console.log("Browser: " + offer.browserUrl);
   console.log(`Relay: ${offer.relayUrl}`);
   console.log(`Expires: ${new Date(offer.expiresAt).toISOString()}`);
   if (openBrowser) openPairPage(`${base}/pair`);

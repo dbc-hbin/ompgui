@@ -3,7 +3,7 @@ import { parseJsonWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-fo
 import { verifyModelConnectivity } from "@/lib/omp/model-connectivity";
 import { ModelVerificationError } from "@/lib/omp/model-verification";
 import { isApiRequestOriginAllowed } from "@/lib/request-security";
-import { isValidWebSession, isWebPasswordEnabled, OMPGUI_SESSION_COOKIE, OMP_WEB_SESSION_COOKIE } from "@/lib/web-auth";
+import { isWebRequestAuthorized } from "@/lib/web-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -12,8 +12,7 @@ export async function POST(request: NextRequest) {
   if (!isApiRequestOriginAllowed(request)) {
     return NextResponse.json({ ok: false, error: "Cross-origin API requests are not allowed" }, { status: 403 });
   }
-  const session = request.cookies.get(OMPGUI_SESSION_COOKIE)?.value ?? request.cookies.get(OMP_WEB_SESSION_COOKIE)?.value;
-  if (isWebPasswordEnabled() && !isValidWebSession(session)) {
+  if (!isWebRequestAuthorized(request)) {
     return NextResponse.json({ ok: false, error: "Password required", code: "password_required" }, { status: 401 });
   }
   let body: unknown;
@@ -29,7 +28,7 @@ export async function POST(request: NextRequest) {
     const result = await verifyModelConnectivity(body, {
       signal: request.signal,
       assertActive: () => {
-        if (isWebPasswordEnabled() && !isValidWebSession(session)) {
+        if (!isWebRequestAuthorized(request)) {
           throw new ModelVerificationError("connectivity_cancelled", "Connectivity request authorization expired");
         }
       },
